@@ -1,0 +1,499 @@
+// Claude Code token usage dashboard for the JC3248W535EN (ESP32-S3, 3.5"
+// 480x320). A port of ~/cyd's CYD firmware: same Mac server contract
+// (/api/usage), same pages, settings, offline/cat behaviour and two-core
+// split -- re-laid out for the bigger panel, with anti-aliased fonts, a
+// TE-synced full-frame present, native-rate cat GIFs and page slides.
+//
+// This file holds the frame/state object definitions, setup(), loop(), the
+// touch router and networkTask(); everything else is split into format.cpp,
+// net.cpp, sd_store.cpp, pages.cpp, gif_player.cpp, settings.cpp,
+// ap_setup.cpp, display.cpp, touch_axs.cpp and fonts.cpp, all declared through
+// state.h.
+#include "state.h"
+
+// ── FRAME ──────────────────────────────────────────────────
+// Off-screen frame (480x320 RGB565, 300KB in PSRAM): every page is composed
+// here and handed to the panel in one TE-synced present, so redraws never
+// flash. There is no panel-direct fallback -- the AXS15231B only takes whole
+// frames -- so a failed allocation at boot is fatal (logged, then restart).
+LGFX_Sprite frame;
+lgfx::LovyanGFX* g = &frame;
+
+// ── STATE ──────────────────────────────────────────────────
+// Non-const: overridable from flash (see sd_store.cpp's loadRuntimeConfig).
+// cfgPollIntervalSec is the user's preference; POLL_INTERVAL_MS is the
+// effective cadence networkTask reads every cycle (Battery Save may stretch it).
+volatile uint32_t cfgPollIntervalSec = 20;
+volatile uint32_t POLL_INTERVAL_MS = 20000;
+
+UsageState STATE;
+
+int currentPage = 0;
+int cfgBootPage = 0;  // which page currentPage starts on; overridable via flash "boot_page"
+int cfgLastPage = 0;  // last page shown before the most recent restart; flash "last_page"
+bool weatherPageOpen = false;  // Weather overlay (tap status-page weather card)
+bool devicePageOpen = false;   // Device Stats overlay (tap footer's CPU/ROM/RAM stats line)
+SettingsScreen settingsScreen = SET_OFF;
+int settingsScrollOffset = 0;  // vertical scroll position (px) of the SET_LIST list
+int settingsLeafIndex = -1;    // index into SETTINGS[] currently open in SET_LEAF
+uint32_t confirmArmedMs = 0;
+int confirmArmedRow = -1;
+volatile uint32_t lastPollMs = 0;
+uint32_t lastTouchMs = 0;
+
+// ── PIXEL SHIFT (anti image-retention) ─────────────────────
+// Applied at present time by display.cpp, so a step needs only a re-present,
+// never a redraw.
+uint32_t cfgShiftStepMs = 180000;  // dwell per step; flash "pixel_shift_min", 0 disables
+uint8_t shiftIdx = 0;
+int shiftX = 0, shiftY = 0;
+uint32_t lastShiftMs = 0;
+bool shiftDirty = false;
+
+// CPU load estimate: no FreeRTOS runtime stats in the Arduino build, so this
+// is the render loop's duty cycle -- work time per pass vs the pass period,
+// minus time spent idle waiting on the panel's TE edge -- smoothed with an EMA.
+float cpuPercentAvg = 0;
+bool touchWasDown = false;
+bool wifiOk = false;
+volatile bool connected = false;  // did the most recent fetch reach the server?
+
+// Guards every read/write of the shared UsageState between the render loop
+// (core 1) and the network task (core 0). See state.h for the locking contract.
+SemaphoreHandle_t stateMutex = nullptr;
+SemaphoreHandle_t sdMutex = nullptr;
+
+// Runtime overrides for the compiled config.h defaults, loaded from internal
+// flash (NVS, see sd_store.cpp's loadRuntimeConfig()).
+String cfgWifiSsid = WIFI_SSID;
+String cfgWifiPassword = WIFI_PASSWORD;
+String cfgServerHost = SERVER_HOST;
+int cfgServerPort = SERVER_PORT;
+int cfgBrightness = 200;   // 0-255 panel backlight; overridable via flash
+// Night mode: fixed 23:00-07:00 schedule (Bangkok has no DST, so tm_hour is
+// already local), dims to a fixed 25% while on. Checked once/sec in loop().
+bool cfgNightModeOn = false;
+// flash "battery_save": 0=OFF, 1=ON, 2=AUTO (follow Mac). serverBatterySave is
+// the last live power.battery_save.
+volatile int cfgBatterySaveMode = BATTERY_SAVE_AUTO;
+volatile bool serverBatterySave = false;
+bool cfgShowCountdown = true;  // default on; flash "show_countdown"
+bool cfgShowAqi = true;        // default on; flash "show_aqi"
+bool cfgHourlyFlash = true;    // default on; flash "hourly_flash"
+bool cfgShowProgress = true;   // default on; flash "show_progress"
+bool nightDimActive = false;
+// Generic Settings-page persistence queue, drained by networkTask (core 0)
+// so the flash write never happens on the render core.
+volatile bool pendingConfigSave = false;
+volatile uint8_t pendingConfigKeyId = 0;
+volatile int32_t pendingConfigValue = 0;
+volatile bool pendingForgetWifi = false;
+volatile bool pendingRestart = false;  // see state.h -- drained by networkTask, not called directly
+int cfgScreenRotation = 1;  // 1 = normal, 3 = flipped 180 (see settings.cpp's Rotation)
+
+// Both thresholds below are WALL-CLOCK, deliberately not counted in poll
+// cycles: Poll Interval is settable from 5s to 5min and Battery Save floors it
+// to 120s, so a cycle count silently divides any threshold by the interval
+// (the CYD's old "3 cycles" offline trigger was a 15-second hair trigger at
+// the 5s setting). millis() compared with unsigned subtraction handles the
+// ~49-day rollover.
+
+// millis() of the last poll that found WiFi down, 0 when WiFi is up.
+uint32_t wifiDownSinceMs = 0;
+// ~15 min of continuous WiFi loss -> self-reboot, at any poll interval.
+const uint32_t RESTART_AFTER_WIFI_DOWN_MS = 900000UL;
+
+// millis() of the last *successful* poll. Once this is more than
+// OFFLINE_AFTER_MS in the past, STATE.haveData is forced back to false,
+// switching the display to the cat/offline screen. Left at 0 on purpose: a
+// board that never reaches the Mac goes offline OFFLINE_AFTER_MS after boot.
+uint32_t lastFetchSuccessMs = 0;
+const uint32_t OFFLINE_AFTER_MS = 60000UL;  // ~1 min without a successful poll
+
+// ── NETWORK TASK ───────────────────────────────────────────
+// All blocking I/O (usage poll -- which also carries BTC/weather -- mDNS,
+// WiFi reconnect, SD writes) runs here on core 0, so loop() on core 1 keeps
+// sampling touch and repainting even while a fetch stalls. Only the brief
+// STATE copies inside the fetch helpers take stateMutex.
+void networkTask(void* param) {
+  uint32_t lastUsagePollMs = 0;
+  uint32_t lastHeapLogMs = 0;
+  bool lowHeapLogged = false;
+  for (;;) {
+    uint32_t now = millis();
+
+    // Black-box heartbeat: free internal heap + uptime to /diag_log.csv
+    // hourly, plus a one-shot warning the first time it dips below 20KB.
+    uint32_t freeInternal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (now - lastHeapLogMs >= 3600000UL) {
+      lastHeapLogMs = now;
+      logDiag((String("heap free=") + freeInternal + " psram_free=" + ESP.getFreePsram() +
+               " uptime_min=" + (now / 60000)).c_str());
+    }
+    if (freeInternal < 20000 && !lowHeapLogged) {
+      lowHeapLogged = true;
+      logDiag((String("low_heap free=") + freeInternal).c_str());
+    }
+
+    if (now - lastUsagePollMs >= POLL_INTERVAL_MS) {
+      lastUsagePollMs = now;
+      lastPollMs = now;  // drives the footer progress line on the render side
+      // FAT bookkeeping for Device Stats, paced by wall time, not poll rate.
+      static uint32_t lastCapacityRefreshMs = 0;
+      if (STATE.sdOk && (lastCapacityRefreshMs == 0 ||
+                         now - lastCapacityRefreshMs >= SD_PERSIST_MIN_MS)) {
+        lastCapacityRefreshMs = now;
+        refreshSdCapacityCache();
+      }
+      if (WiFi.status() == WL_CONNECTED) {
+        wifiOk = true;
+        if (wifiDownSinceMs != 0) {
+          logDiag(("wifi_recovered after " + String((now - wifiDownSinceMs) / 1000) + "s").c_str());
+          wifiDownSinceMs = 0;
+        }
+        ensureMdns();
+        connected = fetchUsage();
+      } else {
+        wifiOk = false;
+        if (wifiDownSinceMs == 0) {
+          wifiDownSinceMs = now;
+          logDiag("wifi_down");
+        }
+        connected = false;
+        mdnsStarted = false;       // re-init mDNS once WiFi returns
+        WiFi.reconnect();
+        if (now - wifiDownSinceMs >= RESTART_AFTER_WIFI_DOWN_MS) {
+          logDiag("restart_wifi_timeout");
+          ESP.restart();
+        }
+      }
+
+      // A failed poll covers both WiFi down and WiFi up but the Mac
+      // unreachable. haveData is otherwise sticky-true, so this is the only
+      // thing that ever flips the display back to the offline/cat screen.
+      if (connected) {
+        STATE.haveData = true;
+        lastFetchSuccessMs = now;
+      } else if (now - lastFetchSuccessMs >= OFFLINE_AFTER_MS) {
+        STATE.haveData = false;
+      } else if (!STATE.haveData && STATE.sdOk) {
+        // Still inside the grace window with nothing to show yet (cold boot
+        // against an unreachable Mac): fall back to the SD cache.
+        STATE.haveData = loadCachedUsage();
+      }
+    }
+
+    if (pendingConfigSave) {
+      pendingConfigSave = false;
+      saveIntConfigToFlash(CONFIG_KEY_NAMES[pendingConfigKeyId], pendingConfigValue);
+    }
+
+    if (pendingForgetWifi) {
+      pendingForgetWifi = false;
+      forgetWifiFromFlash();
+      ESP.restart();  // only after the erase above has actually landed in flash
+    }
+
+    if (pendingRestart) {
+      pendingRestart = false;
+      ESP.restart();  // drained here (core 0), never between this task's own SD ops
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
+// ── CAT MODE / PAGE CHANGES ────────────────────────────────
+// Enter/exit the GIF decoder on catMode edges. Called from the top of loop()
+// and from goToPage() (which needs the decoder before the slide's first frame).
+static bool prevCatMode = false;
+static void syncCatMode(bool catMode) {
+  if (catMode == prevCatMode) return;
+  if (catMode) gifPlayerEnterCatMode();
+  else gifPlayerExitCatMode();
+  prevCatMode = catMode;
+}
+
+// Swipe to a page with the slide transition: snapshot the outgoing frame,
+// draw the incoming page off-screen (cat pages decode their first frame), then
+// animate. While offline the cats own every page, so a page change is
+// invisible -- no slide, and the cats keep playing.
+static void goToPage(int newPage, bool forward) {
+  bool offline = !STATE.haveData;
+  currentPage = newPage;
+  // Always tracked (regardless of cfgBootPage's mode) so switching Boot Page
+  // to AUTO later always has a fresh page ready to resume.
+  cfgLastPage = currentPage;
+  queueConfigSave(CFGKEY_LAST_PAGE, currentPage);
+  if (offline) return;
+
+  bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE);
+  pageTransitionBegin();
+  syncCatMode(catMode);
+  if (currentPage == MIXED_PAGE) {
+    lockState();
+    g->fillScreen(COL_BG);
+    drawMixedPageStatic();
+    unlockState();
+    gifPlayerResetForPageChange();
+    gifPlayerPrimeFrame(false);
+  } else if (currentPage == GIF_PAGE) {
+    gifPlayerResetForPageChange();
+    gifPlayerPrimeFrame(false);
+  } else {
+    render();  // presents are held; this only composes
+  }
+  pageTransitionRun(forward);
+}
+
+// ── SERIAL DEBUG HOOKS ─────────────────────────────────────
+// Single-key commands over the USB serial port, so pages can be driven and
+// screenshotted without touching the board (tools/grab_screen.py):
+//   n / p   next / previous page        w / d / s   Weather / Device / Settings
+//   x       close any overlay           g           grab: raw frame dump
+static void serialCommand(char c) {
+  switch (c) {
+    case 'n': case 'p':
+      settingsScreen = SET_OFF; weatherPageOpen = devicePageOpen = false;
+      goToPage(c == 'n' ? (currentPage + 1) % PAGE_COUNT : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, c == 'n');
+      break;
+    case 'w': weatherPageOpen = true; devicePageOpen = false; render(); break;
+    case 'd': devicePageOpen = true; weatherPageOpen = false; render(); break;
+    case 's': settingsScreen = SET_LIST; settingsScrollOffset = 0; renderSettings(); break;
+    case 'x':
+      settingsScreen = SET_OFF; weatherPageOpen = devicePageOpen = false;
+      render();
+      break;
+    case 'g': {
+      // Header line, raw 480x320 big-endian RGB565 (the sprite's own bytes),
+      // then a trailer line. grab_screen.py syncs on the header.
+      Serial.printf("\nS3SHOT %d %d\n", SCREEN_W, SCREEN_H);
+      Serial.flush();
+      const uint8_t* p = (const uint8_t*)frame.getBuffer();
+      const size_t total = SCREEN_W * SCREEN_H * 2;
+      for (size_t off = 0; off < total; off += 4096) {
+        size_t n = min((size_t)4096, total - off);
+        Serial.write(p + off, n);
+      }
+      Serial.flush();
+      Serial.print("\nS3END\n");
+      break;
+    }
+  }
+}
+
+// ── SETUP / LOOP ───────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  Serial.setTxBufferSize(16384);
+
+  // Create before any fetch: applyUsageJson locks it even during setup's
+  // single-threaded initial fetch (uncontended there).
+  stateMutex = xSemaphoreCreateMutex();
+  sdMutex = xSemaphoreCreateMutex();  // must exist before the first logDiag/SD access below
+  randomSeed(esp_random());           // so the cat picked on the cat pages differs each boot
+
+  if (!displayBegin()) Serial.println("[display] panel init FAILED");
+  displaySetBrightness(200);  // provisional; re-applied from flash once loadRuntimeConfig() runs
+  touchBegin();
+  fontsBegin();
+
+  frame.setPsram(true);
+  frame.setColorDepth(16);
+  if (!frame.createSprite(SCREEN_W, SCREEN_H)) {
+    Serial.println("[frame] sprite alloc FAILED -- restarting");
+    delay(2000);
+    ESP.restart();
+  }
+  frame.fillScreen(COL_BG);
+  presentFrame();
+
+  // TF card on SD_MMC, 1-bit (the board wires CLK/CMD/D0 only). Attempted
+  // once: SD I/O is blocking, so a flaky card must not stall the poll loop.
+  SD_MMC.setPins(S3_SD_CLK, S3_SD_CMD, S3_SD_D0);
+  STATE.sdOk = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_HIGHSPEED);
+  if (!STATE.sdOk) STATE.sdOk = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_DEFAULT);
+  refreshSdCapacityCache();  // seed Device Stats before the first render(); still single-threaded here
+
+  // Settings/config load from internal flash (NVS) -- unconditional, no SD needed.
+  loadRuntimeConfig();
+  displaySetFlipped(cfgScreenRotation == 3);
+  // AUTO resumes wherever the swipe cycle was before the last restart.
+  currentPage = (cfgBootPage == BOOT_PAGE_AUTO) ? cfgLastPage : cfgBootPage;
+  applyEffectiveBrightness();  // honor brightness (+ night mode) from flash
+  if (STATE.sdOk) {
+    loadEnvCache();     // show last-known BTC/weather immediately, before any live fetch
+    loadWeatherCache(); // full Weather-page snapshot (hourly/daily) if present
+    showBootSplash();   // optional /splash.bmp, briefly, before the WiFi spinner
+    scanCats();         // index /cats/*.gif for the cat GIF player page
+  } else {
+    Serial.println("[sd] card not found or failed to mount");
+  }
+  logDiag((String("boot reason=") + resetReasonStr()).c_str());
+
+  // First-boot config portal: only when no WiFi SSID has ever been configured
+  // (WIFI_SSID blank in config.h and none saved to flash).
+  if (cfgWifiSsid.length() == 0) {
+    runApSetup();  // blocks until configured, then restarts -- never returns
+  }
+
+  connectWifi();
+  connected = fetchUsage();  // also carries BTC + weather from the Mac
+  STATE.haveData = connected;
+  if (connected) lastFetchSuccessMs = millis();  // start the offline grace window
+  if (!connected && STATE.sdOk) STATE.haveData = loadCachedUsage();
+  lastPollMs = millis();
+  render();
+
+  uint32_t flashUsed, flashTotal, ramUsed, ramTotal, psUsed, psTotal;
+  Serial.printf("[device] flash=%d%% (%lu/%lu B) internal_ram=%d%% (%lu/%lu B) psram=%d%% (%lu/%lu B) TE=%lu\n",
+                flashPercent(flashUsed, flashTotal), (unsigned long)flashUsed, (unsigned long)flashTotal,
+                staticRamPercent(ramUsed, ramTotal), (unsigned long)ramUsed, (unsigned long)ramTotal,
+                psramPercent(psUsed, psTotal), (unsigned long)psUsed, (unsigned long)psTotal,
+                (unsigned long)displayTeCount());
+
+  // Hand all blocking network I/O to core 0; loop() stays on core 1.
+  xTaskCreatePinnedToCore(networkTask, "net", 8192, nullptr, 1, nullptr, 0);
+}
+
+// Target render-loop period: ~30 passes/sec, which is what the between-render
+// animations (shine sweep, progress line) and touch sampling run at. The GIF
+// player paces itself inside that from each frame's own delay.
+static const uint32_t LOOP_PERIOD_MS = 33;
+
+void loop() {
+  uint32_t loopStartUs = micros();
+  uint32_t teWaitStart = teWaitAccumUs;
+  uint32_t now = millis();
+
+  while (Serial.available()) serialCommand((char)Serial.read());
+
+  // Cats own the screen on the cat pages, AND whenever offline.
+  bool offline = !STATE.haveData;
+  bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE) || offline;
+  syncCatMode(catMode);
+
+  pixelShiftTick(now);
+
+  // Night mode: own 1s timer, regardless of page/catMode/settings state; only
+  // touches brightness on a transition edge.
+  if (cfgNightModeOn) {
+    static uint32_t lastNightCheckMs = 0;
+    if (now - lastNightCheckMs >= 1000) {
+      lastNightCheckMs = now;
+      struct tm ti;
+      if (getLocalTime(&ti, 0)) {
+        bool inWindow = (ti.tm_hour >= 23 || ti.tm_hour < 7);
+        if (inWindow != nightDimActive) {
+          nightDimActive = inWindow;
+          applyEffectiveBrightness();
+        }
+      }
+    }
+  }
+
+  // The hourly flash inverts at 1Hz for 6s; re-present on each flip so the
+  // static screens (settings, overlays) flash too.
+  static bool lastInvertPhase = false;
+  bool isEvenSecond = false;
+  bool invertPhase = checkHourlyFlash(isEvenSecond) && isEvenSecond;
+  bool needPresent = shiftDirty || invertPhase != lastInvertPhase;
+  lastInvertPhase = invertPhase;
+
+  if (settingsScreen != SET_OFF || weatherPageOpen || devicePageOpen) {
+    // Static screens: drawn on entry/change only; a pixel-shift step or the
+    // hourly flash just re-presents the same frame.
+  } else if (catMode) {
+    if (gifTick(offline)) needPresent = true;
+    if (currentPage == MIXED_PAGE && !offline) {
+      static uint32_t lastMixedRenderMs = 0;
+      if (now - lastMixedRenderMs >= 1000) {
+        lastMixedRenderMs = now;
+        lockState();
+        drawMixedPageStatic();
+        unlockState();
+        needPresent = true;
+      }
+      if (shineTick(now)) needPresent = true;
+      if (progressTick(now)) needPresent = true;
+    }
+  } else {
+    // Repaint once a second for the pulsing status dot, the local countdowns,
+    // and the clock's ticking second hand.
+    static uint32_t lastRenderMs = 0;
+    if (now - lastRenderMs >= 1000) {
+      lastRenderMs = now;
+      render();
+      needPresent = false;
+    } else {
+      if (progressTick(now)) needPresent = true;
+      if (shineTick(now)) needPresent = true;
+    }
+  }
+  if (needPresent) presentFrame();
+
+  int32_t tx = 0, ty = 0;
+  bool touchDown = touchRead(tx, ty);
+  if (touchDown != touchWasDown) {
+    Serial.printf("[touch] down=%d x=%ld y=%ld\n", touchDown, (long)tx, (long)ty);
+  }
+  if (touchDown && !touchWasDown && now - lastTouchMs > TOUCH_DEBOUNCE_MS) {
+    lastTouchMs = now;
+
+    if (settingsScreen == SET_LEAF) {
+      handleSettingsTouch(tx, ty, now, catMode);
+    } else if (settingsScreen == SET_LIST) {
+      settingsListDragBegin(tx, ty);  // resolved as a tap or a scroll on release, below
+    } else if (weatherPageOpen) {
+      weatherPageOpen = false;  // any tap dismisses the Weather overlay
+      render();
+    } else if (devicePageOpen) {
+      devicePageOpen = false;   // any tap dismisses the Device Stats overlay
+      render();
+    } else if (!catMode && tx >= SETTINGS_HIT_X0 && tx < SETTINGS_HIT_X1 &&
+               ty >= SETTINGS_HIT_Y0 && ty < SETTINGS_HIT_Y1) {
+      settingsScreen = SET_LIST;
+      settingsScrollOffset = 0;
+      settingsListDragBegin(tx, ty);  // seed drag state fresh -- this is a real new gesture
+      renderSettings();
+    } else if (!catMode && currentPage == 0 &&
+               tx >= WEATHER_HIT_X0 && tx < WEATHER_HIT_X1 &&
+               ty >= WEATHER_HIT_Y0 && ty < WEATHER_HIT_Y1) {
+      weatherPageOpen = true;
+      render();
+    } else if (!catMode && tx >= DEVICE_HIT_X0 && tx < DEVICE_HIT_X1 &&
+               ty >= DEVICE_HIT_Y0 && ty < DEVICE_HIT_Y1) {
+      devicePageOpen = true;
+      render();
+    } else if (catShuffleFixed &&
+               (currentPage == GIF_PAGE || currentPage == MIXED_PAGE) &&
+               tx >= CAT_ADVANCE_X0 && tx < CAT_ADVANCE_X1) {
+      // Cat Shuffle FIXED: only the MIDDLE third changes the cat, and only on
+      // the two real cat pages (gated on currentPage, not catMode -- see
+      // CAT_ADVANCE_X0/X1 in state.h). The outer thirds still navigate.
+      gifPlayerResetForPageChange();
+      flashTouchCenter();
+    } else {
+      bool forward = (tx >= SWIPE_SPLIT_X);
+      goToPage(forward ? (currentPage + 1) % PAGE_COUNT
+                       : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, forward);
+    }
+  } else if (touchDown && touchWasDown && settingsScreen == SET_LIST) {
+    settingsListDragMove(tx, ty);  // live-scroll while the finger stays down, no debounce gate
+  } else if (!touchDown && touchWasDown && settingsScreen == SET_LIST) {
+    settingsListDragEnd(catMode);  // tap (open a leaf / exit) vs scroll, decided from total movement
+  }
+  touchWasDown = touchDown;
+
+  // Duty-cycle CPU estimate: busy time this pass (minus idle TE waits) vs the
+  // loop period, smoothed with an EMA.
+  uint32_t busyUs = micros() - loopStartUs;
+  uint32_t waitUs = teWaitAccumUs - teWaitStart;
+  uint32_t workUs = busyUs > waitUs ? busyUs - waitUs : 0;
+  uint32_t periodUs = max(busyUs, LOOP_PERIOD_MS * 1000);
+  float sample = (float)workUs / periodUs * 100.0f;
+  cpuPercentAvg = cpuPercentAvg * 0.9f + sample * 0.1f;
+
+  uint32_t busyMs = busyUs / 1000;
+  delay(busyMs < LOOP_PERIOD_MS ? LOOP_PERIOD_MS - busyMs : 1);
+}

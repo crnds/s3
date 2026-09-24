@@ -1,0 +1,498 @@
+// Settings area (tap the footer's gear icon to enter). A generic
+// two-screen system: SET_LIST is a scrollable list of setting names
+// (drawSettingsList), SET_LEAF is a value-picker grid for whichever one is
+// open (drawSettingsLeaf). Every setting is one SettingDef row -- a label, a
+// small set of {value,label} options, and two plain function pointers (no
+// std::function/virtual dispatch -- flash is scarce here) -- so adding a
+// setting is a data row + a short apply()/getCurrent() pair, not a
+// hand-copied page. Carried over from the CYD firmware, re-laid out for 480x320.
+#include "state.h"
+
+struct SettingDef {
+  const char* label;      // list-row title
+  const char* leafTitle;  // leaf header (big title)
+  const char* subtitle;   // leaf subheading under the title; "" to omit
+  const char* hint;       // leaf hint line at the bottom
+  uint8_t cols, rows, count;   // button grid shape; rows*cols >= count
+  const int* values;           // raw option values, length == count
+  const char* const* valueLabels;  // button text, length == count
+  uint8_t btnTextSize;    // 1 or 2, sized to fit the longest valueLabel
+  bool destructive;       // reserved for confirm-arm actions (Tier 1+)
+  int (*getCurrent)();        // value to highlight as "on"
+  void (*apply)(int value);   // live mutation + queues SD persistence
+};
+
+static const int BRIGHTNESS_VALUES[5] = {0, 64, 128, 191, 255};
+static const char* const BRIGHTNESS_LABELS[5] = {"0%", "25%", "50%", "75%", "100%"};
+
+// Config keys persisted through the generic queue (see pendingConfigSave in
+// state.h and sd_store.cpp's saveIntConfigToFlash()/main.cpp's
+// networkTask()). Index here must match the id passed to queueConfigSave()
+// from each setting's apply(). These are also the NVS key names used in
+// flash (Preferences), which caps key length at 15 chars -- poll_sec and
+// night_mode are shortened from their old /config.json names for that limit.
+const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT] = {
+  "brightness", "poll_sec", "pixel_shift_min", "boot_page", "cat_shuffle_sec",
+  "night_mode", "screen_rotation", "show_countdown", "battery_save", "show_aqi",
+  "hourly_flash", "show_progress", "last_page"
+};
+
+void queueConfigSave(uint8_t keyId, int32_t value) {
+  pendingConfigKeyId = keyId;
+  pendingConfigValue = value;
+  pendingConfigSave = true;
+}
+
+// Live backlight from user preference + night-mode overlay only.
+// Battery Save never touches brightness.
+void applyEffectiveBrightness() {
+  if (nightDimActive) {
+    displaySetBrightness(NIGHT_MODE_DIM_VALUE);
+    return;
+  }
+  displaySetBrightness((uint8_t)cfgBrightness);
+}
+
+// Live poll cadence: user's Poll Interval, floored to 2 min while Battery
+// Save is active (Settings ON, or AUTO + Mac power.battery_save). networkTask
+// only reads POLL_INTERVAL_MS.
+void applyEffectivePoll() {
+  uint32_t sec = cfgPollIntervalSec;
+  if (sec < 5) sec = 5;
+  if (sec > 3600) sec = 3600;
+  if (batterySaveActive() && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
+  POLL_INTERVAL_MS = sec * 1000;
+}
+
+static int getCurrentBrightness() { return cfgBrightness; }
+static void applyBrightness(int v) {
+  cfgBrightness = (uint8_t)v;
+  applyEffectiveBrightness();  // may stay dimmed under night mode
+  queueConfigSave(CFGKEY_BRIGHTNESS, v);
+}
+
+// Destructive/action rows (Restart, and later Forget WiFi) have no "current
+// value" to highlight -- drawSettingsLeaf() skips getCurrent() for them
+// entirely via def.destructive, but the function pointer still needs a body.
+static int getCurrentNone() { return -1; }
+
+static const int ACTION_VALUES[1] = {0};  // dummy value: these rows are actions, not options
+// Arms the restart rather than calling ESP.restart() directly here on core 1
+// -- that could cut power to core 0 mid-SD-write; networkTask drains
+// pendingRestart between its own sequential SD operations instead.
+static void applyRestart(int v) { pendingRestart = true; }
+static const char* const RESTART_LABELS[1] = {"RESTART"};
+
+// Erasing the flash-saved WiFi creds + the restart-into-AP-portal must both
+// happen on networkTask (core 0) -- see forgetWifiFromFlash()/pendingForgetWifi
+// -- so apply() here just arms the flag and returns immediately.
+static void applyForgetWifi(int v) { pendingForgetWifi = true; }
+static const char* const FORGET_WIFI_LABELS[1] = {"FORGET WIFI"};
+
+// Poll interval: how often networkTask fetches /api/usage from the Mac.
+// Values are seconds (matches the "poll_sec" NVS key directly, no unit
+// conversion needed at the flash-persistence layer).
+static const int POLL_VALUES[5] = {5, 10, 20, 60, 300};
+static const char* const POLL_LABELS[5] = {"5s", "10s", "20s", "60s", "5m"};
+// Leaf shows the *user* preference, not the Battery-Save-stretched effective
+// rate — otherwise turning Battery Save on would make the Poll leaf look like
+// the user had picked 2m.
+static int getCurrentPollInterval() { return (int)cfgPollIntervalSec; }
+static void applyPollInterval(int v) {
+  cfgPollIntervalSec = (uint32_t)v;
+  applyEffectivePoll();  // networkTask reads the (possibly floored) POLL_INTERVAL_MS
+  queueConfigSave(CFGKEY_POLL_INTERVAL, v);
+}
+
+// Anti-retention pixel shift: cfgShiftStepMs is read only by pixelShiftTick(),
+// which is only called from loop() -- core-1-only, so this can be mutated
+// directly with no volatile/queue needed for the live value (unlike poll
+// interval, which crosses to networkTask on core 0).
+static const int PIXEL_SHIFT_VALUES[4] = {0, 1, 3, 10};
+static const char* const PIXEL_SHIFT_LABELS[4] = {"OFF", "1m", "3m", "10m"};
+static int getCurrentPixelShift() { return (int)(cfgShiftStepMs / 60000); }
+static void applyPixelShift(int v) {
+  cfgShiftStepMs = (uint32_t)v * 60000;
+  queueConfigSave(CFGKEY_PIXEL_SHIFT, v);
+}
+
+// Boot page: which page currentPage starts on next boot. AUTO (BOOT_PAGE_AUTO,
+// state.h) resumes cfgLastPage -- whichever page the swipe cycle was on
+// before the restart, tracked on every page change in main.cpp. The
+// other 6 (including the cat/mixed pages) pin a fixed page -- render()'s
+// switch and loop()'s catMode check already handle those generically
+// regardless of how currentPage got set, no special-casing needed. Device
+// Stats isn't in this list -- it's an overlay (devicePageOpen), not a
+// currentPage value.
+static const int PAGE_VALUES[7] = {BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5};
+static const char* const PAGE_LABELS[7] = {
+  "AUTO", "STATUS", "PROJECTS", "LIMITS", "CATS", "MIXED", "NOTE"
+};
+static int getCurrentBootPage() { return cfgBootPage; }
+static void applyBootPage(int v) {
+  cfgBootPage = v;
+  if (v != BOOT_PAGE_AUTO) currentPage = v;  // jump the live dashboard too -- a free,
+                                              // immediate effect; AUTO isn't itself a page
+  queueConfigSave(CFGKEY_BOOT_PAGE, v);
+}
+
+// Cat shuffle interval: how long each cat GIF plays before rotating to a new
+// random one. catShuffleMs/catShuffleFixed live in gif_player.cpp
+// (core-1-only, read in gifTick()), so no volatile/queue needed for the live
+// value here. FIXED (-1) disables auto-rotation entirely; the tap-to-advance
+// branch in main.cpp's touch handler is then the only way to change
+// the cat, via gifPlayerResetForPageChange().
+static const int CAT_SHUFFLE_VALUES[5] = {-1, 0, 5, 10, 30};
+static const char* const CAT_SHUFFLE_LABELS[5] = {"FIXED", "OFF", "5s", "10s", "30s"};
+static int getCurrentCatShuffle() { return catShuffleFixed ? -1 : (int)(catShuffleMs / 1000); }
+static void applyCatShuffle(int v) {
+  catShuffleFixed = (v < 0);
+  catShuffleMs = catShuffleFixed ? 0 : (uint32_t)v * 1000;
+  queueConfigSave(CFGKEY_CAT_SHUFFLE, v);
+}
+
+static const int NIGHT_MODE_VALUES[2] = {0, 1};
+static const char* const NIGHT_MODE_LABELS[2] = {"OFF", "ON"};
+static int getCurrentNightMode() { return cfgNightModeOn ? 1 : 0; }
+static void applyNightMode(int v) {
+  cfgNightModeOn = (v != 0);
+  if (!cfgNightModeOn && nightDimActive) {
+    nightDimActive = false;
+    applyEffectiveBrightness();  // restore user brightness
+  }
+  queueConfigSave(CFGKEY_NIGHT_MODE, v);
+}
+
+// Battery Save: stretches short usage polls to 2 min only (no backlight
+// change). OFF / ON / AUTO — AUTO follows Mac /api/usage power.battery_save
+// (control panel toggle or unplug). User's Poll Interval is preserved.
+static const int BATTERY_SAVE_VALUES[3] = {
+  BATTERY_SAVE_OFF, BATTERY_SAVE_ON, BATTERY_SAVE_AUTO
+};
+static const char* const BATTERY_SAVE_LABELS[3] = {"OFF", "ON", "AUTO"};
+static int getCurrentBatterySave() { return cfgBatterySaveMode; }
+static void applyBatterySave(int v) {
+  if (v < BATTERY_SAVE_OFF) v = BATTERY_SAVE_OFF;
+  if (v > BATTERY_SAVE_AUTO) v = BATTERY_SAVE_AUTO;
+  cfgBatterySaveMode = v;
+  applyEffectivePoll();
+  queueConfigSave(CFGKEY_BATTERY_SAVE, v);
+}
+
+// Rotation flip: 1 = normal, 3 = 180 degrees (the CYD's LovyanGFX rotation
+// numbers, kept so the stored value means the same thing). On the S3 it maps
+// to display.cpp's software rotate (90 vs 270 degrees onto the portrait
+// panel) and touch_axs.cpp reads the same flag to un-rotate touches -- so it
+// applies live, next frame, with nothing to recalibrate.
+static const int ROTATION_VALUES[2] = {1, 3};
+static const char* const ROTATION_LABELS[2] = {"NORMAL", "FLIPPED"};
+static int getCurrentRotation() { return cfgScreenRotation; }
+static void applyRotation(int v) {
+  cfgScreenRotation = v;
+  displaySetFlipped(cfgScreenRotation == 3);
+  queueConfigSave(CFGKEY_ROTATION, v);
+}
+
+// Show Countdown: green progress bars under the 5h/week usage bars on the
+// status/mixed limits card, plus the translucent pie wedge on the analog
+// clock (hour hand -> next 5h reset). The thin green reset hand on the clock
+// always stays when a reset time is known. Default ON.
+static const int SHOW_COUNTDOWN_VALUES[2] = {0, 1};
+static const char* const SHOW_COUNTDOWN_LABELS[2] = {"OFF", "ON"};
+static int getCurrentShowCountdown() { return cfgShowCountdown ? 1 : 0; }
+static void applyShowCountdown(int v) {
+  cfgShowCountdown = (v != 0);
+  queueConfigSave(CFGKEY_SHOW_COUNTDOWN, v);
+}
+
+static const int SHOW_AQI_VALUES[2] = {0, 1};
+static const char* const SHOW_AQI_LABELS[2] = {"OFF", "ON"};
+static int getCurrentShowAqi() { return cfgShowAqi ? 1 : 0; }
+static void applyShowAqi(int v) {
+  cfgShowAqi = (v != 0);
+  queueConfigSave(CFGKEY_SHOW_AQI, v);
+}
+
+// Hourly Flash: the on-the-hour signal (6s of 1Hz display inversion at :00).
+// checkHourlyFlash() short-circuits on this flag, so turning it off also stops
+// the poll-progress line and shine sweep from skipping their inverted frames.
+// Default ON.
+static const int HOURLY_FLASH_VALUES[2] = {0, 1};
+static const char* const HOURLY_FLASH_LABELS[2] = {"OFF", "ON"};
+static int getCurrentHourlyFlash() { return cfgHourlyFlash ? 1 : 0; }
+static void applyHourlyFlash(int v) {
+  cfgHourlyFlash = (v != 0);
+  if (!cfgHourlyFlash) displaySetInvert(false);  // don't leave the panel stuck inverted mid-flash
+  queueConfigSave(CFGKEY_HOURLY_FLASH, v);
+}
+
+// Progress Bar: the 1px bottom-edge line that fills as the next poll
+// approaches. Default ON.
+static const int SHOW_PROGRESS_VALUES[2] = {0, 1};
+static const char* const SHOW_PROGRESS_LABELS[2] = {"OFF", "ON"};
+static int getCurrentShowProgress() { return cfgShowProgress ? 1 : 0; }
+static void applyShowProgress(int v) {
+  cfgShowProgress = (v != 0);
+  queueConfigSave(CFGKEY_SHOW_PROGRESS, v);
+}
+
+static const SettingDef SETTINGS[] = {
+  { "BRIGHTNESS", "BRIGHTNESS", "BACKLIGHT BRIGHTNESS", "TAP A LEVEL TO APPLY",
+    5, 1, 5, BRIGHTNESS_VALUES, BRIGHTNESS_LABELS, 2, false,
+    getCurrentBrightness, applyBrightness },
+  { "POLL INTERVAL", "POLL INTERVAL", "HOW OFTEN TO FETCH /API/USAGE", "TAP A RATE TO APPLY",
+    5, 1, 5, POLL_VALUES, POLL_LABELS, 2, false,
+    getCurrentPollInterval, applyPollInterval },
+  { "PIXEL SHIFT", "PIXEL SHIFT", "ANTI-RETENTION ORBIT INTERVAL", "TAP A RATE TO APPLY",
+    4, 1, 4, PIXEL_SHIFT_VALUES, PIXEL_SHIFT_LABELS, 2, false,
+    getCurrentPixelShift, applyPixelShift },
+  { "BOOT PAGE", "BOOT PAGE", "AUTO = RESUME LAST PAGE SHOWN", "TAP A PAGE TO APPLY",
+    4, 2, 7, PAGE_VALUES, PAGE_LABELS, 1, false,
+    getCurrentBootPage, applyBootPage },
+  { "RESTART", "RESTART", "", "TAP TWICE TO RESTART THE BOARD",
+    1, 1, 1, ACTION_VALUES, RESTART_LABELS, 2, true,
+    getCurrentNone, applyRestart },
+  { "FORGET WIFI", "FORGET WIFI", "", "TAP TWICE TO ERASE WIFI CREDS",
+    1, 1, 1, ACTION_VALUES, FORGET_WIFI_LABELS, 2, true,
+    getCurrentNone, applyForgetWifi },
+  { "CAT SHUFFLE", "CAT SHUFFLE", "HOW LONG EACH CAT GIF PLAYS", "TAP A RATE TO APPLY",
+    5, 1, 5, CAT_SHUFFLE_VALUES, CAT_SHUFFLE_LABELS, 2, false,
+    getCurrentCatShuffle, applyCatShuffle },
+  { "NIGHT MODE", "NIGHT MODE", "23:00-07:00, DIMS TO 25%", "TAP TO TOGGLE",
+    2, 1, 2, NIGHT_MODE_VALUES, NIGHT_MODE_LABELS, 2, false,
+    getCurrentNightMode, applyNightMode },
+  { "BATTERY SAVE", "BATTERY SAVE", "2MIN POLL; AUTO = FOLLOW MAC", "TAP A MODE TO APPLY",
+    3, 1, 3, BATTERY_SAVE_VALUES, BATTERY_SAVE_LABELS, 2, false,
+    getCurrentBatterySave, applyBatterySave },
+  { "ROTATION", "ROTATION", "FOR UPSIDE-DOWN MOUNTING", "APPLIES IMMEDIATELY",
+    2, 1, 2, ROTATION_VALUES, ROTATION_LABELS, 1, false,
+    getCurrentRotation, applyRotation },
+  { "SHOW COUNTDOWN", "SHOW COUNTDOWN", "GREEN BARS + CLOCK WEDGE", "TAP TO TOGGLE",
+    2, 1, 2, SHOW_COUNTDOWN_VALUES, SHOW_COUNTDOWN_LABELS, 2, false,
+    getCurrentShowCountdown, applyShowCountdown },
+  { "SHOW AQI", "SHOW AQI", "BADGE NEXT TO THE STATUS DATE", "TAP TO TOGGLE",
+    2, 1, 2, SHOW_AQI_VALUES, SHOW_AQI_LABELS, 2, false,
+    getCurrentShowAqi, applyShowAqi },
+  { "HOURLY FLASH", "HOURLY FLASH", "INVERT SIGNAL ON THE HOUR", "TAP TO TOGGLE",
+    2, 1, 2, HOURLY_FLASH_VALUES, HOURLY_FLASH_LABELS, 2, false,
+    getCurrentHourlyFlash, applyHourlyFlash },
+  { "PROGRESS BAR", "PROGRESS BAR", "POLL COUNTDOWN ALONG THE FOOT", "TAP TO TOGGLE",
+    2, 1, 2, SHOW_PROGRESS_VALUES, SHOW_PROGRESS_LABELS, 2, false,
+    getCurrentShowProgress, applyShowProgress },
+};
+static const int SETTINGS_COUNT = 14;
+
+static const int SET_BACK_X0 = 0, SET_BACK_X1 = 150, SET_BACK_Y0 = 0, SET_BACK_Y1 = 46;
+static const int SET_BTN_X0 = 25, SET_BTN_Y = 128, SET_BTN_W = 81, SET_BTN_H = 76;
+static const int SET_BTN_STEP = 87, SET_BTN_STEP_Y = 84;  // STEP_Y only matters for rows>1
+static const int SET_ROW_X0 = 15, SET_ROW_Y0 = 48, SET_ROW_W = 450, SET_ROW_H = 56, SET_ROW_STEP = 62;
+// A lone action button (count==1, e.g. Restart/Forget WiFi) gets the full
+// row width instead of one narrow preset-grid cell.
+static const int SET_WIDE_BTN_X0 = SET_ROW_X0, SET_WIDE_BTN_W = SET_ROW_W;
+
+// The list scrolls rather than paginates: a fixed viewport below the header,
+// and settingsScrollOffset (px) slides the full SETTINGS_COUNT-row list
+// through it. Row i's unscrolled y is SETTINGS_VIEWPORT_Y0 + i*SET_ROW_STEP.
+static const int SETTINGS_VIEWPORT_Y0 = SET_ROW_Y0;
+static const int SETTINGS_VIEWPORT_H = SCREEN_H - 4 - SETTINGS_VIEWPORT_Y0;
+static const int SETTINGS_CONTENT_H = SETTINGS_COUNT * SET_ROW_STEP - (SET_ROW_STEP - SET_ROW_H);
+static const int SETTINGS_SCROLL_MAX = (SETTINGS_CONTENT_H > SETTINGS_VIEWPORT_H)
+    ? (SETTINGS_CONTENT_H - SETTINGS_VIEWPORT_H) : 0;
+static const int SETTINGS_SCROLLBAR_X = 471, SETTINGS_SCROLLBAR_W = 5;
+
+// Button label font by the table's btnTextSize (1 = small, 2 = body).
+static FontId btnFont(uint8_t size) { return size >= 2 ? FONT_MDB : FONT_SMB; }
+
+static void drawSettingsList() {
+  g->fillScreen(COL_BG);
+
+  // Close box: an "X" drawn as two wide strokes (crisper than a glyph).
+  g->drawWideLine(20, 16, 36, 32, 2.0f, COL_ACCENT);
+  g->drawWideLine(36, 16, 20, 32, 2.0f, COL_ACCENT);
+  drawTextR(FONT_SMB, SCREEN_W - 15, 16, "SETTINGS", COL_ACCENT);
+
+  g->setClipRect(0, SETTINGS_VIEWPORT_Y0, SCREEN_W, SETTINGS_VIEWPORT_H);
+  for (int idx = 0; idx < SETTINGS_COUNT; idx++) {
+    int y = SETTINGS_VIEWPORT_Y0 + idx * SET_ROW_STEP - settingsScrollOffset;
+    if (y + SET_ROW_H < SETTINGS_VIEWPORT_Y0 || y > SETTINGS_VIEWPORT_Y0 + SETTINGS_VIEWPORT_H) continue;
+    g->fillRoundRect(SET_ROW_X0, y, SET_ROW_W, SET_ROW_H, 8, COL_SURFACE);
+    g->drawRoundRect(SET_ROW_X0, y, SET_ROW_W, SET_ROW_H, 8, COL_BORDER);
+    int ty = y + (SET_ROW_H - fontLineH(FONT_MDB)) / 2;
+    drawText(FONT_MDB, SET_ROW_X0 + 18, ty, SETTINGS[idx].label, COL_TEXT);
+    // Chevron, drawn: two strokes meeting at the row's right edge.
+    int cx = SET_ROW_X0 + SET_ROW_W - 26, cy = y + SET_ROW_H / 2;
+    g->drawWideLine(cx - 4, cy - 7, cx + 3, cy, 1.5f, COL_ACCENT);
+    g->drawWideLine(cx + 3, cy, cx - 4, cy + 7, 1.5f, COL_ACCENT);
+  }
+  g->clearClipRect();
+
+  if (SETTINGS_SCROLL_MAX > 0) {
+    g->fillRoundRect(SETTINGS_SCROLLBAR_X, SETTINGS_VIEWPORT_Y0, SETTINGS_SCROLLBAR_W, SETTINGS_VIEWPORT_H, 2, COL_BORDER);
+    int thumbH = SETTINGS_VIEWPORT_H * SETTINGS_VIEWPORT_H / SETTINGS_CONTENT_H;
+    if (thumbH < 24) thumbH = 24;
+    int thumbY = SETTINGS_VIEWPORT_Y0 +
+        (SETTINGS_VIEWPORT_H - thumbH) * settingsScrollOffset / SETTINGS_SCROLL_MAX;
+    g->fillRoundRect(SETTINGS_SCROLLBAR_X, thumbY, SETTINGS_SCROLLBAR_W, thumbH, 2, COL_ACCENT);
+  }
+}
+
+static void drawSettingsLeaf() {
+  const SettingDef& def = SETTINGS[settingsLeafIndex];
+  g->fillScreen(COL_BG);
+
+  // "< BACK": drawn chevron + label.
+  g->drawWideLine(24, 17, 17, 24, 1.5f, COL_ACCENT);
+  g->drawWideLine(17, 24, 24, 31, 1.5f, COL_ACCENT);
+  drawText(FONT_MDB, 34, 13, "BACK", COL_ACCENT);
+
+  drawText(FONT_LG, 15, 52, def.leafTitle, COL_ACCENT);
+  if (def.subtitle[0]) drawText(FONT_SM, 15, 94, def.subtitle, COL_TEXT2);
+
+  // Only lit when the current value is an exact preset. Destructive rows have
+  // no "current value" -- they're armed/unarmed instead (confirmArmedRow).
+  int current = def.destructive ? -1 : def.getCurrent();
+  bool armed = def.destructive && confirmArmedRow == settingsLeafIndex &&
+               (millis() - confirmArmedMs < CONFIRM_ARM_MS);
+  int btnW = (def.count == 1) ? SET_WIDE_BTN_W : SET_BTN_W;
+  FontId bf = btnFont(def.btnTextSize);
+  for (int i = 0; i < def.count; i++) {
+    int col = i % def.cols;
+    int row = i / def.cols;
+    int x = (def.count == 1) ? SET_WIDE_BTN_X0 : SET_BTN_X0 + col * SET_BTN_STEP;
+    int y = SET_BTN_Y + row * SET_BTN_STEP_Y;
+    bool on = armed || (!def.destructive && def.values[i] == current);
+    uint16_t fill = armed ? COL_WARN : (on ? COL_ACCENT : COL_SURFACE);
+    uint16_t border = armed ? COL_WARN : (on ? COL_ACCENT : COL_BORDER);
+    g->fillRoundRect(x, y, btnW, SET_BTN_H, 8, fill);
+    g->drawRoundRect(x, y, btnW, SET_BTN_H, 8, border);
+    const char* label = armed ? "TAP AGAIN" : def.valueLabels[i];
+    drawTextC(bf, x + btnW / 2, y + (SET_BTN_H - fontLineH(bf)) / 2, label, on ? COL_BG : COL_TEXT);
+  }
+
+  int hintY = (def.rows > 1) ? 298 : 222;  // clears the 2-row grid (e.g. Boot Page)
+  drawTextC(FONT_SM, SCREEN_W / 2, hintY, def.hint, COL_TEXT2);
+}
+
+void renderSettings() {
+  // Neither screen touches STATE, so no stateMutex needed here.
+  if (settingsScreen == SET_LEAF) drawSettingsLeaf();
+  else drawSettingsList();
+  presentFrame();
+}
+
+// True only between a real settingsListDragBegin() and its matching End/abandon
+// (see the drag-gesture trio below) -- declared up here too since
+// handleSettingsTouch's BACK case needs to clear it.
+static bool dragActive = false;
+
+// Touch handling for SET_LEAF (called from loop() on a fresh debounced tap,
+// same as before). SET_LIST no longer routes through here at all -- see the
+// drag-gesture trio below.
+bool handleSettingsTouch(int32_t tx, int32_t ty, uint32_t now, bool catMode) {
+  const SettingDef& def = SETTINGS[settingsLeafIndex];
+  if (tx >= SET_BACK_X0 && tx < SET_BACK_X1 && ty >= SET_BACK_Y0 && ty < SET_BACK_Y1) {
+    confirmArmedRow = -1;
+    settingsScreen = SET_LIST;
+    // This same physical touch is still down and will generate Move/End calls
+    // against the list next -- but it already did its job (leaf -> list) via
+    // this tap, so it must NOT also be replayed as a list tap/scroll on release
+    // (that previously reopened this same leaf, or -- since BACK's hit-box is
+    // the list's own close-box coords -- could otherwise close Settings outright).
+    dragActive = false;
+    renderSettings();
+    return true;
+  }
+  int btnW = (def.count == 1) ? SET_WIDE_BTN_W : SET_BTN_W;
+  for (int i = 0; i < def.count; i++) {
+    int col = i % def.cols;
+    int row = i / def.cols;
+    int x = (def.count == 1) ? SET_WIDE_BTN_X0 : SET_BTN_X0 + col * SET_BTN_STEP;
+    int y = SET_BTN_Y + row * SET_BTN_STEP_Y;
+    if (tx >= x && tx < x + btnW && ty >= y && ty < y + SET_BTN_H) {
+      if (def.destructive) {
+        bool armed = (confirmArmedRow == settingsLeafIndex &&
+                      now - confirmArmedMs < CONFIRM_ARM_MS);
+        if (armed) {
+          confirmArmedRow = -1;
+          def.apply(def.values[i]);  // may never return (e.g. ESP.restart())
+        } else {
+          confirmArmedRow = settingsLeafIndex;
+          confirmArmedMs = now;
+        }
+      } else {
+        def.apply(def.values[i]);
+      }
+      renderSettings();
+      break;
+    }
+  }
+  return true;
+}
+
+// ── SET_LIST drag-to-scroll ────────────────────────────────
+// The touch controller only reports position while pressed (no velocity/
+// gesture primitives), so a tap and a scroll look identical until the finger
+// has actually moved: Begin just remembers where the touch started, Move
+// live-shifts settingsScrollOffset by the frame-to-frame delta, and End
+// checks the accumulated movement to decide whether this was a scroll (do
+// nothing more) or a tap (hit-test against the row rects at their current
+// scrolled position). Using the last position seen by Move/Begin -- rather
+// than re-reading the touch controller at release -- avoids relying on
+// whatever getTouch() returns the instant the finger lifts.
+static int32_t dragLastX = 0, dragLastY = 0;
+static int32_t dragTotalMoveY = 0;  // cumulative |dy| this gesture, px
+static const int32_t DRAG_TAP_PX = 8;  // below this total movement, treat release as a tap
+// dragActive itself is declared above handleSettingsTouch(), which also needs
+// it. Without it, a touch that transitions INTO SET_LIST by some other path
+// (the settings-gear tap, or BACK from a leaf) would fall through to Move/End
+// using whatever dragLastX/Y a previous, unrelated gesture left behind -- see
+// the callers below for how each transition sets this correctly.
+
+void settingsListDragBegin(int32_t tx, int32_t ty) {
+  dragLastX = tx;
+  dragLastY = ty;
+  dragTotalMoveY = 0;
+  dragActive = true;
+}
+
+void settingsListDragMove(int32_t tx, int32_t ty) {
+  if (!dragActive) return;
+  int32_t dy = ty - dragLastY;
+  dragLastX = tx;
+  dragLastY = ty;
+  if (dy == 0) return;
+  dragTotalMoveY += (dy < 0) ? -dy : dy;
+
+  int newOffset = settingsScrollOffset - dy;  // drag finger up -> scroll list down (reveal later rows)
+  if (newOffset < 0) newOffset = 0;
+  if (newOffset > SETTINGS_SCROLL_MAX) newOffset = SETTINGS_SCROLL_MAX;
+  if (newOffset != settingsScrollOffset) {
+    settingsScrollOffset = newOffset;
+    renderSettings();
+  }
+}
+
+void settingsListDragEnd(bool catMode) {
+  if (!dragActive) return;  // this touch never went through Begin -- e.g. the same
+                             // press that just transitioned in via BACK; ignore its release
+  dragActive = false;
+  if (dragTotalMoveY >= DRAG_TAP_PX) return;  // was a scroll, not a tap -- nothing else to do
+  int32_t tx = dragLastX, ty = dragLastY;
+
+  if (tx >= SET_BACK_X0 && tx < SET_BACK_X1 && ty >= SET_BACK_Y0 && ty < SET_BACK_Y1) {
+    settingsScreen = SET_OFF;
+    if (!catMode) render();  // catMode: gifTick() resumes drawing next pass
+    return;
+  }
+  for (int idx = 0; idx < SETTINGS_COUNT; idx++) {
+    int y = SETTINGS_VIEWPORT_Y0 + idx * SET_ROW_STEP - settingsScrollOffset;
+    if (y + SET_ROW_H < SETTINGS_VIEWPORT_Y0 || y > SETTINGS_VIEWPORT_Y0 + SETTINGS_VIEWPORT_H) continue;
+    if (tx >= SET_ROW_X0 && tx < SET_ROW_X0 + SET_ROW_W && ty >= y && ty < y + SET_ROW_H) {
+      settingsLeafIndex = idx;
+      confirmArmedRow = -1;
+      settingsScreen = SET_LEAF;
+      renderSettings();
+      break;
+    }
+  }
+}

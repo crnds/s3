@@ -1,0 +1,1895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S3 Dashboard Simulator</title>
+<style>
+:root {
+  --bg: #08090d;
+  --surface: #0f1117;
+  --surface-alt: #161b27;
+  --border: rgba(255,255,255,0.08);
+  --text: #f1f5f9;
+  --text2: #94a3b8;
+  --muted: #64748b;
+  --accent: #F4620E;
+  --good: #22c55e;
+  --warn: #f43f5e;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.2);
+}
+[data-theme="light"] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-alt: #eef0f4;
+  --border: rgba(0,0,0,0.1);
+  --text: #0f172a;
+  --text2: #475569;
+  --muted: #64748b;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  min-height: 100vh;
+  padding: 24px;
+}
+header { margin-bottom: 20px; }
+header h1 { font-size: 20px; font-weight: 600; }
+header p { color: var(--text2); font-size: 13px; margin-top: 4px; max-width: 70ch; }
+
+.layout {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
+
+/* ── simulated device (Guition's black housing) ── */
+.device {
+  background: linear-gradient(145deg, #26272b, #111214);
+  border-radius: 18px;
+  padding: 26px 24px;
+  box-shadow: var(--shadow);
+  display: inline-block;
+}
+.device-label {
+  text-align: center;
+  color: rgba(255,255,255,0.35);
+  font-size: 10px;
+  letter-spacing: 2px;
+  margin-top: 12px;
+  text-transform: uppercase;
+}
+/* 1:1 backing store (480x320 true pixels, like the panel), shown with nearest
+   scaling so what you see is the firmware's pixels, not a smoothed redraw. */
+#screen {
+  display: block;
+  width: 486px;   /* 480 + 2x3px border (box-sizing: border-box) */
+  height: 326px;
+  background: #000;
+  border: 3px solid #050505;
+  border-radius: 4px;
+  cursor: pointer;
+  image-rendering: pixelated;
+}
+@media (max-width: 480px) {
+  body { padding: 16px; }
+  #screen { width: 100%; height: auto; aspect-ratio: 486 / 326; }
+  .device { padding: 12px; display: block; }
+}
+
+/* ── control panel ── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.card h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.control-row:last-child { margin-bottom: 0; }
+label { font-size: 13px; color: var(--text2); }
+input[type="text"], select {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+input[type="text"] { flex: 1; min-width: 220px; }
+input[type="text"]:focus, select:focus, button:focus, #screen:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 7px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+button:hover { background: rgba(127,127,127,0.18); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { opacity: 0.88; }
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+  cursor: pointer;
+}
+.status-line {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.status-line .dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+.dot.ok { background: var(--good); animation: pulse 2s infinite; }
+.dot.bad { background: var(--warn); }
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+pre {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 260px;
+  overflow-y: auto;
+  color: var(--text2);
+}
+#log { max-height: 150px; }
+#log .err { color: var(--warn); }
+#log .ok { color: var(--good); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>S3 Dashboard Simulator</h1>
+  <p>Simulates the 3.5&Prime; 480&times;320 JC3248W535EN (ESP32-S3) screen. Text is drawn from the firmware's own glyph bitmaps (sim/fonts.js), so widths and line breaks match the board. Click the right/left half to change page, exactly like the firmware.</p>
+</header>
+
+<main class="layout">
+  <section class="device" aria-label="Simulated JC3248W535EN device">
+    <canvas id="screen" width="480" height="320" tabindex="0" aria-label="Simulated 480 by 320 landscape display, click to change page"></canvas>
+    <div class="device-label">JC3248W535EN &middot; simulated</div>
+  </section>
+
+  <section class="panel">
+    <div class="card">
+      <h2>Connection</h2>
+      <div class="control-row">
+        <input type="text" id="server-url" value="http://localhost:8787/api/usage" aria-label="Server URL">
+        <button class="primary" id="poll-now">Poll now</button>
+      </div>
+      <div class="control-row">
+        <label for="poll-interval">Poll every</label>
+        <select id="poll-interval" aria-label="Poll interval">
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+          <option value="20000" selected>20s (firmware default)</option>
+          <option value="60000">60s</option>
+          <option value="300000">5m</option>
+        </select>
+        <label class="toggle"><input type="checkbox" id="sim-offline"> Simulate server offline</label>
+        <label class="toggle"><input type="checkbox" id="mock-data"> Use mock data</label>
+        <label class="toggle"><input type="checkbox" id="sim-sd-missing"> Simulate SD card missing</label>
+        <label class="toggle"><input type="checkbox" id="force-hourly-flash"> Force hourly flash (test)</label>
+      </div>
+      <div class="status-line">
+        <span id="conn-status"><span class="dot bad"></span>not connected</span>
+        <span id="fetch-status">no fetch yet</span>
+        <span id="page-status">page 1/6</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Last response</h2>
+      <pre id="raw-json">&mdash;</pre>
+    </div>
+
+    <div class="card">
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </div>
+  </section>
+</main>
+
+<script src="sim/fonts.js"></script>
+<script>
+// ── CONSTANTS (mirroring src/state.h / main.cpp) ─────────────
+// PARITY: every number in this file that places pixels is a copy of the
+// firmware's. Change the firmware, change it here (CLAUDE.md).
+const SCREEN_W = 480, SCREEN_H = 320;
+const POLL_DEFAULT_MS = 20000;
+const PAGE_COUNT = 6;
+const GIF_PAGE = 3;    // cat GIFs on the device (placeholder here -- see drawGifPage)
+const MIXED_PAGE = 4;  // limits column + cats pane
+const NOTE_PAGE = 5;   // limits column + note pane (an ordinary render() page)
+const TOUCH_DEBOUNCE_MS = 350;
+const OFFLINE_AFTER_MS = 60000;  // wall-clock, like main.cpp -- never a poll-cycle count
+const SLIDE_MS = 180;            // pages.cpp's page slide
+
+// Layout grid (state.h's LAYOUT section).
+const LEFT_X = 3, LEFT_W = 236;
+const RIGHT_X = 241, RIGHT_W = 236;
+const CONTENT_Y1 = 290;
+const FOOTER_Y0 = 292;
+const SWIPE_SPLIT_X = SCREEN_W / 2;
+const WEATHER_HIT_X0 = RIGHT_X, WEATHER_HIT_X1 = RIGHT_X + RIGHT_W;
+const WEATHER_HIT_Y0 = 221, WEATHER_HIT_Y1 = CONTENT_Y1;
+const DEVICE_HIT_X0 = 56, DEVICE_HIT_X1 = 330;
+const DEVICE_HIT_Y0 = FOOTER_Y0, DEVICE_HIT_Y1 = SCREEN_H;
+const SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
+const SETTINGS_HIT_Y0 = FOOTER_Y0, SETTINGS_HIT_Y1 = SCREEN_H;
+// Middle-third "next cat" band while Cat Shuffle is FIXED. Not playback --
+// it decides page navigation, so it is kept in parity (see state.h).
+const CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;
+const BATTERY_ICON_X0 = 444, BATTERY_ICON_Y0 = 3, BATTERY_ICON_Y1 = 21;
+const MIXED_GIF_X0 = 240, MIXED_GIF_W = 240, MIXED_GIF_Y0 = 3, MIXED_GIF_H = CONTENT_Y1 - 3;
+
+const SHIFT_ORBIT = [[0,0],[1,0],[2,0],[2,-1],[2,-2],[1,-2],[0,-2],[0,-1]];
+let SHIFT_STEP_MS = 180000;  // firmware default; flash "pixel_shift_min" * 60000
+
+const WEATHER_HOURLY_N = 6;
+const WEATHER_DAILY_N = 5;
+const LAST_USAGE_KEY = 's3dashboard_v1_lastusage';
+const LAST_WEATHER_KEY = 's3dashboard_v1_weather';
+
+// Settings geometry -- mirrors settings.cpp exactly.
+const SET_BACK_X0 = 0, SET_BACK_X1 = 150, SET_BACK_Y0 = 0, SET_BACK_Y1 = 46;
+const SET_BTN_X0 = 25, SET_BTN_Y = 128, SET_BTN_W = 81, SET_BTN_H = 76;
+const SET_BTN_STEP = 87, SET_BTN_STEP_Y = 84;
+const SET_ROW_X0 = 15, SET_ROW_Y0 = 48, SET_ROW_W = 450, SET_ROW_H = 56, SET_ROW_STEP = 62;
+const SET_WIDE_BTN_X0 = SET_ROW_X0, SET_WIDE_BTN_W = SET_ROW_W;
+const SETTINGS_VIEWPORT_Y0 = SET_ROW_Y0;
+const SETTINGS_VIEWPORT_H = SCREEN_H - 4 - SETTINGS_VIEWPORT_Y0;
+const SETTINGS_SCROLLBAR_X = 471, SETTINGS_SCROLLBAR_W = 5;
+const BRIGHTNESS_KEY = 's3dashboard_v1_brightness';
+const BOOT_PAGE_KEY = 's3dashboard_v1_bootpage';
+const LAST_PAGE_KEY = 's3dashboard_v1_lastpage';
+const BOOT_PAGE_AUTO = -1;
+const CAT_SHUFFLE_KEY = 's3dashboard_v1_catshuffle';
+const NIGHT_MODE_KEY = 's3dashboard_v1_nightmode';
+const ROTATION_KEY = 's3dashboard_v1_rotation';
+const SHOW_COUNTDOWN_KEY = 's3dashboard_v1_showcountdown';
+const BATTERY_SAVE_KEY = 's3dashboard_v1_batterysave';
+const SHOW_AQI_KEY = 's3dashboard_v1_showaqi';
+const HOURLY_FLASH_KEY = 's3dashboard_v1_hourlyflash';
+const SHOW_PROGRESS_KEY = 's3dashboard_v1_showprogress';
+const BATTERY_SAVE_POLL_SEC = 120;
+
+// localStorage can throw (private windows, blocked site data) -- every
+// access goes through these, and the sim works without it.
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* best-effort */ } }
+
+// ── SETTINGS TABLE (mirrors settings.cpp's SETTINGS[]) ────────
+function getCurrentBrightness() { return STATE.cfgBrightness; }
+function applyBrightness(v) {
+  STATE.cfgBrightness = v;
+  lsSet(BRIGHTNESS_KEY, String(v));
+  applyEffectiveBrightnessFilter();
+}
+// Restart = page reload (STATE re-initializes, same as the board re-running setup()).
+function getCurrentNone() { return -1; }
+function applyRestart(v) { location.reload(); }
+function applyForgetWifi(v) {
+  console.log('[sim] Forget WiFi: on hardware this erases wifi_ssid/wifi_password from flash and restarts.');
+  location.reload();
+}
+// Cat shuffle: persisted only (no real GIF playback here to pace).
+function getCurrentCatShuffle() { return STATE.catShuffleSec; }
+function applyCatShuffle(v) {
+  STATE.catShuffleSec = v;
+  lsSet(CAT_SHUFFLE_KEY, String(v));
+}
+
+// Night mode: fixed 23:00-07:00, dims to 25% -- as a CSS filter here.
+let nightDimActive = false;
+let lastNightCheckMs = 0;
+function applyEffectiveBrightnessFilter() {
+  if (nightDimActive) { canvas.style.filter = 'brightness(25%)'; return; }
+  applyBrightnessFilter();
+}
+function getCurrentNightMode() { return STATE.cfgNightModeOn ? 1 : 0; }
+function applyNightMode(v) {
+  STATE.cfgNightModeOn = v !== 0;
+  lsSet(NIGHT_MODE_KEY, String(v));
+  if (!STATE.cfgNightModeOn && nightDimActive) {
+    nightDimActive = false;
+    applyEffectiveBrightnessFilter();
+  }
+}
+function checkNightMode() {
+  const now = performance.now();
+  if (now - lastNightCheckMs < 1000) return;
+  lastNightCheckMs = now;
+  if (!STATE.cfgNightModeOn) return;
+  const bkk = bangkokParts();
+  const hour = parseInt(bkk.hour, 10);
+  const inWindow = hour >= 23 || hour < 7;
+  if (inWindow !== nightDimActive) {
+    nightDimActive = inWindow;
+    applyEffectiveBrightnessFilter();
+  }
+}
+
+const BATTERY_SAVE_OFF = 0, BATTERY_SAVE_ON = 1, BATTERY_SAVE_AUTO = 2;
+function batterySaveActive() {
+  if (STATE.cfgBatterySaveMode === BATTERY_SAVE_ON) return true;
+  if (STATE.cfgBatterySaveMode === BATTERY_SAVE_AUTO) return !!STATE.serverBatterySave;
+  return false;
+}
+function getCurrentBatterySave() { return STATE.cfgBatterySaveMode; }
+function applyBatterySave(v) {
+  STATE.cfgBatterySaveMode = Math.max(BATTERY_SAVE_OFF, Math.min(BATTERY_SAVE_AUTO, v));
+  lsSet(BATTERY_SAVE_KEY, String(STATE.cfgBatterySaveMode));
+  restartPollTimer();
+}
+function effectivePollMs() {
+  let sec = Number(document.getElementById('poll-interval').value) / 1000;
+  if (!Number.isFinite(sec) || sec <= 0) sec = POLL_DEFAULT_MS / 1000;
+  if (batterySaveActive() && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
+  return sec * 1000;
+}
+
+// Rotation: the board flips its software rotate (display.cpp) and touch
+// mapping; a 180deg flip changes nothing about layout, so the sim only
+// persists the value.
+function getCurrentRotation() { return STATE.cfgScreenRotation; }
+function applyRotation(v) {
+  STATE.cfgScreenRotation = v;
+  lsSet(ROTATION_KEY, String(v));
+}
+function getCurrentShowCountdown() { return STATE.cfgShowCountdown ? 1 : 0; }
+function applyShowCountdown(v) { STATE.cfgShowCountdown = v !== 0; lsSet(SHOW_COUNTDOWN_KEY, String(v)); }
+function getCurrentShowAqi() { return STATE.cfgShowAqi ? 1 : 0; }
+function applyShowAqi(v) { STATE.cfgShowAqi = v !== 0; lsSet(SHOW_AQI_KEY, String(v)); }
+function getCurrentHourlyFlash() { return STATE.cfgHourlyFlash ? 1 : 0; }
+function applyHourlyFlash(v) { STATE.cfgHourlyFlash = v !== 0; lsSet(HOURLY_FLASH_KEY, String(v)); }
+function getCurrentShowProgress() { return STATE.cfgShowProgress ? 1 : 0; }
+function applyShowProgress(v) { STATE.cfgShowProgress = v !== 0; lsSet(SHOW_PROGRESS_KEY, String(v)); }
+function getCurrentPollInterval() { return Number(document.getElementById('poll-interval').value) / 1000; }
+function applyPollInterval(v) {
+  document.getElementById('poll-interval').value = String(v * 1000);
+  restartPollTimer();
+}
+function getCurrentPixelShift() { return SHIFT_STEP_MS / 60000; }
+function applyPixelShift(v) { SHIFT_STEP_MS = v * 60000; }
+function getCurrentBootPage() { return STATE.cfgBootPage; }
+function applyBootPage(v) {
+  STATE.cfgBootPage = v;
+  if (v !== BOOT_PAGE_AUTO) STATE.currentPage = v;
+  lsSet(BOOT_PAGE_KEY, String(v));
+}
+
+const SETTINGS = [
+  { label: 'BRIGHTNESS', leafTitle: 'BRIGHTNESS', subtitle: 'BACKLIGHT BRIGHTNESS',
+    hint: 'TAP A LEVEL TO APPLY', cols: 5, rows: 1, count: 5,
+    values: [0, 64, 128, 191, 255], valueLabels: ['0%', '25%', '50%', '75%', '100%'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentBrightness, apply: applyBrightness },
+  { label: 'POLL INTERVAL', leafTitle: 'POLL INTERVAL', subtitle: 'HOW OFTEN TO FETCH /API/USAGE',
+    hint: 'TAP A RATE TO APPLY', cols: 5, rows: 1, count: 5,
+    values: [5, 10, 20, 60, 300], valueLabels: ['5s', '10s', '20s', '60s', '5m'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentPollInterval, apply: applyPollInterval },
+  { label: 'PIXEL SHIFT', leafTitle: 'PIXEL SHIFT', subtitle: 'ANTI-RETENTION ORBIT INTERVAL',
+    hint: 'TAP A RATE TO APPLY', cols: 4, rows: 1, count: 4,
+    values: [0, 1, 3, 10], valueLabels: ['OFF', '1m', '3m', '10m'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentPixelShift, apply: applyPixelShift },
+  { label: 'BOOT PAGE', leafTitle: 'BOOT PAGE', subtitle: 'AUTO = RESUME LAST PAGE SHOWN',
+    hint: 'TAP A PAGE TO APPLY', cols: 4, rows: 2, count: 7,
+    values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5],
+    valueLabels: ['AUTO', 'STATUS', 'PROJECTS', 'LIMITS', 'CATS', 'MIXED', 'NOTE'],
+    btnTextSize: 1, destructive: false, getCurrent: getCurrentBootPage, apply: applyBootPage },
+  { label: 'RESTART', leafTitle: 'RESTART', subtitle: '',
+    hint: 'TAP TWICE TO RESTART THE BOARD', cols: 1, rows: 1, count: 1,
+    values: [0], valueLabels: ['RESTART'],
+    btnTextSize: 2, destructive: true, getCurrent: getCurrentNone, apply: applyRestart },
+  { label: 'FORGET WIFI', leafTitle: 'FORGET WIFI', subtitle: '',
+    hint: 'TAP TWICE TO ERASE WIFI CREDS', cols: 1, rows: 1, count: 1,
+    values: [0], valueLabels: ['FORGET WIFI'],
+    btnTextSize: 2, destructive: true, getCurrent: getCurrentNone, apply: applyForgetWifi },
+  { label: 'CAT SHUFFLE', leafTitle: 'CAT SHUFFLE', subtitle: 'HOW LONG EACH CAT GIF PLAYS',
+    hint: 'TAP A RATE TO APPLY', cols: 5, rows: 1, count: 5,
+    values: [-1, 0, 5, 10, 30], valueLabels: ['FIXED', 'OFF', '5s', '10s', '30s'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentCatShuffle, apply: applyCatShuffle },
+  { label: 'NIGHT MODE', leafTitle: 'NIGHT MODE', subtitle: '23:00-07:00, DIMS TO 25%',
+    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
+    values: [0, 1], valueLabels: ['OFF', 'ON'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentNightMode, apply: applyNightMode },
+  { label: 'BATTERY SAVE', leafTitle: 'BATTERY SAVE', subtitle: '2MIN POLL; AUTO = FOLLOW MAC',
+    hint: 'TAP A MODE TO APPLY', cols: 3, rows: 1, count: 3,
+    values: [0, 1, 2], valueLabels: ['OFF', 'ON', 'AUTO'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentBatterySave, apply: applyBatterySave },
+  { label: 'ROTATION', leafTitle: 'ROTATION', subtitle: 'FOR UPSIDE-DOWN MOUNTING',
+    hint: 'APPLIES IMMEDIATELY', cols: 2, rows: 1, count: 2,
+    values: [1, 3], valueLabels: ['NORMAL', 'FLIPPED'],
+    btnTextSize: 1, destructive: false, getCurrent: getCurrentRotation, apply: applyRotation },
+  { label: 'SHOW COUNTDOWN', leafTitle: 'SHOW COUNTDOWN', subtitle: 'GREEN BARS + CLOCK WEDGE',
+    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
+    values: [0, 1], valueLabels: ['OFF', 'ON'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentShowCountdown, apply: applyShowCountdown },
+  { label: 'SHOW AQI', leafTitle: 'SHOW AQI', subtitle: 'BADGE NEXT TO THE STATUS DATE',
+    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
+    values: [0, 1], valueLabels: ['OFF', 'ON'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentShowAqi, apply: applyShowAqi },
+  { label: 'HOURLY FLASH', leafTitle: 'HOURLY FLASH', subtitle: 'INVERT SIGNAL ON THE HOUR',
+    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
+    values: [0, 1], valueLabels: ['OFF', 'ON'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentHourlyFlash, apply: applyHourlyFlash },
+  { label: 'PROGRESS BAR', leafTitle: 'PROGRESS BAR', subtitle: 'POLL COUNTDOWN ALONG THE FOOT',
+    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
+    values: [0, 1], valueLabels: ['OFF', 'ON'],
+    btnTextSize: 2, destructive: false, getCurrent: getCurrentShowProgress, apply: applyShowProgress },
+];
+const SETTINGS_COUNT = SETTINGS.length;
+const SETTINGS_CONTENT_H = SETTINGS_COUNT * SET_ROW_STEP - (SET_ROW_STEP - SET_ROW_H);
+const SETTINGS_SCROLL_MAX = Math.max(0, SETTINGS_CONTENT_H - SETTINGS_VIEWPORT_H);
+const CONFIRM_ARM_MS = 4000;
+
+// On-device figures with no browser equivalent: from the board's own boot
+// log (they only change on a reflash).
+const FLASH_USED_BYTES = 1549568, FLASH_TOTAL_BYTES = 8103168;
+const RAM_USED_BYTES = 153190, RAM_TOTAL_BYTES = 348700;
+const PSRAM_USED_BYTES = 994304, PSRAM_TOTAL_BYTES = 8388608;
+const SD_USED_BYTES = 2483027968, SD_TOTAL_BYTES = 7948206080;
+
+// RGB565 firmware colours as the panel shows them (the `// 0x....` is the
+// firmware's value -- keep them together when changing either).
+const COL_BG      = 'rgb(8,8,8)';       // 0x0841
+const COL_SURFACE = 'rgb(8,8,8)';       // 0x0841 (card fill = bg, no surface tint)
+const COL_BORDER  = 'rgb(58,57,58)';    // 0x39C7
+const COL_TEXT    = 'rgb(255,255,255)'; // 0xFFFF
+const COL_TEXT2   = 'rgb(156,154,156)'; // 0x9CD3
+const COL_ACCENT  = 'rgb(255,97,66)';   // 0xFB08
+const COL_BLUE    = 'rgb(58,130,247)';  // 0x3C1E
+const COL_YELLOW  = 'rgb(255,255,0)';   // 0xFFE0
+const COL_GOOD    = 'rgb(33,206,66)';   // 0x2668
+const COL_GOOD_50 = 'rgb(25,109,41)';   // 0x1B65
+const COL_SHINE_LO  = 'rgb(90,219,115)';  // 0x5ECE
+const COL_SHINE_MID = 'rgb(148,231,165)'; // 0x9734
+const COL_SHINE_HI  = 'rgb(214,247,214)'; // 0xD7BA
+const COL_WARN    = 'rgb(255,24,49)';   // 0xF8C6
+const COL_TRACK   = 'rgb(90,89,90)';    // 0x5ACB
+const COL_TRACK_BLACK = 'rgb(0,0,0)';   // 0x0000
+const COL_AQI_ORANGE = 'rgb(249,115,22)'; // 0xFB82
+const COL_PURPLE     = 'rgb(168,85,247)'; // 0xAABE
+const COL_MAROON     = 'rgb(127,29,29)';  // 0x78E3
+
+// ── STATE (mirroring the firmware UsageState struct + main.cpp globals) ──
+const STATE = {
+  projects: [], trend: [0,0,0,0,0,0,0],
+  haveData: false,
+  cpuPercentAvg: 0,
+  sessionPercent: -1, sessionResets: '', sessionResetsInSec: -1,
+  weekPercent: -1, weekResets: '', weekResetsInSec: -1,
+  ctxTokens: -1, ctxPercent: -1,
+  weekModelPercent: -1, weekModelName: '', weekModelResets: '',
+  creditsUsed: -1, creditsLimit: -1, creditsPercent: -1,
+  lastFetchOkMs: 0,
+  btcPrice: -1, aqi: -1,
+  weatherTempC: -999, weatherCode: -1, weatherHigh: -999, weatherLow: -999,
+  weatherCondition: '', weatherHourly: [], weatherDaily: [],
+  note: '', noteSize: 1,
+  weatherPageOpen: false, devicePageOpen: false,
+  lastPollMs: 0,
+  lastFetchSuccessMs: 0,
+  currentPage: 0,
+  connected: false, wifiOk: false,
+  pollTimer: null,
+  shiftIdx: 0, lastShiftMs: 0,
+  settingsScreen: 'off',  // 'off' | 'list' | 'leaf' -- the firmware's SettingsScreen
+  settingsScrollOffset: 0, settingsLeafIndex: -1,
+  confirmArmedMs: 0, confirmArmedRow: -1,
+  cfgBrightness: 200, cfgBootPage: 0, cfgLastPage: 0,
+  catShuffleSec: 0,
+  cfgNightModeOn: false,
+  cfgBatterySaveMode: 2, serverBatterySave: false,
+  cfgShowCountdown: true, cfgShowAqi: true, cfgHourlyFlash: true, cfgShowProgress: true,
+  cfgScreenRotation: 1,
+  lastTouchMs: 0,
+};
+
+// ── SIMULATED GFX (the LovyanGFX calls pages.cpp makes, on a 1:1 canvas) ──
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+
+// Text: the firmware's VLW glyphs, pre-tinted per colour into small canvases
+// and composited with source-over -- the same alpha blend LovyanGFX does
+// against the sprite (minus RGB565 quantization). Positioned by the two
+// fonts.h rules: y is the line TOP (glyph top = y + maxAscent - dY), and a
+// string is as wide as the sum of its advances.
+const FONT = {};
+for (const [id, f] of Object.entries(window.S3_FONTS || {})) {
+  const glyphs = {};
+  for (const [code, w, h, adv, dy, dx, b64] of f.glyphs) {
+    const bin = atob(b64);
+    const a = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    glyphs[code] = { w, h, adv, dy, dx, alpha: a, tinted: {} };
+  }
+  FONT[id] = { maxAscent: f.maxAscent, lineHeight: f.lineHeight, glyphs };
+}
+function glyphOf(font, ch) {
+  const f = FONT[font];
+  let code = ch.charCodeAt(0);
+  if (code < 0x20 || code > 0x7E) code = 0x3F;  // '?', same fold as fonts.cpp
+  return f.glyphs[code];
+}
+function tintedGlyph(g, color) {
+  let c = g.tinted[color];
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = Math.max(g.w, 1);
+  c.height = Math.max(g.h, 1);
+  const cx = c.getContext('2d');
+  const img = cx.createImageData(c.width, c.height);
+  const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(color) || [0, 255, 255, 255];
+  for (let i = 0; i < g.w * g.h; i++) {
+    img.data[i * 4] = +m[1]; img.data[i * 4 + 1] = +m[2]; img.data[i * 4 + 2] = +m[3];
+    img.data[i * 4 + 3] = g.alpha[i];
+  }
+  cx.putImageData(img, 0, 0);
+  g.tinted[color] = c;
+  return c;
+}
+function textW(font, s) {
+  s = String(s);
+  let w = 0;
+  for (const ch of s) w += glyphOf(font, ch).adv;
+  return w;
+}
+function fontLineH(font) { return FONT[font].lineHeight; }
+function fontAscent(font) { return FONT[font].maxAscent; }
+function drawText(font, x, y, s, color) {
+  s = String(s);
+  const f = FONT[font];
+  let pen = x;
+  for (const ch of s) {
+    const g = glyphOf(font, ch);
+    if (g.w > 0 && g.h > 0) ctx.drawImage(tintedGlyph(g, color), pen + g.dx, y + f.maxAscent - g.dy);
+    pen += g.adv;
+  }
+  return x + textW(font, s);
+}
+function drawTextR(font, xRight, y, s, color) { return drawText(font, xRight - textW(font, s), y, s, color); }
+function drawTextC(font, cx, y, s, color) { return drawText(font, cx - Math.trunc(textW(font, s) / 2), y, s, color); }
+function drawChar(font, x, y, c, color) { drawText(font, x, y, c, color); }
+
+const gfx = {
+  fillScreen(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, SCREEN_W, SCREEN_H); },
+  fillRect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); },
+  drawRect(x, y, w, h, c) {
+    ctx.strokeStyle = c; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  },
+  fillRoundRect(x, y, w, h, r, c) {
+    ctx.fillStyle = c; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+  },
+  drawRoundRect(x, y, w, h, r, c) {
+    ctx.strokeStyle = c; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.stroke();
+  },
+  fillCircle(x, y, r, c) {
+    ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r + 0.5, 0, Math.PI * 2); ctx.fill();
+  },
+  drawCircle(x, y, r, c) {
+    ctx.strokeStyle = c; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r, 0, Math.PI * 2); ctx.stroke();
+  },
+  fillTriangle(x0, y0, x1, y1, x2, y2, c) {
+    ctx.fillStyle = c; ctx.beginPath();
+    ctx.moveTo(x0 + 0.5, y0 + 0.5); ctx.lineTo(x1 + 0.5, y1 + 0.5); ctx.lineTo(x2 + 0.5, y2 + 0.5);
+    ctx.closePath(); ctx.fill();
+  },
+  // LovyanGFX drawWideLine(x0,y0,x1,y1,r,color): r is the half-width.
+  drawWideLine(x0, y0, x1, y1, r, c) {
+    ctx.strokeStyle = c; ctx.lineWidth = r * 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x0 + 0.5, y0 + 0.5); ctx.lineTo(x1 + 0.5, y1 + 0.5); ctx.stroke();
+    ctx.lineCap = 'butt';
+  },
+  // LovyanGFX fillArc(x,y,r0,r1,angle0,angle1,color) with r1=0: a pie wedge, degrees.
+  fillArc(cx, cy, r, a0, a1, c) {
+    ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(cx + 0.5, cy + 0.5);
+    ctx.arc(cx + 0.5, cy + 0.5, r, a0 * Math.PI / 180, a1 * Math.PI / 180, false);
+    ctx.closePath(); ctx.fill();
+  },
+  setClipRect(x, y, w, h) {
+    if (this._clipped) ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    this._clipped = true;
+  },
+  clearClipRect() { if (this._clipped) { ctx.restore(); this._clipped = false; } },
+};
+
+// ── FORMATTING (mirroring format.cpp) ─────────────────────────
+function fmtTokens(t) {
+  if (t >= 1e9) return (t / 1e9).toFixed(2) + 'B';
+  if (t >= 1e6) return (t / 1e6).toFixed(1) + 'M';
+  if (t >= 1e3) return (t / 1e3).toFixed(1) + 'K';
+  return String(t);
+}
+function fmtCost(c) { return '$' + c.toFixed(2); }
+function fmtBtc(p) { return p < 0 ? '--' : Math.round(p).toLocaleString('en-US'); }
+function fmtCountdown(sec) {
+  if (sec < 0) return '';
+  let m = Math.floor((sec + 30) / 60);
+  const h = Math.floor(m / 60);
+  m %= 60;
+  return h > 0 ? h + 'h:' + String(m).padStart(2, '0') + 'm' : m + 'm';
+}
+function fmtCountdownDHM(sec) {
+  if (sec < 0) return '';
+  const totalMin = Math.floor((sec + 30) / 60);
+  const days = Math.floor(totalMin / 1440);
+  if (days > 0) return days + 'd:' + Math.floor((totalMin % 1440) / 60) + 'h';
+  return Math.floor(totalMin / 60) + 'h:' + String(totalMin % 60).padStart(2, '0') + 'm';
+}
+function fmtKB(bytes) { return (bytes / 1024).toFixed(1) + 'KB'; }
+function fmtGB(bytes) { return (bytes / (1024 ** 3)).toFixed(1) + 'GB'; }
+const WDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// ── FOOTER (pages.cpp) ────────────────────────────────────────
+const FOOTER_TEXT_Y = 297, FOOTER_CY = 305, PROGRESS_Y = SCREEN_H - 1;
+
+function drawWifiIcon() {
+  const c = STATE.wifiOk ? COL_GOOD : COL_WARN;
+  gfx.fillRect(30, 307, 3, 4, c);
+  gfx.fillRect(35, 303, 3, 8, c);
+  gfx.fillRect(40, 299, 3, 12, c);
+}
+
+function drawSettingsIcon() {
+  const cx = 452, cy = FOOTER_CY;
+  gfx.fillCircle(cx, cy, 5, COL_TEXT2);
+  gfx.fillCircle(cx, cy, 2, COL_BG);
+  gfx.drawWideLine(cx, cy - 9, cx, cy - 6, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx, cy + 6, cx, cy + 9, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx - 9, cy, cx - 6, cy, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx + 6, cy, cx + 9, cy, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx - 6, cy - 6, cx - 4, cy - 4, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx + 4, cy + 4, cx + 6, cy + 6, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx - 6, cy + 6, cx - 4, cy + 4, 1.5, COL_TEXT2);
+  gfx.drawWideLine(cx + 4, cy - 4, cx + 6, cy - 6, 1.5, COL_TEXT2);
+}
+
+function drawFooter() {
+  const onPhase = Math.floor(Date.now() / 1000) % 2;
+  if (STATE.wifiOk) {
+    if (!STATE.connected) gfx.fillCircle(18, FOOTER_CY, 4, COL_ACCENT);
+    else if (onPhase) gfx.fillCircle(18, FOOTER_CY, 5, COL_GOOD);
+  }
+  drawWifiIcon();
+  drawSettingsIcon();
+
+  drawTextR('SM', SETTINGS_HIT_X0 - 8, FOOTER_TEXT_Y, `${STATE.currentPage + 1} / ${PAGE_COUNT}`, COL_TEXT2);
+
+  const romPct = Math.round(FLASH_USED_BYTES / FLASH_TOTAL_BYTES * 100);
+  const ramPct = Math.round(RAM_USED_BYTES / RAM_TOTAL_BYTES * 100);
+  const cpuInt = Math.round(STATE.cpuPercentAvg);
+  let x = 52;
+  x = drawText('SM', x, FOOTER_TEXT_Y, 'CPU ', COL_TEXT2);
+  x = drawText('SM', x, FOOTER_TEXT_Y, cpuInt + '%', COL_TEXT);
+  x = drawText('SM', x, FOOTER_TEXT_Y, '   ROM ', COL_TEXT2);
+  x = drawText('SM', x, FOOTER_TEXT_Y, romPct + '%', COL_TEXT);
+  x = drawText('SM', x, FOOTER_TEXT_Y, '   RAM ', COL_TEXT2);
+  drawText('SM', x, FOOTER_TEXT_Y, ramPct + '%', COL_TEXT);
+
+  // Poll-progress line (firmware: drawFooter + progressTick top-ups).
+  if (!STATE.cfgShowProgress || !STATE.connected) return;
+  const pollMs = effectivePollMs();
+  const elapsed = Math.min(performance.now() - STATE.lastPollMs, pollMs);
+  const w = Math.floor(elapsed / pollMs * SCREEN_W);
+  if (w > 0) gfx.fillRect(0, PROGRESS_Y, w, 1, COL_TEXT2);
+}
+
+function drawBatterySaveIcon() {
+  if (!batterySaveActive()) return;
+  const boxW = SCREEN_W - 3 - BATTERY_ICON_X0, boxH = BATTERY_ICON_Y1 - BATTERY_ICON_Y0 + 1;
+  gfx.fillRect(BATTERY_ICON_X0, BATTERY_ICON_Y0, boxW, boxH, COL_BG);
+  const bodyX = 450, bodyY = 7, bodyW = 19, bodyH = 11, nubW = 3, nubH = 5;
+  gfx.fillRoundRect(bodyX, bodyY, bodyW, bodyH, 2, COL_YELLOW);
+  gfx.fillRect(bodyX + bodyW, bodyY + (bodyH - nubH) / 2, nubW, nubH, COL_YELLOW);
+}
+
+// ── DRAWING HELPERS ───────────────────────────────────────────
+function drawPercentBar(x, y, w, h, percent, color, trackColor = COL_TRACK, minFillPx = 3) {
+  gfx.fillRect(x, y, w, h, trackColor);
+  if (percent < 0) return -1;
+  let fillW = Math.floor(Math.min(percent, 100) / 100 * w + 0.5);
+  if (fillW < minFillPx) fillW = minFillPx;
+  gfx.fillRect(x, y, fillW, h, color);
+  return fillW;
+}
+function liveResetsInSec(baseSec) {
+  if (baseSec < 0) return -1;
+  const rem = baseSec - Math.floor((performance.now() - STATE.lastFetchOkMs) / 1000);
+  return rem < 0 ? 0 : rem;
+}
+function drawLimitsRow(y, label, right, percent) {
+  drawText('MD', 15, y, label, COL_TEXT);
+  drawTextR('MD', 465, y, right, COL_TEXT2);
+  drawPercentBar(15, y + 27, 450, 10, percent, COL_ACCENT);
+}
+function limitRowText(percent, resets) {
+  if (percent < 0) return '--';
+  return (resets ? 'Resets ' + resets + '  ' : '') + percent + '%';
+}
+
+function drawLimitsPage() {
+  drawText('SMB', 15, 8, 'USAGE LIMITS', COL_TEXT);
+  let y = 34;
+  const STEP = 51;
+  const ctxText = STATE.ctxTokens >= 0 ? fmtTokens(STATE.ctxTokens) + '  ' + STATE.ctxPercent + '%' : '--';
+  drawLimitsRow(y, 'Context window', ctxText, STATE.ctxPercent); y += STEP;
+  drawLimitsRow(y, '5-hour limit', limitRowText(STATE.sessionPercent, STATE.sessionResets), STATE.sessionPercent); y += STEP;
+  drawLimitsRow(y, 'Weekly (all models)', limitRowText(STATE.weekPercent, STATE.weekResets), STATE.weekPercent); y += STEP;
+  if (STATE.weekModelPercent >= 0) {
+    const name = STATE.weekModelName || 'model';
+    drawLimitsRow(y, 'Weekly (' + name + ')', limitRowText(STATE.weekModelPercent, STATE.weekModelResets),
+                  STATE.weekModelPercent);
+    y += STEP;
+  }
+  if (STATE.creditsUsed >= 0) {
+    drawLimitsRow(y, 'Usage credits', fmtCost(STATE.creditsUsed) + ' of ' + fmtCost(STATE.creditsLimit),
+                  STATE.creditsPercent);
+  }
+}
+
+function drawProjectsPage() {
+  drawText('SMB', 15, 8, 'TOP PROJECTS (7D)', COL_TEXT);
+  if (STATE.projects.length === 0) {
+    drawText('SM', 15, 34, 'No data yet', COL_TEXT2);
+  } else {
+    const shown = Math.min(STATE.projects.length, 4);
+    let maxTokens = 1;
+    for (let i = 0; i < shown; i++) maxTokens = Math.max(maxTokens, STATE.projects[i].tokens);
+    let y = 32;
+    const barMaxW = 360;
+    for (let i = 0; i < shown; i++) {
+      const p = STATE.projects[i];
+      drawText('SM', 15, y, p.name, COL_TEXT);
+      const barW = Math.floor(p.tokens / maxTokens * barMaxW);
+      gfx.fillRect(15, y + 19, barMaxW, 10, COL_SURFACE);
+      gfx.fillRoundRect(15, y + 19, Math.max(barW, 5), 10, 2, COL_ACCENT);
+      drawText('SM', 15 + barMaxW + 12, y + 15, fmtTokens(p.tokens), COL_TEXT2);
+      y += 35;
+    }
+  }
+  gfx.fillRect(15, 176, 462, 1, COL_BORDER);
+  drawText('SMB', 15, 184, '7-DAY TREND', COL_TEXT);
+  const maxTrend = Math.max(1, ...STATE.trend);
+  const dayLabels = ['-6', '-5', '-4', '-3', '-2', '-1', 'today'];
+  const chartX = 36, chartY = 208, chartH = 62, barW = 51, gap = 12;
+  for (let i = 0; i < 7; i++) {
+    const barH = Math.floor(STATE.trend[i] / maxTrend * chartH);
+    const bx = chartX + i * (barW + gap);
+    gfx.fillRoundRect(bx, chartY + chartH - barH, barW, Math.max(barH, 3), 4, COL_ACCENT);
+    drawTextC('SM', bx + Math.trunc(barW / 2), chartY + chartH + 3, dayLabels[i], COL_TEXT2);
+  }
+}
+
+// Vector weather icon centred on (cx, cy), scaled by k (pages.cpp twin).
+function drawWeatherIcon(cx, cy, code, k) {
+  const S = (v) => Math.round(v * k);
+  const lw = 1.0 * k;
+  if (code < 0) { drawTextC('SM', cx, cy - Math.trunc(fontLineH('SM') / 2), '--', COL_TEXT2); return; }
+  if (code === 0 || code === 1) {
+    gfx.fillCircle(cx, cy, S(4), COL_YELLOW);
+    gfx.drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, COL_YELLOW);
+    gfx.drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, COL_YELLOW);
+    gfx.drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, COL_YELLOW);
+    gfx.drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, COL_YELLOW);
+    gfx.drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, COL_YELLOW);
+    gfx.drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, COL_YELLOW);
+    gfx.drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, COL_YELLOW);
+    gfx.drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, COL_YELLOW);
+    return;
+  }
+  if (code >= 95) {
+    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), COL_YELLOW);
+    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), COL_YELLOW);
+    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), COL_YELLOW);
+    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), COL_YELLOW);
+    return;
+  }
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
+    gfx.drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, COL_TEXT);
+    gfx.drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, COL_TEXT);
+    gfx.drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, COL_TEXT);
+    return;
+  }
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
+    gfx.fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), COL_BLUE);
+    gfx.fillCircle(cx - S(6), cy - S(3), S(2), COL_BLUE);
+    gfx.fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), COL_BLUE);
+    gfx.fillCircle(cx + S(5), cy - S(1), S(2), COL_BLUE);
+    gfx.fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), COL_BLUE);
+    gfx.fillCircle(cx - S(1), cy + S(6), S(3), COL_BLUE);
+    return;
+  }
+  gfx.fillCircle(cx - S(4), cy - S(2), S(4), COL_TEXT2);
+  gfx.fillCircle(cx + S(3), cy - S(3), S(5), COL_TEXT2);
+  gfx.fillRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), COL_TEXT2);
+}
+
+function drawMiniBar(x, y, w, percent, color, trackColor = COL_TRACK, h = 8) {
+  return drawPercentBar(x, y, w, h, percent, color, trackColor, h);
+}
+
+// ── SHINE SWEEP (pages.cpp twin; drawn whole every frame here) ────────────
+const SHINE_PERIOD_MS = 2600, SHINE_BAND_R = 10;
+const SHINE_BAR_X = 16, SHINE_BAR_W = 208, SHINE_BAR_H = 6;
+const SHINE_BAR_Y = [70, 195];
+function shineColor(i, center) {
+  const d = Math.abs(i - center);
+  return d <= 2 ? COL_SHINE_HI : d <= 6 ? COL_SHINE_MID : d <= SHINE_BAND_R ? COL_SHINE_LO : COL_GOOD;
+}
+function drawShineStrip(x, y, fillW, nowMs) {
+  if (fillW < 14) return;
+  const phase = (nowMs % SHINE_PERIOD_MS) / SHINE_PERIOD_MS;
+  const center = -SHINE_BAND_R + Math.floor(phase * (SHINE_BAR_W + 2 * SHINE_BAND_R));
+  for (let i = 2; i <= fillW - 3; i++) gfx.fillRect(x + i, y, 1, SHINE_BAR_H, shineColor(i, center));
+}
+
+function drawCardLabel(x, y, label) { drawText('SMB', x, y, label, COL_TEXT2); }
+function drawCard(x, y, w, h) { gfx.fillRect(x, y, w, h, COL_SURFACE); gfx.drawRect(x, y, w, h, COL_BORDER); }
+
+const SESSION_WINDOW_SEC = 5 * 3600, WEEK_WINDOW_SEC = 7 * 24 * 3600;
+function elapsedPercentOfWindow(remainingSec, windowSec) {
+  if (remainingSec < 0) return -1;
+  const elapsed = Math.max(0, windowSec - remainingSec);
+  return Math.max(0, Math.min(100, Math.floor(elapsed * 100 / windowSec)));
+}
+function formatPaceDur(currentPct, elapsedSec, remainingSec) {
+  if (currentPct <= 0 || elapsedSec <= 0 || remainingSec < 0) return '';
+  const remainingPct = 100 - currentPct;
+  if (remainingPct <= 0) return '';
+  const secToExhaust = remainingPct / (currentPct / elapsedSec);
+  if (secToExhaust >= remainingSec) return '';
+  if (secToExhaust < 3600) return Math.max(1, Math.floor(secToExhaust / 60 + 0.5)) + 'm';
+  return Math.floor(secToExhaust / 3600 + 0.5) + 'h';
+}
+function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec) {
+  if (!ahead) return;
+  const x2 = drawText('MDB', x, baseline - fontAscent('MDB'), '!', COL_WARN);
+  const dur = formatPaceDur(currentPct, elapsedSec, remainingSec);
+  if (dur) drawText('MD', x2 + 3, baseline - fontAscent('MD'), dur, COL_TEXT2);
+}
+
+function drawLimitHalf(topY, label, percent, ahead, elapsed, rem, pace, barIdx, resets, inText, resetsFont) {
+  const pctStr = percent >= 0 ? percent + '%' : '--';
+  const pctY = topY + 9;
+  const baseline = pctY + fontAscent('LG');
+  const x = drawText('LG', 16, pctY, pctStr, COL_ACCENT);
+  drawCardLabel(x + 8, baseline - fontAscent('SMB'), label);
+  drawPaceFlag(x + 8 + textW('SMB', label) + 8, baseline, ahead, percent, elapsed, rem);
+
+  const barY = SHINE_BAR_Y[barIdx] - 14;
+  drawMiniBar(16, barY, SHINE_BAR_W, percent, COL_ACCENT);
+  if (STATE.cfgShowCountdown) {
+    const fill = drawMiniBar(16, SHINE_BAR_Y[barIdx], SHINE_BAR_W, pace, COL_GOOD, COL_TRACK_BLACK, SHINE_BAR_H);
+    drawShineStrip(SHINE_BAR_X, SHINE_BAR_Y[barIdx], fill, performance.now());
+  }
+  const resetsY = SHINE_BAR_Y[barIdx] + 12;
+  drawText(resetsFont, 16, resetsY, resets ? 'resets ' + resets : 'resets --', COL_TEXT2);
+  if (inText) drawText('MD', 16, resetsY + 23, inText, COL_TEXT);
+}
+
+function drawLimitsCard() {
+  drawCard(LEFT_X, 3, LEFT_W, 132);
+  drawCard(LEFT_X, 137, LEFT_W, 116);
+  const sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
+  const weekRem = liveResetsInSec(STATE.weekResetsInSec);
+  const sessionPace = elapsedPercentOfWindow(sessionRem, SESSION_WINDOW_SEC);
+  const weekPace = elapsedPercentOfWindow(weekRem, WEEK_WINDOW_SEC);
+  const sessionAhead = STATE.sessionPercent >= 0 && sessionPace >= 0 && STATE.sessionPercent > sessionPace + 2;
+  const weekAhead = STATE.weekPercent >= 0 && weekPace >= 0 && STATE.weekPercent > weekPace + 2;
+  const sessionElapsed = sessionRem >= 0 ? SESSION_WINDOW_SEC - sessionRem : -1;
+  const weekElapsed = weekRem >= 0 ? WEEK_WINDOW_SEC - weekRem : -1;
+  drawLimitHalf(3, '5H', STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem, sessionPace, 0,
+                STATE.sessionResets, sessionRem >= 0 ? 'in ' + fmtCountdown(sessionRem) : '', 'MD');
+  drawLimitHalf(137, 'WK', STATE.weekPercent, weekAhead, weekElapsed, weekRem, weekPace, 1,
+                STATE.weekResets, weekRem >= 0 ? 'in ' + fmtCountdownDHM(weekRem) : '', 'MD');
+}
+
+function drawBtcCard() {
+  drawCard(LEFT_X, 255, LEFT_W, 35);
+  const baseline = 279;
+  const x = drawText('SM', 16, baseline - fontAscent('SM'), 'BTCUSDT', COL_TEXT2);
+  drawText('MDB', x + 10, baseline - fontAscent('MDB'), fmtBtc(STATE.btcPrice), COL_TEXT);
+}
+
+// ── NOTE PAGE (pages.cpp twin) ────────────────────────────────
+const NOTE_X = RIGHT_X, NOTE_Y = 3, NOTE_W = RIGHT_W, NOTE_H = CONTENT_Y1 - 3;
+const NOTE_TX = NOTE_X + 9;
+const NOTE_TY = 26;
+const NOTE_TY_MAX = NOTE_Y + NOTE_H - 5;
+const NOTE_TEXT_W = 220;
+const NOTE_FONTS = ['MONO1', 'MONO2', 'MONO3'];
+
+// ── Syntax highlighting ───────────────────────────────────────────────────
+// Same rule set as src/pages.cpp (and ~/cyd's pages.cpp, simulator.html,
+// note.html, note.py). Precedence, first match wins:
+//   1. inside a `backtick span`      -> COL_BLUE (delimiters included)
+//   2. word is TODO/FIXME/BUG        -> COL_WARN
+//      word is DONE/OK               -> COL_GOOD
+//      word is numeric               -> COL_YELLOW
+//   3. line begins '#'               -> COL_ACCENT (whole line)
+//      line begins '>'               -> COL_TEXT2  (whole line)
+//   4. leading "- ", "* ", "+ "      -> COL_ACCENT (the marker char only)
+//   5. otherwise                     -> COL_TEXT
+// Keywords are matched case-SENSITIVE uppercase-only.
+function notePunctOpen(c) { return c === '(' || c === '[' || c === '{' || c === '"' || c === "'"; }
+function notePunctClose(c) {
+  return c === ')' || c === ']' || c === '}' || c === ':' || c === ';' ||
+         c === ',' || c === '.' || c === '!' || c === '?' || c === '"' || c === "'";
+}
+function noteIsDigit(c) { return c >= '0' && c <= '9'; }
+function noteIsNumChar(c) {
+  return noteIsDigit(c) || c === '.' || c === ',' || c === ':' || c === '/' ||
+         c === '%' || c === '$' || c === '+' || c === '-';
+}
+function noteWordColor(s, a, b) {
+  while (a < b && notePunctOpen(s[a])) a++;
+  while (b > a && notePunctClose(s[b - 1])) b--;
+  if (b === a) return null;
+  const w = s.slice(a, b);
+  if (w === 'TODO' || w === 'FIXME' || w === 'BUG') return COL_WARN;
+  if (w === 'DONE' || w === 'OK') return COL_GOOD;
+  let hasDigit = false;
+  for (let i = a; i < b; i++) {
+    if (!noteIsNumChar(s[i])) return null;
+    if (noteIsDigit(s[i])) hasDigit = true;
+  }
+  return hasDigit ? COL_YELLOW : null;
+}
+
+function drawNotePane() {
+  drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
+  drawCardLabel(NOTE_TX, 7, 'NOTE');
+  const s = STATE.note || '';
+  const size = Math.min(3, Math.max(1, STATE.noteSize || 1));
+  const font = NOTE_FONTS[size - 1];
+  const glyphW = glyphOf(font, '0').adv;
+  const glyphH = fontLineH(font);
+  const lineH = glyphH;
+  const cols = Math.floor(NOTE_TEXT_W / glyphW);
+
+  if (s.length === 0) {
+    const cx = NOTE_X + Math.trunc(NOTE_W / 2);
+    drawTextC('SM', cx, 132, 'no note yet', COL_TEXT2);
+    drawTextC('SM', cx, 152, 'edit at :8787/note', COL_TEXT2);
+    return;
+  }
+
+  let y = NOTE_TY, col = 0, i = 0;
+  const n = s.length;
+  while (i < n) {
+    let lineEnd = i;
+    while (lineEnd < n && s[lineEnd] !== '\n') lineEnd++;
+    let p = i;
+    while (p < lineEnd && s[p] === ' ') p++;
+    let lineColor = null, markerIdx = -1;
+    if (p < lineEnd) {
+      if (s[p] === '#') lineColor = COL_ACCENT;
+      else if (s[p] === '>') lineColor = COL_TEXT2;
+      else if ((s[p] === '-' || s[p] === '*' || s[p] === '+') && (p + 1 === lineEnd || s[p + 1] === ' ')) markerIdx = p;
+    }
+    let inCode = false;
+    col = 0;
+    while (i < lineEnd) {
+      if (s[i] === ' ') {
+        if (col > 0) col++;
+        i++;
+        if (col >= cols) { y += lineH; col = 0; if (y + glyphH > NOTE_TY_MAX) return; }
+        continue;
+      }
+      let wEnd = i;
+      while (wEnd < lineEnd && s[wEnd] !== ' ') wEnd++;
+      const wLen = wEnd - i;
+      if (col > 0 && col + wLen > cols && wLen <= cols) {
+        y += lineH; col = 0;
+        if (y + glyphH > NOTE_TY_MAX) return;
+        continue;
+      }
+      const wordColor = noteWordColor(s, i, wEnd);
+      while (i < wEnd) {
+        if (col >= cols) { y += lineH; col = 0; if (y + glyphH > NOTE_TY_MAX) return; }
+        let c;
+        if (s[i] === '`') { inCode = !inCode; c = COL_BLUE; }
+        else if (inCode) c = COL_BLUE;
+        else if (wordColor) c = wordColor;
+        else if (lineColor) c = lineColor;
+        else if (i === markerIdx) c = COL_ACCENT;
+        else c = COL_TEXT;
+        drawChar(font, NOTE_TX + col * glyphW, y, s[i], c);
+        col++; i++;
+      }
+    }
+    i = lineEnd + 1;
+    y += lineH; col = 0;
+    if (y + glyphH > NOTE_TY_MAX) return;
+  }
+}
+
+function drawNotePage() { drawLimitsCard(); drawBtcCard(); drawNotePane(); }
+
+// Mixed page: static half (pages.cpp's drawMixedPageStatic) + the cat pane,
+// which on the device is the 2x-downscaled GIF -- a placeholder here, like
+// the CYD simulator's (cat playback is the one firmware-only surface).
+function drawMixedPage() {
+  gfx.fillScreen(COL_BG);
+  drawLimitsCard();
+  drawBtcCard();
+  drawFooter();
+  gfx.fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, 'rgb(0,0,0)');
+  const cx = MIXED_GIF_X0 + MIXED_GIF_W / 2;
+  if (catsAvailable()) {
+    drawTextC('LG', cx, 118, 'CATS', COL_ACCENT);
+    drawTextC('SM', cx, 158, 'cat GIFs play here', COL_TEXT2);
+    drawTextC('SM', cx, 176, 'on the device', COL_TEXT2);
+  } else {
+    gfx.fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, COL_BG);
+    drawTextC('LG', cx, 118, 'CATS', COL_ACCENT);   // gif_player.cpp's no-GIFs placeholder
+    drawTextC('SM', cx, 158, 'no GIFs', COL_TEXT2);
+  }
+}
+function catsAvailable() { return !document.getElementById('sim-sd-missing').checked; }
+
+// ── CLOCK (pages.cpp twin) ────────────────────────────────────
+function drawTimerWedge(cx, cy, r, startAngle, endAngle) {
+  let delta = (endAngle - startAngle) % 360;
+  if (delta < 0) delta += 360;
+  gfx.fillArc(cx, cy, r, startAngle, startAngle + delta, COL_GOOD_50);
+}
+function drawAnalogClock(cx, cy, r, hour24, minute, second, haveReset, resetHour24, resetMinute) {
+  const hourAngle = ((hour24 % 12) + minute / 60) * 30 - 90;
+  const minAngle = (minute + second / 60) * 6 - 90;
+  const secAngle = second * 6 - 90;
+  const rad = (a) => a * Math.PI / 180;
+  if (haveReset && STATE.cfgShowCountdown) {
+    drawTimerWedge(cx, cy, r - 1, hourAngle, ((resetHour24 % 12) + resetMinute / 60) * 30 - 90);
+  }
+  gfx.drawCircle(cx, cy, r, COL_TEXT);
+  gfx.drawCircle(cx, cy, r - 1, COL_TEXT);
+  for (let i = 0; i < 12; i++) {
+    const t = rad(i * 30 - 90);
+    gfx.drawWideLine(cx + Math.trunc(Math.cos(t) * (r - 2)), cy + Math.trunc(Math.sin(t) * (r - 2)),
+                     cx + Math.trunc(Math.cos(t) * (r - 8)), cy + Math.trunc(Math.sin(t) * (r - 8)), 1.0, COL_TEXT);
+  }
+  const hx = cx + Math.trunc(Math.cos(rad(hourAngle)) * r * 0.5), hy = cy + Math.trunc(Math.sin(rad(hourAngle)) * r * 0.5);
+  const mx = cx + Math.trunc(Math.cos(rad(minAngle)) * r * 0.8), my = cy + Math.trunc(Math.sin(rad(minAngle)) * r * 0.8);
+  const sx = cx + Math.trunc(Math.cos(rad(secAngle)) * (r - 3)), sy = cy + Math.trunc(Math.sin(rad(secAngle)) * (r - 3));
+  gfx.drawWideLine(cx, cy, hx, hy, 3.0, COL_TEXT);
+  gfx.drawWideLine(cx, cy, mx, my, 2.0, COL_TEXT);
+  if (haveReset) {
+    const ra = rad(((resetHour24 % 12) + resetMinute / 60) * 30 - 90);
+    gfx.drawWideLine(cx, cy, cx + Math.trunc(Math.cos(ra) * (r - 3)), cy + Math.trunc(Math.sin(ra) * (r - 3)), 0.8, COL_GOOD);
+  }
+  gfx.drawWideLine(cx, cy, sx, sy, 1.2, COL_ACCENT);
+  gfx.fillCircle(cx, cy, 3, COL_TEXT);
+}
+
+function aqiColors(aqi) {
+  if (aqi <= 50)  return [COL_GOOD, COL_TRACK_BLACK];
+  if (aqi <= 100) return [COL_YELLOW, COL_TRACK_BLACK];
+  if (aqi <= 150) return [COL_AQI_ORANGE, COL_TRACK_BLACK];
+  if (aqi <= 200) return [COL_WARN, COL_TRACK_BLACK];
+  if (aqi <= 300) return [COL_PURPLE, COL_TRACK_BLACK];
+  return [COL_MAROON, COL_TEXT];
+}
+const AQI_BADGE_H = 24;
+function aqiBadgeW(aqi) { return textW('MDB', String(aqi)) + 12; }
+function drawAqiBadge(x, y, aqi) {
+  const [bg, fg] = aqiColors(aqi);
+  gfx.fillRoundRect(x, y, aqiBadgeW(aqi), AQI_BADGE_H, 5, bg);
+  drawText('MDB', x + 6, y + Math.trunc((AQI_BADGE_H - fontLineH('MDB')) / 2), String(aqi), fg);
+}
+
+function drawStatusPage() {
+  drawLimitsCard();
+  drawBtcCard();
+  drawCard(RIGHT_X, 3, RIGHT_W, 216);
+  drawCard(RIGHT_X, 221, RIGHT_W, 69);
+
+  const bkk = bangkokParts();
+  const hour = parseInt(bkk.hour, 10), minute = parseInt(bkk.minute, 10), second = parseInt(bkk.second, 10);
+  const sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
+  const haveReset = sessionRem >= 0;
+  let resetHour = 0, resetMinute = 0;
+  if (haveReset) {
+    const totalSec = (hour * 3600 + minute * 60 + second + sessionRem) % 86400;
+    resetHour = Math.floor(totalSec / 3600);
+    resetMinute = Math.floor((totalSec % 3600) / 60);
+  }
+  const clockCx = RIGHT_X + RIGHT_W / 2, clockCy = 80, clockR = 68;
+  drawAnalogClock(clockCx, clockCy, clockR, hour, minute, second, haveReset, resetHour, resetMinute);
+  drawTextC('LG', clockCx, 152, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), COL_TEXT);
+
+  const buf = `${bkk.weekday} ${parseInt(bkk.day, 10)} ${bkk.month}`;
+  const dateW = textW('MD', buf);
+  const haveAqi = STATE.cfgShowAqi && STATE.aqi >= 0;
+  const badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
+  const gap = haveAqi ? 8 : 0;
+  const startX = clockCx - Math.trunc((dateW + gap + badgeW) / 2);
+  const dateY = 190;
+  drawText('MD', startX, dateY, buf, COL_TEXT2);
+  if (haveAqi) drawAqiBadge(startX + dateW + gap, dateY - 1, STATE.aqi);
+
+  gfx.fillRect(323, 229, 1, 53, COL_BORDER);
+  drawText('SM', 250, 231, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--', COL_TEXT);
+  drawText('SM', 250, 263, STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--', COL_TEXT2);
+
+  const NOW_CENTER_X = 295;
+  drawWeatherIcon(NOW_CENTER_X, 241, STATE.weatherCode, 1.4);
+  if (STATE.weatherTempC > -900) {
+    const tempStr = String(Math.round(STATE.weatherTempC));
+    const tw = textW('MDB', tempStr) + textW('SM', 'C');
+    let x = NOW_CENTER_X - Math.trunc(tw / 2);
+    const baseline = 279;
+    x = drawText('MDB', x, baseline - fontAscent('MDB'), tempStr, COL_TEXT);
+    drawText('SM', x, baseline - fontAscent('SM'), 'C', COL_TEXT2);
+  } else {
+    drawTextC('MDB', NOW_CENTER_X, 261, '--', COL_TEXT);
+  }
+
+  const SLOT_X = 324, SLOT_W = 51;
+  for (let i = 0; i < 3; i++) {
+    const idx = i + 1;
+    const cx = SLOT_X + i * SLOT_W + Math.trunc(SLOT_W / 2);
+    const have = STATE.weatherHourly.length > idx;
+    const hr = have ? STATE.weatherHourly[idx] : null;
+    drawTextC('SM', cx, 225, have ? String(hr.h).padStart(2, '0') : '--', COL_TEXT2);
+    drawWeatherIcon(cx, 254, have ? hr.code : -1, 1.2);
+    drawTextC('SM', cx, 268, have ? hr.tempC + 'C' : '--', COL_TEXT);
+  }
+}
+
+function drawFullStatBlock(y, title, percent, sub, color) {
+  drawText('SMB', 15, y, title, COL_TEXT2);
+  const barX = 15, barY = y + 19, barW = 369, barH = 14;
+  drawPercentBar(barX, barY, barW, barH, percent, color);
+  drawText('MDB', barX + barW + 12, barY + Math.trunc((barH - fontLineH('MDB')) / 2),
+           percent >= 0 ? percent + '%' : '--', COL_TEXT);
+  if (sub) drawText('SM', 15, barY + barH + 2, sub, COL_TEXT2);
+}
+
+function drawDevicePage() {
+  drawText('LG', 15, 8, 'Device Stats', COL_TEXT);
+  const cpuInt = Math.round(STATE.cpuPercentAvg);
+  drawFullStatBlock(48, 'CPU USAGE (render loop duty cycle, live)', cpuInt, '', cpuInt >= 80 ? COL_WARN : COL_BLUE);
+  const pct = (u, t) => Math.round(u / t * 100);
+  const f = pct(FLASH_USED_BYTES, FLASH_TOTAL_BYTES);
+  drawFullStatBlock(98, 'FLASH (APP PARTITION)', f, fmtKB(FLASH_USED_BYTES) + ' / ' + fmtKB(FLASH_TOTAL_BYTES), f >= 80 ? COL_WARN : COL_BLUE);
+  const r = pct(RAM_USED_BYTES, RAM_TOTAL_BYTES);
+  drawFullStatBlock(152, 'INTERNAL RAM', r, fmtKB(RAM_USED_BYTES) + ' / ' + fmtKB(RAM_TOTAL_BYTES), r >= 80 ? COL_WARN : COL_BLUE);
+  const p = pct(PSRAM_USED_BYTES, PSRAM_TOTAL_BYTES);
+  drawFullStatBlock(206, 'PSRAM', p, fmtKB(PSRAM_USED_BYTES) + ' / ' + fmtKB(PSRAM_TOTAL_BYTES), p >= 80 ? COL_WARN : COL_BLUE);
+  const sdMissing = document.getElementById('sim-sd-missing').checked;
+  const sdPct = sdMissing ? -1 : pct(SD_USED_BYTES, SD_TOTAL_BYTES);
+  drawFullStatBlock(260, 'SD CARD', sdPct,
+                    sdPct >= 0 ? fmtGB(SD_USED_BYTES) + ' / ' + fmtGB(SD_TOTAL_BYTES) : 'SD CARD NOT FOUND',
+                    sdPct >= 80 ? COL_WARN : COL_BLUE);
+}
+
+function drawWeatherPage() {
+  gfx.fillScreen(COL_BG);
+  const CARD_X = 15, CARD_W = 450, heroRight = CARD_X + CARD_W - 12;
+  drawCard(CARD_X, 5, CARD_W, 72);
+  drawWeatherIcon(44, 41, STATE.weatherCode, 2.0);
+  const tempX = 72;
+  let metaX;
+  if (STATE.weatherTempC > -900) {
+    const x = drawText('XL', tempX, 16, String(Math.round(STATE.weatherTempC)), COL_TEXT);
+    gfx.drawCircle(x + 6, 24, 4, COL_TEXT2);
+    gfx.drawCircle(x + 6, 24, 3, COL_TEXT2);
+    metaX = x + 24;
+  } else {
+    metaX = drawText('XL', tempX, 16, '--', COL_TEXT2) + 20;
+  }
+  const haveAqi = STATE.cfgShowAqi && STATE.aqi >= 0;
+  const badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
+  const metaMaxX = heroRight - (haveAqi ? badgeW + 10 : 0);
+  {
+    const cond = STATE.weatherCondition || '--';
+    let n = 0;
+    while (n < cond.length && n < 19) {
+      if (metaX + textW('MDB', cond.slice(0, n + 1)) > metaMaxX) break;
+      n++;
+    }
+    drawText('MDB', metaX, 14, cond.slice(0, n), STATE.weatherCondition ? COL_TEXT : COL_TEXT2);
+  }
+  {
+    const hStr = STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--';
+    const lStr = STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--';
+    let x = metaX;
+    x = drawText('MD', x, 43, 'H ', COL_TEXT2);
+    x = drawText('MD', x, 43, hStr, COL_TEXT);
+    x = drawText('MD', x + 16, 43, 'L ', COL_TEXT2);
+    drawText('MD', x, 43, lStr, COL_TEXT);
+  }
+  if (haveAqi) drawAqiBadge(heroRight - badgeW, 12, STATE.aqi);
+
+  drawCard(CARD_X, 81, CARD_W, 78);
+  const hourCount = STATE.weatherHourly.length > 0 ? STATE.weatherHourly.length : WEATHER_HOURLY_N;
+  const slotW = 75;
+  for (let i = 0; i < hourCount && i < WEATHER_HOURLY_N; i++) {
+    const sx = CARD_X + i * slotW;
+    const cx = sx + Math.trunc(slotW / 2);
+    const have = i < STATE.weatherHourly.length;
+    const hr = have ? STATE.weatherHourly[i] : null;
+    if (i === 0) gfx.fillRoundRect(sx + 10, 83, slotW - 20, 3, 1, COL_ACCENT);
+    drawTextC('SM', cx, 89, have && hr.h >= 0 ? String(hr.h).padStart(2, '0') : '--', i === 0 ? COL_ACCENT : COL_TEXT2);
+    drawWeatherIcon(cx, 118, have ? hr.code : -1, 1.5);
+    drawTextC('MD', cx, 133, have ? String(hr.tempC) : '--', have ? COL_TEXT : COL_TEXT2);
+  }
+
+  drawCard(CARD_X, 163, CARD_W, 152);
+  let minT = 100, maxT = -100;
+  for (const d of STATE.weatherDaily) { minT = Math.min(minT, d.low); maxT = Math.max(maxT, d.high); }
+  if (maxT <= minT) { minT = 20; maxT = 40; }
+  const dayY0 = 166, dayStep = 30, barX = 144, barW = 264, barH = 8;
+  const dayCount = STATE.weatherDaily.length > 0 ? STATE.weatherDaily.length : WEATHER_DAILY_N;
+  for (let i = 0; i < dayCount && i < WEATHER_DAILY_N; i++) {
+    const y = dayY0 + i * dayStep;
+    const have = i < STATE.weatherDaily.length;
+    const d = have ? STATE.weatherDaily[i] : null;
+    const textY = y + Math.trunc((dayStep - fontLineH('MD')) / 2);
+    const barY = y + Math.trunc((dayStep - barH) / 2);
+    drawText('MD', 28, textY, have && d.wd >= 0 && d.wd < 7 ? WDAY_ABBR[d.wd] : '---', i === 0 ? COL_ACCENT : COL_TEXT);
+    drawWeatherIcon(90, y + dayStep / 2, have ? d.code : -1, 1.2);
+    drawTextR('MD', barX - 8, textY, have ? String(d.low) : '--', COL_TEXT2);
+    gfx.fillRoundRect(barX, barY, barW, barH, 4, COL_TRACK);
+    if (have && maxT > minT) {
+      const span = maxT - minT;
+      const x0 = barX + Math.trunc((d.low - minT) / span * barW);
+      let x1 = barX + Math.trunc((d.high - minT) / span * barW);
+      if (x1 - x0 < barH) x1 = x0 + barH;
+      gfx.fillRoundRect(x0, barY, x1 - x0, barH, 4, COL_ACCENT);
+    }
+    drawText('MD', barX + barW + 8, textY, have ? String(d.high) : '--', COL_TEXT);
+  }
+}
+
+// ── CAT PAGE (placeholder -- the firmware-only surface) ──────────────────
+// The device plays random GIFs from /cats/ (gif_player.cpp); the canvas
+// can't, so this shows the firmware's own no-GIFs placeholder layout with a
+// note. Same session overlay rule: GIF_PAGE only, never while offline.
+function drawGifPage() {
+  gfx.fillScreen(COL_BG);
+  drawTextC('XL', SCREEN_W / 2, 118, 'CATS', COL_ACCENT);
+  drawTextC('SM', SCREEN_W / 2, 176,
+            catsAvailable() ? 'random cat GIFs play here on the device' : 'insert an SD card with /cats/ GIFs',
+            COL_TEXT2);
+  if (STATE.currentPage === GIF_PAGE && STATE.haveData) drawSessionResetOverlay();
+}
+function drawSessionResetOverlay() {
+  const percent = STATE.sessionPercent, resets = STATE.sessionResets;
+  if (percent < 0 || !resets) return;
+  const a = percent + '% ', b = 'reset: ';
+  const padX = 8, padY = 6;
+  const tw = textW('MD', a) + textW('MD', b) + textW('MD', resets);
+  const boxW = tw + padX * 2, boxH = fontLineH('MD') + padY * 2;
+  const boxY = SCREEN_H - boxH;
+  gfx.fillRect(0, boxY, boxW, boxH, 'rgb(0,0,0)');
+  let x = drawText('MD', padX, boxY + padY, a, COL_TEXT);
+  x = drawText('MD', x, boxY + padY, b, COL_TEXT2);
+  drawText('MD', x, boxY + padY, resets, COL_TEXT);
+}
+
+// ── SETTINGS (settings.cpp twin) ──────────────────────────────
+function btnFont(size) { return size >= 2 ? 'MDB' : 'SMB'; }
+function drawSettingsList() {
+  gfx.fillScreen(COL_BG);
+  gfx.drawWideLine(20, 16, 36, 32, 2.0, COL_ACCENT);
+  gfx.drawWideLine(36, 16, 20, 32, 2.0, COL_ACCENT);
+  drawTextR('SMB', SCREEN_W - 15, 16, 'SETTINGS', COL_ACCENT);
+  gfx.setClipRect(0, SETTINGS_VIEWPORT_Y0, SCREEN_W, SETTINGS_VIEWPORT_H);
+  for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
+    const y = SETTINGS_VIEWPORT_Y0 + idx * SET_ROW_STEP - STATE.settingsScrollOffset;
+    if (y + SET_ROW_H < SETTINGS_VIEWPORT_Y0 || y > SETTINGS_VIEWPORT_Y0 + SETTINGS_VIEWPORT_H) continue;
+    gfx.fillRoundRect(SET_ROW_X0, y, SET_ROW_W, SET_ROW_H, 8, COL_SURFACE);
+    gfx.drawRoundRect(SET_ROW_X0, y, SET_ROW_W, SET_ROW_H, 8, COL_BORDER);
+    drawText('MDB', SET_ROW_X0 + 18, y + Math.trunc((SET_ROW_H - fontLineH('MDB')) / 2), SETTINGS[idx].label, COL_TEXT);
+    const cx = SET_ROW_X0 + SET_ROW_W - 26, cy = y + SET_ROW_H / 2;
+    gfx.drawWideLine(cx - 4, cy - 7, cx + 3, cy, 1.5, COL_ACCENT);
+    gfx.drawWideLine(cx + 3, cy, cx - 4, cy + 7, 1.5, COL_ACCENT);
+  }
+  gfx.clearClipRect();
+  if (SETTINGS_SCROLL_MAX > 0) {
+    gfx.fillRoundRect(SETTINGS_SCROLLBAR_X, SETTINGS_VIEWPORT_Y0, SETTINGS_SCROLLBAR_W, SETTINGS_VIEWPORT_H, 2, COL_BORDER);
+    const thumbH = Math.max(24, Math.trunc(SETTINGS_VIEWPORT_H * SETTINGS_VIEWPORT_H / SETTINGS_CONTENT_H));
+    const thumbY = SETTINGS_VIEWPORT_Y0 + Math.trunc((SETTINGS_VIEWPORT_H - thumbH) * STATE.settingsScrollOffset / SETTINGS_SCROLL_MAX);
+    gfx.fillRoundRect(SETTINGS_SCROLLBAR_X, thumbY, SETTINGS_SCROLLBAR_W, thumbH, 2, COL_ACCENT);
+  }
+}
+function leafButtonRect(def, i) {
+  const col = i % def.cols, row = Math.floor(i / def.cols);
+  return {
+    x: def.count === 1 ? SET_WIDE_BTN_X0 : SET_BTN_X0 + col * SET_BTN_STEP,
+    y: SET_BTN_Y + row * SET_BTN_STEP_Y,
+    w: def.count === 1 ? SET_WIDE_BTN_W : SET_BTN_W,
+  };
+}
+function drawSettingsLeaf() {
+  const def = SETTINGS[STATE.settingsLeafIndex];
+  gfx.fillScreen(COL_BG);
+  gfx.drawWideLine(24, 17, 17, 24, 1.5, COL_ACCENT);
+  gfx.drawWideLine(17, 24, 24, 31, 1.5, COL_ACCENT);
+  drawText('MDB', 34, 13, 'BACK', COL_ACCENT);
+  drawText('LG', 15, 52, def.leafTitle, COL_ACCENT);
+  if (def.subtitle) drawText('SM', 15, 94, def.subtitle, COL_TEXT2);
+  const current = def.destructive ? -1 : def.getCurrent();
+  const armed = def.destructive && STATE.confirmArmedRow === STATE.settingsLeafIndex &&
+                performance.now() - STATE.confirmArmedMs < CONFIRM_ARM_MS;
+  const bf = btnFont(def.btnTextSize);
+  for (let i = 0; i < def.count; i++) {
+    const { x, y, w } = leafButtonRect(def, i);
+    const on = armed || (!def.destructive && def.values[i] === current);
+    const fill = armed ? COL_WARN : (on ? COL_ACCENT : COL_SURFACE);
+    const border = armed ? COL_WARN : (on ? COL_ACCENT : COL_BORDER);
+    gfx.fillRoundRect(x, y, w, SET_BTN_H, 8, fill);
+    gfx.drawRoundRect(x, y, w, SET_BTN_H, 8, border);
+    drawTextC(bf, x + Math.trunc(w / 2), y + Math.trunc((SET_BTN_H - fontLineH(bf)) / 2),
+              armed ? 'TAP AGAIN' : def.valueLabels[i], on ? COL_BG : COL_TEXT);
+  }
+  drawTextC('SM', SCREEN_W / 2, def.rows > 1 ? 298 : 222, def.hint, COL_TEXT2);
+}
+
+// ── RENDER ────────────────────────────────────────────────────
+function applyBrightnessFilter() {
+  canvas.style.filter = 'brightness(' + Math.round(STATE.cfgBrightness / 255 * 100) + '%)';
+}
+function loadInt(key, fn) {
+  const raw = lsGet(key);
+  if (raw === null) return;
+  const v = parseInt(raw, 10);
+  if (!Number.isNaN(v)) fn(v);
+}
+function loadSettings() {
+  loadInt(BRIGHTNESS_KEY, v => { STATE.cfgBrightness = v; });
+  loadInt(LAST_PAGE_KEY, v => { STATE.cfgLastPage = v; });
+  loadInt(BOOT_PAGE_KEY, v => {
+    STATE.cfgBootPage = v;
+    STATE.currentPage = (v === BOOT_PAGE_AUTO) ? STATE.cfgLastPage : v;
+  });
+  loadInt(CAT_SHUFFLE_KEY, v => { STATE.catShuffleSec = v; });
+  loadInt(NIGHT_MODE_KEY, v => { STATE.cfgNightModeOn = v !== 0; });
+  loadInt(ROTATION_KEY, v => { STATE.cfgScreenRotation = v; });
+  loadInt(SHOW_COUNTDOWN_KEY, v => { STATE.cfgShowCountdown = v !== 0; });
+  loadInt(SHOW_AQI_KEY, v => { STATE.cfgShowAqi = v !== 0; });
+  loadInt(HOURLY_FLASH_KEY, v => { STATE.cfgHourlyFlash = v !== 0; });
+  loadInt(SHOW_PROGRESS_KEY, v => { STATE.cfgShowProgress = v !== 0; });
+  loadInt(BATTERY_SAVE_KEY, v => { STATE.cfgBatterySaveMode = Math.max(0, Math.min(2, v)); });
+}
+
+// The page slide (pages.cpp's pageTransitionRun): an off-screen snapshot of
+// the outgoing frame composited against the live incoming one, same easing.
+let slide = null;  // {from: canvas, t0, forward}
+const offscreen = document.createElement('canvas');
+offscreen.width = SCREEN_W; offscreen.height = SCREEN_H;
+
+function render() {
+  const nowMs = performance.now();
+  if (SHIFT_STEP_MS > 0 && nowMs - STATE.lastShiftMs >= SHIFT_STEP_MS) {
+    STATE.lastShiftMs = nowMs;
+    STATE.shiftIdx = (STATE.shiftIdx + 1) % 8;
+  }
+  const [shiftX, shiftY] = SHIFT_ORBIT[STATE.shiftIdx];
+  ctx.fillStyle = COL_BG;
+  ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  ctx.save();
+  ctx.translate(shiftX, shiftY);
+  drawScreenContent();
+  ctx.restore();
+
+  if (slide) {
+    const el = nowMs - slide.t0;
+    if (el >= SLIDE_MS) {
+      slide = null;
+    } else {
+      // Keep the incoming frame, then lay both halves down at the eased offset.
+      const octx = offscreen.getContext('2d');
+      octx.drawImage(canvas, 0, 0);
+      const t = el / SLIDE_MS;
+      const off = Math.floor((1 - Math.pow(1 - t, 3)) * SCREEN_W);
+      ctx.fillStyle = COL_BG;
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+      if (slide.forward) {
+        ctx.drawImage(slide.from, -off, 0);
+        ctx.drawImage(offscreen, SCREEN_W - off, 0);
+      } else {
+        ctx.drawImage(slide.from, off, 0);
+        ctx.drawImage(offscreen, off - SCREEN_W, 0);
+      }
+    }
+  }
+
+  if (shiftX !== 0 || shiftY !== 0) {
+    document.getElementById('page-status').textContent += ` · shift (${shiftX},${shiftY})`;
+  }
+  // Hourly flash: the panel's INVON on even seconds of :00:00-:00:05.
+  if (STATE.cfgHourlyFlash) {
+    const bkk = bangkokParts();
+    const min = parseInt(bkk.minute, 10), sec = parseInt(bkk.second, 10);
+    if (min === 0 && sec < 6 && sec % 2 === 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'difference';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+      ctx.restore();
+      document.getElementById('page-status').textContent = 'HOURLY SIGNAL (INVERT FLASH)';
+    }
+  }
+}
+
+function setPageStatus(t) { document.getElementById('page-status').textContent = t; }
+
+function drawScreenContent() {
+  if (STATE.settingsScreen === 'leaf') { drawSettingsLeaf(); setPageStatus('SETTINGS: ' + SETTINGS[STATE.settingsLeafIndex].label); return; }
+  if (STATE.settingsScreen === 'list') { drawSettingsList(); setPageStatus('SETTINGS (list)'); return; }
+  if (STATE.weatherPageOpen) { drawWeatherPage(); drawBatterySaveIcon(); setPageStatus('WEATHER (tap to close)'); return; }
+  if (STATE.devicePageOpen) {
+    gfx.fillScreen(COL_BG); drawDevicePage(); drawBatterySaveIcon();
+    setPageStatus('DEVICE STATS (tap to close)');
+    return;
+  }
+  if (!STATE.haveData) { drawGifPage(); drawBatterySaveIcon(); setPageStatus('OFFLINE (cat GIFs)'); return; }
+  if (STATE.currentPage === GIF_PAGE) {
+    drawGifPage(); drawBatterySaveIcon();
+    setPageStatus(`page ${GIF_PAGE + 1}/${PAGE_COUNT} (cat GIFs)`);
+    return;
+  }
+  if (STATE.currentPage === MIXED_PAGE) {
+    drawMixedPage(); drawBatterySaveIcon();
+    setPageStatus(`page ${MIXED_PAGE + 1}/${PAGE_COUNT} (limits + cats)`);
+    return;
+  }
+  gfx.fillScreen(COL_BG);
+  switch (STATE.currentPage) {
+    case 0: drawStatusPage(); break;
+    case 1: drawProjectsPage(); break;
+    case 2: drawLimitsPage(); break;
+    case 5: drawNotePage(); break;
+  }
+  drawFooter();
+  drawBatterySaveIcon();
+  setPageStatus(`page ${STATE.currentPage + 1}/${PAGE_COUNT}` + (STATE.currentPage === NOTE_PAGE ? ' (note)' : ''));
+}
+
+// ── DATA LOADING ──────────────────────────────────────────────
+const MOCK = {
+  today: { tokens: 2573012, cost: 2.31 },
+  week: { tokens: 351668302, cost: 228.27 },
+  active_now: true,
+  projects: [
+    { name: 'ampypay-eunite', tokens: 178178755 },
+    { name: 'org-chart', tokens: 145575128 },
+    { name: 'autoclaude', tokens: 15567872 },
+    { name: 'iief-thai', tokens: 5286431 },
+    { name: 'fsfi-thai', tokens: 3970315 },
+  ],
+  trend: [118891173, 158279627, 0, 0, 55363947, 17326402, 2573012],
+  limits: {
+    session: { percent: 57, resets: '03:19', resets_in_sec: 5400 },
+    week: { percent: 86, resets: 'Jul 9, 04:59', resets_in_sec: 302400 },
+    week_model: { name: 'Fable', percent: 58, resets: 'Jul 16, 04:59' },
+    credits: { used: 0.41, limit: 10.0, percent: 4 },
+  },
+  context: { tokens: 80000, percent: 40 },
+  btc: { price: 109432 },
+  aqi: { aqi: 81 },
+  // Exercises every tokenizer rule at once (same sample as ~/cyd's simulator).
+  note: {
+    text: '# SPRINT 6\n> shipped 2026-08-26\n\n- TODO wire the note pane\n' +
+          '* DONE server /api/note\n+ OK boot page picker\n\n' +
+          'budget $1,200 / 50% used\nrun `arduino-cli compile --fqbn esp32`\n' +
+          'supercalifragilisticexpialidocious',
+    size: 1,
+  },
+  weather: {
+    tempC: 34, code: 3, high: 35, low: 26, condition: 'Overcast',
+    hourly: [
+      { h: 17, tempC: 34, code: 3 }, { h: 18, tempC: 33, code: 2 }, { h: 19, tempC: 32, code: 0 },
+      { h: 20, tempC: 31, code: 0 }, { h: 21, tempC: 30, code: 0 }, { h: 22, tempC: 29, code: 2 },
+    ],
+    daily: [
+      { wd: 1, high: 35, low: 26, code: 51 }, { wd: 2, high: 35, low: 27, code: 95 },
+      { wd: 3, high: 35, low: 26, code: 95 }, { wd: 4, high: 34, low: 26, code: 95 },
+      { wd: 5, high: 32, low: 25, code: 51 },
+    ],
+  },
+  power: { on_ac: true, percent: 82, paused: false, battery_save: false, battery_save_manual: null, source: 'auto' },
+};
+
+function saveLastUsageCache(doc) { lsSet(LAST_USAGE_KEY, JSON.stringify(doc)); }
+function loadCachedUsage() {
+  try {
+    const raw = lsGet(LAST_USAGE_KEY);
+    if (!raw) return false;
+    applyData(JSON.parse(raw), false);
+    return true;
+  } catch { return false; }
+}
+
+// Mirrors net.cpp's applyUsageJson: keep last-known limits/btc/weather/aqi on
+// an absent field; the note always overwrites (it is server-local state).
+function applyData(doc, fromNetwork = true) {
+  STATE.projects = (doc.projects || []).slice(0, 5);
+  STATE.trend = Array.from({ length: 7 }, (_, i) => doc.trend?.[i] ?? 0);
+  if (doc.limits) {
+    STATE.sessionPercent = doc.limits.session?.percent ?? -1;
+    STATE.sessionResets = doc.limits.session?.resets ?? '';
+    STATE.sessionResetsInSec = doc.limits.session?.resets_in_sec ?? -1;
+    STATE.weekPercent = doc.limits.week?.percent ?? -1;
+    STATE.weekResets = doc.limits.week?.resets ?? '';
+    STATE.weekResetsInSec = doc.limits.week?.resets_in_sec ?? -1;
+    STATE.weekModelPercent = doc.limits.week_model?.percent ?? -1;
+    STATE.weekModelName = doc.limits.week_model?.name ?? '';
+    STATE.weekModelResets = doc.limits.week_model?.resets ?? '';
+    STATE.creditsUsed = doc.limits.credits?.used ?? -1;
+    STATE.creditsLimit = doc.limits.credits?.limit ?? -1;
+    STATE.creditsPercent = doc.limits.credits?.percent ?? -1;
+  }
+  STATE.ctxTokens = doc.context?.tokens ?? -1;
+  STATE.ctxPercent = doc.context?.percent ?? -1;
+  if (doc.btc && doc.btc.price > 0) STATE.btcPrice = doc.btc.price;
+  if (doc.weather) applyWeatherData(doc.weather);
+  if (doc.aqi && doc.aqi.aqi >= 0) STATE.aqi = doc.aqi.aqi;
+  if (doc.note) {
+    STATE.note = doc.note.text || '';
+    STATE.noteSize = Math.min(3, Math.max(1, doc.note.size || 1));
+  }
+  // Battery Save AUTO follows live polls only, never the cache (net.cpp).
+  if (fromNetwork && doc.power && typeof doc.power.battery_save === 'boolean') {
+    const want = !!doc.power.battery_save;
+    if (want !== STATE.serverBatterySave) {
+      STATE.serverBatterySave = want;
+      restartPollTimer();
+    }
+  }
+  STATE.lastFetchOkMs = performance.now();
+  document.getElementById('raw-json').textContent = JSON.stringify(doc, null, 2);
+}
+
+function applyWeatherData(w) {
+  if (!w) return;
+  if (w.tempC != null) STATE.weatherTempC = w.tempC;
+  if (w.code != null) STATE.weatherCode = w.code;
+  if (w.high != null) STATE.weatherHigh = Math.round(w.high);
+  if (w.low != null) STATE.weatherLow = Math.round(w.low);
+  if (w.condition != null) STATE.weatherCondition = w.condition;
+  if (Array.isArray(w.hourly)) {
+    STATE.weatherHourly = w.hourly.slice(0, WEATHER_HOURLY_N).map(h => ({
+      h: h.h ?? -1, tempC: Math.round(h.tempC ?? 0), code: h.code ?? -1,
+    }));
+  }
+  if (Array.isArray(w.daily)) {
+    STATE.weatherDaily = w.daily.slice(0, WEATHER_DAILY_N).map(d => ({
+      wd: d.wd ?? -1, high: Math.round(d.high ?? 0), low: Math.round(d.low ?? 0), code: d.code ?? -1,
+    }));
+  }
+  lsSet(LAST_WEATHER_KEY, JSON.stringify(w));
+}
+function loadWeatherCache() {
+  try {
+    const raw = lsGet(LAST_WEATHER_KEY);
+    if (raw) applyWeatherData(JSON.parse(raw));
+  } catch { /* ignore corrupt cache */ }
+}
+
+// Bangkok time (no DST, fixed UTC+7 -- the firmware's GMT_OFFSET_SEC).
+function bangkokParts() {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Bangkok', hour12: false,
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = {};
+  for (const p of fmt.formatToParts(new Date())) parts[p.type] = p.value;
+  const out = {
+    weekday: parts.weekday, month: parts.month, day: parts.day, year: parts.year,
+    hour: parts.hour === '24' ? '00' : parts.hour, minute: parts.minute, second: parts.second,
+  };
+  if (document.getElementById('force-hourly-flash')?.checked) {
+    out.minute = '00';
+    out.second = '0' + (Math.floor(Date.now() / 1000) % 10);
+  }
+  return out;
+}
+
+// Offline after OFFLINE_AFTER_MS of wall time without a successful poll --
+// main.cpp's networkTask rule, not a cycle count.
+function markFetchFailed() {
+  const now = performance.now();
+  if (now - STATE.lastFetchSuccessMs >= OFFLINE_AFTER_MS) STATE.haveData = false;
+  else if (!STATE.haveData) STATE.haveData = loadCachedUsage();
+}
+
+let fetchInFlight = false;
+async function fetchUsage() {
+  if (fetchInFlight) return;
+  fetchInFlight = true;
+  STATE.lastPollMs = performance.now();
+  const offline = document.getElementById('sim-offline').checked;
+  const mock = document.getElementById('mock-data').checked;
+  const ok = (detail) => {
+    STATE.haveData = true;
+    STATE.lastFetchSuccessMs = performance.now();
+    STATE.wifiOk = true;
+    STATE.connected = true;
+    setConn(true, detail);
+  };
+  try {
+    if (mock) {
+      applyData(MOCK);
+      saveLastUsageCache(MOCK);
+      ok('mock data');
+      log('applied mock data', 'ok');
+      return;
+    }
+    if (offline) {
+      STATE.wifiOk = false;
+      STATE.connected = false;
+      markFetchFailed();
+      setConn(false, 'simulated offline');
+      log('poll skipped: simulated offline', 'err');
+      return;
+    }
+    const url = document.getElementById('server-url').value.trim();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const doc = await res.json();
+      applyData(doc);
+      saveLastUsageCache(doc);
+      ok('ok, ' + new Date().toLocaleTimeString());
+      log('fetched ' + fmtTokens(doc.today?.tokens ?? 0) + ' today / ' + fmtTokens(doc.week?.tokens ?? 0) + ' week', 'ok');
+    } catch (err) {
+      STATE.wifiOk = false;
+      STATE.connected = false;
+      markFetchFailed();
+      setConn(false, err.name === 'AbortError' ? 'timeout (5s)' : err.message);
+      log('fetch failed: ' + err.message, 'err');
+    } finally {
+      clearTimeout(timer);
+    }
+  } finally {
+    fetchInFlight = false;
+    render();
+  }
+}
+
+// ── UI WIRING ─────────────────────────────────────────────────
+function setConn(ok, detail) {
+  document.getElementById('conn-status').innerHTML =
+    `<span class="dot ${ok ? 'ok' : 'bad'}"></span>${ok ? 'connected' : 'disconnected'}`;
+  document.getElementById('fetch-status').textContent = detail;
+}
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  el.prepend(line);
+  while (el.childElementCount > 50) el.removeChild(el.lastChild);
+}
+function restartPollTimer() {
+  clearInterval(STATE.pollTimer);
+  STATE.pollTimer = setInterval(fetchUsage, effectivePollMs());
+}
+
+// SET_LIST drag-to-scroll (settings.cpp's settingsListDragBegin/Move/End).
+let dragLastX = 0, dragLastY = 0, dragTotalMoveY = 0, dragActive = false;
+const DRAG_TAP_PX = 8;
+function screenXY(event) {
+  const r = canvas.getBoundingClientRect();
+  return [Math.floor((event.clientX - r.left - 3) * SCREEN_W / (r.width - 6)),
+          Math.floor((event.clientY - r.top - 3) * SCREEN_H / (r.height - 6))];
+}
+function settingsListDragEnd() {
+  if (dragTotalMoveY >= DRAG_TAP_PX) return;
+  const tx = dragLastX, ty = dragLastY;
+  if (tx >= SET_BACK_X0 && tx < SET_BACK_X1 && ty >= SET_BACK_Y0 && ty < SET_BACK_Y1) {
+    STATE.settingsScreen = 'off';
+    return;
+  }
+  for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
+    const y = SETTINGS_VIEWPORT_Y0 + idx * SET_ROW_STEP - STATE.settingsScrollOffset;
+    if (y + SET_ROW_H < SETTINGS_VIEWPORT_Y0 || y > SETTINGS_VIEWPORT_Y0 + SETTINGS_VIEWPORT_H) continue;
+    if (tx >= SET_ROW_X0 && tx < SET_ROW_X0 + SET_ROW_W && ty >= y && ty < y + SET_ROW_H) {
+      STATE.settingsLeafIndex = idx;
+      STATE.confirmArmedRow = -1;
+      STATE.settingsScreen = 'leaf';
+      break;
+    }
+  }
+}
+
+// Page change with the slide (main.cpp's goToPage): offline, the cats own
+// every page, so the change is invisible -- no slide.
+function goToPage(newPage, forward) {
+  const from = document.createElement('canvas');
+  from.width = SCREEN_W; from.height = SCREEN_H;
+  from.getContext('2d').drawImage(canvas, 0, 0);
+  STATE.currentPage = newPage;
+  STATE.cfgLastPage = newPage;
+  lsSet(LAST_PAGE_KEY, String(newPage));
+  if (STATE.haveData) slide = { from, t0: performance.now(), forward };
+}
+
+// Touch router -- main.cpp's loop() chain, in the same order.
+function handleTap(tx, ty) {
+  const now = performance.now();
+  if (now - STATE.lastTouchMs <= TOUCH_DEBOUNCE_MS) return;
+  STATE.lastTouchMs = now;
+  const catMode = STATE.currentPage === GIF_PAGE || STATE.currentPage === MIXED_PAGE || !STATE.haveData;
+
+  if (STATE.settingsScreen === 'leaf') {
+    const def = SETTINGS[STATE.settingsLeafIndex];
+    if (tx >= SET_BACK_X0 && tx < SET_BACK_X1 && ty >= SET_BACK_Y0 && ty < SET_BACK_Y1) {
+      STATE.confirmArmedRow = -1;
+      STATE.settingsScreen = 'list';
+      return;
+    }
+    for (let i = 0; i < def.count; i++) {
+      const { x, y, w } = leafButtonRect(def, i);
+      if (tx >= x && tx < x + w && ty >= y && ty < y + SET_BTN_H) {
+        if (def.destructive) {
+          const armed = STATE.confirmArmedRow === STATE.settingsLeafIndex && now - STATE.confirmArmedMs < CONFIRM_ARM_MS;
+          if (armed) { STATE.confirmArmedRow = -1; def.apply(def.values[i]); }
+          else { STATE.confirmArmedRow = STATE.settingsLeafIndex; STATE.confirmArmedMs = now; }
+        } else {
+          def.apply(def.values[i]);
+        }
+        break;
+      }
+    }
+    return;
+  }
+  if (STATE.weatherPageOpen) { STATE.weatherPageOpen = false; return; }
+  if (STATE.devicePageOpen) { STATE.devicePageOpen = false; return; }
+  if (!catMode && tx >= SETTINGS_HIT_X0 && tx < SETTINGS_HIT_X1 && ty >= SETTINGS_HIT_Y0 && ty < SETTINGS_HIT_Y1) {
+    STATE.settingsScreen = 'list';
+    STATE.settingsScrollOffset = 0;
+    return;
+  }
+  if (!catMode && STATE.currentPage === 0 && tx >= WEATHER_HIT_X0 && tx < WEATHER_HIT_X1 &&
+      ty >= WEATHER_HIT_Y0 && ty < WEATHER_HIT_Y1) {
+    STATE.weatherPageOpen = true;
+    return;
+  }
+  if (!catMode && tx >= DEVICE_HIT_X0 && tx < DEVICE_HIT_X1 && ty >= DEVICE_HIT_Y0 && ty < DEVICE_HIT_Y1) {
+    STATE.devicePageOpen = true;
+    return;
+  }
+  if (STATE.catShuffleSec < 0 && (STATE.currentPage === GIF_PAGE || STATE.currentPage === MIXED_PAGE) &&
+      tx >= CAT_ADVANCE_X0 && tx < CAT_ADVANCE_X1) {
+    console.log('[sim] Cat Shuffle FIXED: middle-third tap advances the cat on the device (page unchanged).');
+    return;
+  }
+  const forward = tx >= SWIPE_SPLIT_X;
+  goToPage(forward ? (STATE.currentPage + 1) % PAGE_COUNT : (STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, forward);
+}
+
+canvas.addEventListener('pointerdown', (event) => {
+  const [tx, ty] = screenXY(event);
+  if (STATE.settingsScreen === 'list') {
+    if (performance.now() - STATE.lastTouchMs <= TOUCH_DEBOUNCE_MS) return;
+    STATE.lastTouchMs = performance.now();
+    dragActive = true;
+    dragLastX = tx; dragLastY = ty; dragTotalMoveY = 0;
+    canvas.setPointerCapture(event.pointerId);
+    return;
+  }
+  handleTap(tx, ty);
+  render();
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (!dragActive) return;
+  const [tx, ty] = screenXY(event);
+  const dy = ty - dragLastY;
+  dragLastX = tx; dragLastY = ty;
+  if (dy === 0) return;
+  dragTotalMoveY += Math.abs(dy);
+  STATE.settingsScrollOffset = Math.max(0, Math.min(SETTINGS_SCROLL_MAX, STATE.settingsScrollOffset - dy));
+});
+canvas.addEventListener('pointerup', () => {
+  if (!dragActive) return;
+  dragActive = false;
+  settingsListDragEnd();
+  render();
+});
+// Keyboard: the same single-key commands the firmware takes over serial.
+canvas.addEventListener('keydown', (event) => {
+  const k = event.key;
+  if (k === 'n' || k === 'ArrowRight') goToPage((STATE.currentPage + 1) % PAGE_COUNT, true);
+  else if (k === 'p' || k === 'ArrowLeft') goToPage((STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, false);
+  else if (k === 'w') { STATE.weatherPageOpen = true; STATE.devicePageOpen = false; }
+  else if (k === 'd') { STATE.devicePageOpen = true; STATE.weatherPageOpen = false; }
+  else if (k === 's') { STATE.settingsScreen = 'list'; STATE.settingsScrollOffset = 0; }
+  else if (k === 'x' || k === 'Escape') { STATE.settingsScreen = 'off'; STATE.weatherPageOpen = STATE.devicePageOpen = false; }
+  else return;
+  event.preventDefault();
+  render();
+});
+
+document.getElementById('poll-now').addEventListener('click', fetchUsage);
+document.getElementById('poll-interval').addEventListener('change', restartPollTimer);
+document.getElementById('sim-offline').addEventListener('change', fetchUsage);
+document.getElementById('mock-data').addEventListener('change', fetchUsage);
+document.getElementById('sim-sd-missing').addEventListener('change', render);
+document.getElementById('force-hourly-flash').addEventListener('change', render);
+
+// ~30fps, the firmware's LOOP_PERIOD_MS: the shine sweep, progress line and
+// slide all move at the board's cadence. CPU% is this tab's draw duty cycle.
+function tick() {
+  const start = performance.now();
+  render();
+  checkNightMode();
+  const busyMs = performance.now() - start;
+  STATE.cpuPercentAvg = STATE.cpuPercentAvg * 0.9 + (busyMs / 33 * 100) * 0.1;
+}
+
+if (!window.S3_FONTS) {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<p style="color:var(--warn)">sim/fonts.js missing -- run python3 tools/make_vlw.py</p>');
+} else {
+  loadWeatherCache();
+  loadSettings();
+  applyEffectiveBrightnessFilter();
+  render();
+  fetchUsage();
+  restartPollTimer();
+  setInterval(tick, 33);
+}
+</script>
+</body>
+</html>

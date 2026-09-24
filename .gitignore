@@ -1,0 +1,14 @@
+# Seller package, factory backup, city list (~1.1GB) — kept locally, never tracked
+docs/
+# Generated cat GIF library (regenerate with ~/cyd/prepare_cat_gifs.py --width 480 --height 320)
+cats/
+cats_raw/
+# Local WiFi/server config (copy src/config.example.h)
+src/config.h
+# Build output + tooling cruft
+.pio/
+.vscode/
+__pycache__/
+*.pyc
+.DS_Store
+shots/
