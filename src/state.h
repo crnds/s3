@@ -140,6 +140,7 @@ const int STRIP_HIT_Y0 = TOK_LAYOUT_CONTENT_Y1;                           // 280
 const int HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;                          // -> Device Stats
 const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;              // -> Settings
 const int STRIP_CY = 303;                                                 // glyph centre line
+const int STRIP_CAPTION_Y = 295;                                          // caption text top (design.md 11.12)
 
 // Media control (design.md 11.20): a shuffle icon button, only while Cat
 // Shuffle is Fixed, bottom-right of the media area, 8px in from its edges.

@@ -1183,12 +1183,12 @@ excluded on purpose are listed in §11.23.
   | Zone | Contents | Target |
   |---|---|---|
   | **Health cluster** (glyphs x 8..39) | Status dot (x 8..15), then 8 px, then the Wi-Fi glyph (x 24..39) | Hit x 0..55, y 280..319 (56 × 40) → opens **Device Stats**. Pressed state: a `fill.pressed` pill behind both glyphs. |
+  | **CPU** (x 47) | `type.caption`: "CPU" in `text.secondary`, then the render-loop duty-cycle percentage in `text.primary` (e.g. "CPU10%") -- no space, no bracket | none |
   | **Centre** | Page indicator | none |
   | **Settings** (x 452, centred) | Gear glyph | Hit x 424..479, y 280..319 (56 × 40) → opens **Settings** |
 
 - **Vertical:** glyph centres at y 303. Any caption text in the strip uses top y 295.
-- **Removed:** the CPU/ROM/RAM readout. It is developer telemetry on every page, it is already in
-  Device Stats, and as a target it is invisible (§15.1).
+- **ROM/RAM stay out** of the strip; both remain developer telemetry available in Device Stats.
 - **Pinned during the carousel slide.** "Persistent" means visually static: the strip
   (and the hairline under it) stays put while the page above it slides horizontally,
   rather than sliding off with the outgoing page and back in with the incoming one.

@@ -377,6 +377,7 @@ const STRIP_HIT_Y0 = TOK_LAYOUT_CONTENT_Y1;
 const HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;
 const SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
 const STRIP_CY = 303;
+const STRIP_CAPTION_Y = 295;
 const SHUFFLE_DISC_R = 16, SHUFFLE_HIT = 48;
 const SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W, SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
 const MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
@@ -922,6 +923,7 @@ function drawModalHeader(back, title, pressed) {
 // ── STATUS STRIP ──────────────────────────────────────────────
 const PROGRESS_Y = SCREEN_H - 1, DOT_CX = 12, WIFI_X0 = 24, GEAR_CX = 452;
 const DOTS_W = PAGE_COUNT * 6 + (PAGE_COUNT - 1) * 6;
+const CPU_X = 47;  // just past the Wi-Fi glyph (x 24..39) + an 8px gap
 function drawStatusDot(r) {
   const bg = NAV.pressedId === 'health' ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS;
   if (STATE.connected) {
@@ -956,6 +958,9 @@ function drawStatusStrip() {
   if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 12, 48, 24, 12, TOK_COLOR_FILL_PRESSED);
   drawStatusDot(4);
   drawWifiGlyph();
+  const cpuInt = Math.round(STATE.cpuPercentAvg);
+  const cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, 'CPU', TOK_COLOR_TEXT_SECONDARY);
+  drawText(TOK_TYPE_CAPTION, cpuTx, STRIP_CAPTION_Y, cpuInt + '%', TOK_COLOR_TEXT_PRIMARY);
   let x = TOK_LAYOUT_HALF_SPLIT_X - DOTS_W / 2;
   for (let i = 0; i < PAGE_COUNT; i++, x += 12)
     gfx.fillSmoothRoundRect(x, STRIP_CY - 3, 6, 6, 3, i === STATE.currentPage ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_FILL_TRACK);

@@ -267,6 +267,7 @@ static const int PROGRESS_Y = SCREEN_H - 1;
 static const int DOT_CX = 12, WIFI_X0 = 24;
 static const int DOTS_W = PAGE_COUNT * 6 + (PAGE_COUNT - 1) * 6;
 static const int GEAR_CX = 452;
+static const int CPU_X = 47;  // just past the Wi-Fi glyph (x 24..39) + an 8px gap
 
 // Status dot: server OK = success, filled; unreachable = warning ring;
 // unknown / booting = tertiary ring. `r` is the pulse radius (4, or 5 for a
@@ -316,6 +317,12 @@ static void drawStatusStrip() {
     aaFillRoundRect(DOT_CX - 8, STRIP_CY - 12, 48, 24, 12, TOK_COLOR_FILL_PRESSED);
   drawStatusDot(4);
   drawWifiGlyph();
+
+  // CPU usage: render-loop duty cycle, "CPU" in text.secondary, the number in
+  // text.primary, no separating space or bracket.
+  int cpuInt = (int)(cpuPercentAvg + 0.5f);
+  int cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, "CPU", TOK_COLOR_TEXT_SECONDARY);
+  drawText(TOK_TYPE_CAPTION, cpuTx, STRIP_CAPTION_Y, String(cpuInt) + "%", TOK_COLOR_TEXT_PRIMARY);
 
   // Page indicator: 6 dots, 6px across with 6px gaps, centred at x 240.
   int x = TOK_LAYOUT_HALF_SPLIT_X - DOTS_W / 2;
