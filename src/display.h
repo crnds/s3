@@ -20,6 +20,9 @@ void displaySetBrightness(uint8_t level);
 // Panel-side colour inversion (INVON/INVOFF) -- the hourly flash. Cheap: one
 // command, applied between frames by displayPresent().
 void displaySetInvert(bool on);
+// Screen sleep: true = DISPOFF + SLPIN (panel GRAM is kept), false = SLPOUT
+// + DISPON. Blocks ~120ms on wake. The backlight is the caller's job.
+void displaySetSleep(bool sleep);
 // false = 90deg software rotation (the seller demo's default orientation),
 // true = 270deg (the Settings "FLIPPED" option). Also read by touch_axs.cpp.
 void displaySetFlipped(bool flipped);

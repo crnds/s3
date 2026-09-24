@@ -169,10 +169,20 @@ const int SETTINGS_HIT_Y0 = FOOTER_Y0, SETTINGS_HIT_Y1 = SCREEN_H;
 // then). Don't widen this band back over the split.
 const int CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;
 
-// Battery Save top-right corner overlay: drawBatterySaveIcon()'s backing box
-// (pages.cpp). Page content that must never be covered by it (the note pane's
-// first text row) starts below BATTERY_ICON_Y1.
-const int BATTERY_ICON_X0 = 444;
+// Screen-sleep pill (drawSleepButton() in pages.cpp), top-right corner of
+// every screen -- pages, overlays, cats, settings. Anything else that wants
+// that corner sits to its left (Battery Save icon below, the Weather AQI
+// badge, the Settings list title). The hit box is deliberately bigger than
+// the pill; tapping it is checked before every other touch target.
+const int SLEEP_BTN_X0 = 432, SLEEP_BTN_Y0 = 8, SLEEP_BTN_W = 40, SLEEP_BTN_H = 9;  // centred on the battery icon's row
+const int SLEEP_HIT_X0 = 416, SLEEP_HIT_X1 = SCREEN_W;
+const int SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = 36;
+
+// Battery Save top-right overlay, just left of the sleep pill:
+// drawBatterySaveIcon()'s backing box (pages.cpp), x X0..X1 inclusive. Page
+// content that must never be covered by it or the pill (the note pane's first
+// text row) starts below both.
+const int BATTERY_ICON_X0 = 400, BATTERY_ICON_X1 = 428;
 const int BATTERY_ICON_Y0 = 3, BATTERY_ICON_Y1 = 21;
 
 // Weather forecast slots delivered by /api/usage (Mac-proxied Open-Meteo)
@@ -279,6 +289,10 @@ extern int confirmArmedRow;
 // STATE.haveData above.
 extern volatile uint32_t lastPollMs;
 extern uint32_t lastTouchMs;
+// Screen sleep (main.cpp enterScreenSleep/exitScreenSleep): backlight 0,
+// panel off, CPU 80MHz, WiFi modem sleep, polls floored like Battery Save.
+// Read by applyEffectivePoll() on networkTask's core -- volatile.
+extern volatile bool screenSleeping;
 
 // ── PIXEL SHIFT (anti image-retention) ─────────────────────
 const int8_t SHIFT_ORBIT[8][2] = {
@@ -483,6 +497,7 @@ void drawMixedPageStatic();
 const int MIXED_GIF_X0 = 240, MIXED_GIF_W = 240;
 const int MIXED_GIF_Y0 = 3, MIXED_GIF_H = CONTENT_Y1 - 3;
 void drawBatterySaveIcon();
+void drawSleepButton();
 
 // ── GIF PLAYER (gif_player.cpp) ─────────────────────────────
 void scanCats();

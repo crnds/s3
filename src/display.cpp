@@ -9,6 +9,7 @@
 #include <driver/ledc.h>
 #include <driver/spi_master.h>
 #include <esp_heap_caps.h>
+#include <esp_lcd_panel_commands.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <freertos/FreeRTOS.h>
@@ -133,6 +134,27 @@ bool displayBegin() {
   gpio_install_isr_service(0);  // harmless if Arduino already installed it
   gpio_isr_handler_add((gpio_num_t)S3_LCD_TE, onTeEdge, nullptr);
   return true;
+}
+
+// Bare panel command, QSPI-encoded the way the vendored driver's tx_param()
+// does it (opcode 0x02 in the top byte, command in bits 8..15). tx_param
+// drains any strip DMA still queued before it sends.
+static void panelCommand(uint8_t cmd) {
+  esp_lcd_panel_io_tx_param(ioHandle, (0x02 << 24) | ((int)cmd << 8), nullptr, 0);
+}
+
+void displaySetSleep(bool sleep) {
+  if (!panelHandle) return;
+  if (sleep) {
+    // The driver's hook names its argument `off`: true = DISPOFF.
+    esp_lcd_panel_disp_on_off(panelHandle, true);
+    panelCommand(LCD_CMD_SLPIN);
+    delay(5);
+  } else {
+    panelCommand(LCD_CMD_SLPOUT);
+    delay(120);  // SLPOUT settle before the next command (MIPI DCS)
+    esp_lcd_panel_disp_on_off(panelHandle, false);
+  }
 }
 
 void displaySetInvert(bool on) { invertWanted = on; }

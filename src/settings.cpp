@@ -44,8 +44,13 @@ void queueConfigSave(uint8_t keyId, int32_t value) {
 }
 
 // Live backlight from user preference + night-mode overlay only.
-// Battery Save never touches brightness.
+// Battery Save never touches brightness. Screen sleep pins it at 0 so a
+// night-mode edge (or any other caller) can't light a sleeping panel.
 void applyEffectiveBrightness() {
+  if (screenSleeping) {
+    displaySetBrightness(0);
+    return;
+  }
   if (nightDimActive) {
     displaySetBrightness(NIGHT_MODE_DIM_VALUE);
     return;
@@ -54,13 +59,13 @@ void applyEffectiveBrightness() {
 }
 
 // Live poll cadence: user's Poll Interval, floored to 2 min while Battery
-// Save is active (Settings ON, or AUTO + Mac power.battery_save). networkTask
-// only reads POLL_INTERVAL_MS.
+// Save is active (Settings ON, or AUTO + Mac power.battery_save) or the
+// screen is asleep. networkTask only reads POLL_INTERVAL_MS.
 void applyEffectivePoll() {
   uint32_t sec = cfgPollIntervalSec;
   if (sec < 5) sec = 5;
   if (sec > 3600) sec = 3600;
-  if (batterySaveActive() && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
+  if ((batterySaveActive() || screenSleeping) && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
   POLL_INTERVAL_MS = sec * 1000;
 }
 
@@ -309,7 +314,7 @@ static void drawSettingsList() {
   // Close box: an "X" drawn as two wide strokes (crisper than a glyph).
   g->drawWideLine(20, 16, 36, 32, 2.0f, COL_ACCENT);
   g->drawWideLine(36, 16, 20, 32, 2.0f, COL_ACCENT);
-  drawTextR(FONT_SMB, SCREEN_W - 15, 16, "SETTINGS", COL_ACCENT);
+  drawTextR(FONT_SMB, SLEEP_BTN_X0 - 12, 16, "SETTINGS", COL_ACCENT);  // left of the sleep pill
 
   g->setClipRect(0, SETTINGS_VIEWPORT_Y0, SCREEN_W, SETTINGS_VIEWPORT_H);
   for (int idx = 0; idx < SETTINGS_COUNT; idx++) {
@@ -377,6 +382,7 @@ void renderSettings() {
   // Neither screen touches STATE, so no stateMutex needed here.
   if (settingsScreen == SET_LEAF) drawSettingsLeaf();
   else drawSettingsList();
+  drawSleepButton();
   presentFrame();
 }
 

@@ -191,17 +191,25 @@ bool progressTick(uint32_t nowMs) {
   return true;
 }
 
-// Small top-right corner overlay shown on every page whenever Battery Save is
-// *active* (Settings ON, or AUTO + Mac power.battery_save). No-ops when
-// inactive. A solid backing box keeps it legible over cat frames.
+// Small top-right overlay (left of the sleep pill) shown on every page
+// whenever Battery Save is *active* (Settings ON, or AUTO + Mac
+// power.battery_save). No-ops when inactive. A solid backing box keeps it
+// legible over cat frames.
 void drawBatterySaveIcon() {
   if (!batterySaveActive()) return;
-  const int boxW = SCREEN_W - 3 - BATTERY_ICON_X0, boxH = BATTERY_ICON_Y1 - BATTERY_ICON_Y0 + 1;
+  const int boxW = BATTERY_ICON_X1 - BATTERY_ICON_X0 + 1, boxH = BATTERY_ICON_Y1 - BATTERY_ICON_Y0 + 1;
   g->fillRect(BATTERY_ICON_X0, BATTERY_ICON_Y0, boxW, boxH, COL_BG);
-  const int bodyX = 450, bodyY = 7, bodyW = 19, bodyH = 11;
+  const int bodyX = BATTERY_ICON_X0 + 4, bodyY = 7, bodyW = 19, bodyH = 11;
   const int nubW = 3, nubH = 5;
   g->fillRoundRect(bodyX, bodyY, bodyW, bodyH, 2, COL_YELLOW);
   g->fillRect(bodyX + bodyW, bodyY + (bodyH - nubH) / 2, nubW, nubH, COL_YELLOW);
+}
+
+// Screen-sleep pill, top-right corner of every screen (always drawn, last,
+// over whatever the page put there): a plain solid grey pill, no stroke or
+// icon. Tap -> enterScreenSleep() (main.cpp).
+void drawSleepButton() {
+  g->fillRoundRect(SLEEP_BTN_X0, SLEEP_BTN_Y0, SLEEP_BTN_W, SLEEP_BTN_H, SLEEP_BTN_H / 2, COL_TRACK);
 }
 
 // ── DRAWING HELPERS ────────────────────────────────────────
@@ -522,6 +530,22 @@ static void drawLimitHalf(int topY, const char* label, int percent, bool ahead, 
   if (inText.length()) drawText(FONT_MD, 16, resetsY + 23, inText, COL_TEXT);
 }
 
+// Week reset label for the shared limits card: the server's "Oct 1, 04:59"
+// with the month/day swapped for the weekday name (e.g. "Thu, 04:59"),
+// computed locally from the live countdown so it never depends on the
+// server's clock. Falls back to the server string verbatim when the
+// countdown or the comma (time-of-day suffix) is missing.
+static String weekResetWeekdayLabel(long weekRem, const char* resets) {
+  if (resets[0] == '\0') return String(resets);
+  const char* comma = strchr(resets, ',');
+  if (weekRem < 0 || !comma) return String(resets);
+  time_t resetT = time(nullptr) + weekRem;
+  struct tm ti;
+  localtime_r(&resetT, &ti);
+  if (ti.tm_wday < 0 || ti.tm_wday > 6) return String(resets);
+  return String(WDAY_ABBR[ti.tm_wday]) + comma;
+}
+
 // Left column of the status / mixed / note pages: two cards (5h, week).
 static void drawLimitsCard() {
   drawCard(LEFT_X, 3, LEFT_W, 132);
@@ -529,6 +553,7 @@ static void drawLimitsCard() {
 
   long sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
   long weekRem = liveResetsInSec(STATE.weekResetsInSec);
+  String weekResetLabel = weekResetWeekdayLabel(weekRem, STATE.weekResets);
 
   // QUOTA PACING: "% of the window elapsed" (also the green countdown bar)
   // vs actual usage -- a flag is earned only by running ahead of pace.
@@ -545,7 +570,7 @@ static void drawLimitsCard() {
                 sessionPace, 0, STATE.sessionResets,
                 sessionRem >= 0 ? "in " + fmtCountdown(sessionRem) : String(""), FONT_MD);
   drawLimitHalf(137, "WK", STATE.weekPercent, weekAhead, weekElapsed, weekRem,
-                weekPace, 1, STATE.weekResets,
+                weekPace, 1, weekResetLabel.c_str(),
                 weekRem >= 0 ? "in " + fmtCountdownDHM(weekRem) : String(""), FONT_MD);
 }
 
@@ -564,8 +589,9 @@ static const int NOTE_Y = 3;
 static const int NOTE_W = RIGHT_W;
 static const int NOTE_H = CONTENT_Y1 - 3;
 static const int NOTE_TX = NOTE_X + 9;  // 250, first glyph column
-// First text row sits below BATTERY_ICON_Y1: drawBatterySaveIcon() punches a
-// COL_BG box into the top-right corner on *every* page after the content, so
+// First text row sits below BATTERY_ICON_Y1 and the sleep pill's bottom
+// (SLEEP_BTN_Y0 + SLEEP_BTN_H): drawBatterySaveIcon() and drawSleepButton()
+// punch COL_BG boxes into the top-right corner on *every* page after the content, so
 // text starting higher would lose the end of its first line whenever Battery
 // Save is on. The band that buys holds the "NOTE" label.
 static const int NOTE_TY = 26;
@@ -1002,7 +1028,7 @@ static void drawDevicePage() {
 // Full 480x320, no footer; any tap dismisses. Twin of simulator-s3.html.
 static void drawWeatherPage() {
   g->fillScreen(COL_BG);
-  const int CARD_X = 15, CARD_W = 450, heroRight = CARD_X + CARD_W - 12;
+  const int CARD_X = 15, CARD_W = 450;
 
   // ── Hero card (15, 5, 450, 72) ───────────────────────────
   drawCard(CARD_X, 5, CARD_W, 72);
@@ -1023,11 +1049,14 @@ static void drawWeatherPage() {
     metaX = x + 20;
   }
 
-  // AQI badge pinned to the hero card's top-right corner; the condition text
-  // truncates around it.
+  // AQI badge at the hero card's top-right, left of the corner overlays (the
+  // sleep pill, and the Battery Save icon's box -- reserved even when that
+  // icon is hidden, so the badge never jumps); the condition text truncates
+  // around it.
   bool haveAqi = cfgShowAqi && STATE.aqi >= 0;
   int badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
-  const int metaMaxX = heroRight - (haveAqi ? badgeW + 10 : 0);
+  const int badgeX = BATTERY_ICON_X0 - 8 - badgeW;
+  const int metaMaxX = (haveAqi ? badgeX : BATTERY_ICON_X0) - 10;
 
   {
     const char* cond = STATE.weatherCondition[0] ? STATE.weatherCondition : "--";
@@ -1058,7 +1087,7 @@ static void drawWeatherPage() {
     drawText(FONT_MD, x, 43, lStr, COL_TEXT);
   }
 
-  if (haveAqi) drawAqiBadge(heroRight - badgeW, 12, STATE.aqi);
+  if (haveAqi) drawAqiBadge(badgeX, 12, STATE.aqi);
 
   // ── Hourly (next 6) (15, 81, 450, 78) ────────────────────
   drawCard(CARD_X, 81, CARD_W, 78);
@@ -1162,10 +1191,12 @@ void render() {
   if (weatherPageOpen) {
     drawWeatherPage();
     drawBatterySaveIcon();
+    drawSleepButton();
   } else if (devicePageOpen) {
     g->fillScreen(COL_BG);
     drawDevicePage();
     drawBatterySaveIcon();
+    drawSleepButton();
   } else {
     g->fillScreen(COL_BG);
     switch (currentPage) {
@@ -1176,6 +1207,7 @@ void render() {
     }
     drawFooter();
     drawBatterySaveIcon();
+    drawSleepButton();
   }
   unlockState();
   uint32_t drawUs = micros() - startUs;

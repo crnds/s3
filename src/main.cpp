@@ -40,6 +40,7 @@ uint32_t confirmArmedMs = 0;
 int confirmArmedRow = -1;
 volatile uint32_t lastPollMs = 0;
 uint32_t lastTouchMs = 0;
+volatile bool screenSleeping = false;
 
 // ── PIXEL SHIFT (anti image-retention) ─────────────────────
 // Applied at present time by display.cpp, so a step needs only a re-present,
@@ -251,6 +252,47 @@ static void goToPage(int newPage, bool forward) {
 // screenshotted without touching the board (tools/grab_screen.py):
 //   n / p   next / previous page        w / d / s   Weather / Device / Settings
 //   x       close any overlay           g           grab: raw frame dump
+// ── SCREEN SLEEP ───────────────────────────────────────────
+// Tap the top-right pill (drawSleepButton) -> backlight 0, panel DISPOFF +
+// SLPIN, CPU down to 80MHz (lowest WiFi-safe clock; APB stays 80MHz so LEDC,
+// SPI and I2C are unaffected), WiFi modem sleep, polls floored to the Battery
+// Save cadence. loop() then only watches touch; the next press anywhere wakes
+// and is swallowed. Nothing is presented while asleep, so the frame (and an
+// open GIF's canvas) is exactly as it was on wake.
+static const uint32_t SLEEP_WAKE_GUARD_MS = 600;  // ignore the tap that put it to sleep
+static const uint32_t SLEEP_LOOP_MS = 50;
+static uint32_t sleepStartMs = 0;
+static uint32_t cpuMhzBeforeSleep = 240;
+
+static void enterScreenSleep() {
+  if (screenSleeping) return;
+  screenSleeping = true;
+  sleepStartMs = millis();
+  displaySetBrightness(0);
+  displaySetSleep(true);
+  cpuMhzBeforeSleep = getCpuFrequencyMhz();
+  setCpuFrequencyMhz(80);
+  WiFi.setSleep(true);
+  applyEffectivePoll();
+  Serial.printf("[sleep] enter (cpu %lu MHz, poll %lus)\n", (unsigned long)getCpuFrequencyMhz(),
+                (unsigned long)(POLL_INTERVAL_MS / 1000));
+}
+
+static void exitScreenSleep() {
+  if (!screenSleeping) return;
+  setCpuFrequencyMhz(cpuMhzBeforeSleep);
+  WiFi.setSleep(false);
+  screenSleeping = false;
+  applyEffectivePoll();
+  displaySetSleep(false);
+  bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE) || !STATE.haveData;
+  if (settingsScreen != SET_OFF) renderSettings();
+  else if (catMode && !weatherPageOpen && !devicePageOpen) presentFrame();
+  else render();
+  applyEffectiveBrightness();
+  Serial.printf("[sleep] exit after %lus\n", (unsigned long)((millis() - sleepStartMs) / 1000));
+}
+
 static void serialCommand(char c) {
   switch (c) {
     case 'n': case 'p':
@@ -263,6 +305,10 @@ static void serialCommand(char c) {
     case 'x':
       settingsScreen = SET_OFF; weatherPageOpen = devicePageOpen = false;
       render();
+      break;
+    case 'z':
+      if (screenSleeping) exitScreenSleep();
+      else enterScreenSleep();
       break;
     case 'g': {
       // Header line, raw 480x320 big-endian RGB565 (the sprite's own bytes),
@@ -368,6 +414,22 @@ void loop() {
 
   while (Serial.available()) serialCommand((char)Serial.read());
 
+  if (screenSleeping) {
+    // Asleep: no drawing, no presents, no GIF decode -- just watch for a
+    // press. The waking press is swallowed (touchWasDown stays true until it
+    // lifts), so it never navigates.
+    int32_t sx = 0, sy = 0;
+    bool down = touchRead(sx, sy);
+    if (down && !touchWasDown && now - sleepStartMs > SLEEP_WAKE_GUARD_MS) {
+      Serial.printf("[touch] wake x=%ld y=%ld\n", (long)sx, (long)sy);
+      lastTouchMs = now;
+      exitScreenSleep();
+    }
+    touchWasDown = down;
+    delay(SLEEP_LOOP_MS);
+    return;
+  }
+
   // Cats own the screen on the cat pages, AND whenever offline.
   bool offline = !STATE.haveData;
   bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE) || offline;
@@ -440,7 +502,11 @@ void loop() {
   if (touchDown && !touchWasDown && now - lastTouchMs > TOUCH_DEBOUNCE_MS) {
     lastTouchMs = now;
 
-    if (settingsScreen == SET_LEAF) {
+    if (tx >= SLEEP_HIT_X0 && tx < SLEEP_HIT_X1 && ty >= SLEEP_HIT_Y0 && ty < SLEEP_HIT_Y1) {
+      // Sleep pill: checked first -- it sits over every screen, settings and
+      // overlays included.
+      enterScreenSleep();
+    } else if (settingsScreen == SET_LEAF) {
       handleSettingsTouch(tx, ty, now, catMode);
     } else if (settingsScreen == SET_LIST) {
       settingsListDragBegin(tx, ty);  // resolved as a tap or a scroll on release, below

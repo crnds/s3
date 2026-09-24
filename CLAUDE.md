@@ -72,8 +72,16 @@ python3 tools/grab_screen.py "x 1 g:status n 1 g:projects w 1 g:weather x"
 python3 tools/make_vlw.py                # regenerate fonts (firmware + sim) after editing FONTS
 ```
 
+`grab_screen.py` must run under the **system `python3`** (it has pyserial +
+Pillow; PlatformIO's venv has no Pillow), and it can't open the port while
+`pio device monitor` holds it. In its command string a bare number is a
+pause in seconds, and `g:name` writes `shots/<name>.png`. A grab is a single
+frame, so it can't show a one-frame glitch (flash, tear): those need eyes on
+the panel.
+
 Serial debug keys (main.cpp `serialCommand`): `n`/`p` next/prev page,
-`w`/`d`/`s` Weather/Device/Settings, `x` close overlays, `g` dump the frame
+`w`/`d`/`s` Weather/Device/Settings, `x` close overlays, `z` toggle screen
+sleep, `g` dump the frame
 (`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`). The simulator
 canvas takes the same keys (plus arrows/Esc) when focused.
 
@@ -85,6 +93,8 @@ The `#screen` box is 486×326 = 480×320 canvas + 3px border; crop 3px to
 compare against a board grab pixel-for-pixel.
 
 A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
+Git is local only (no remote). `docs/`, `cats/`, `shots/` and `config.h`
+are gitignored.
 
 ## Toolchain facts (verified)
 
@@ -96,6 +106,12 @@ A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
   Build is ~1.55MB (24% of the app slot); ~200KB of it is fonts.
 - Native USB Serial/JTAG — uploads at 921600 are reliable here (unlike the
   CYD's CH340, which needed 115200). If the port vanishes: hold BOOT, tap RST.
+- A first `pio run` can die in pioarduino's package postinstall
+  (`FileNotFoundError: package-postinstall.py`); re-running it succeeds.
+- `lib/axs15231b/esp_lcd_axs15231b.h` includes `esp_lcd_panel_io.h` instead
+  of the seller's `hal/spi_ll.h`: the latter clashes with C++ linkage
+  (`conflicting declaration of C function`). Keep that if you re-vendor the
+  driver.
 - Factory image backup: `docs/backups-factory-firmware/` (see spec for restore).
 
 ## Firmware internals
@@ -139,6 +155,11 @@ A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
   right under the downscale and the overlays. Frame delays are honoured
   as-is (no 12fps ceiling). A layout flip under an open GIF (going
   offline/online on the mixed page) reopens it for the new layout.
+  **Never present between a close and the next decoded frame.** Opening
+  clears the canvas/pane to black, so a reopen (loop end, next cat, layout
+  flip) is deferred via `nextOpenIsLoop` and done in the same `gifTick()` as
+  the first frame's decode. The last frame is held for its own delay first.
+  Presenting in between is the one-frame black flash users see at a loop.
 - **Fonts (`fonts.cpp`):** VLW preloaded once into `lgfx::VLWfont` objects;
   `drawText/drawTextR/drawTextC(FontId, …)` are the only text API — no
   `setTextSize`/`print` built-in font anywhere. ASCII only (server
@@ -151,6 +172,20 @@ A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
   the CYD minus touch calibration; no `/config.json` migration.
 - **Offline threshold / WiFi self-reboot are wall-clock** (60s / 15 min),
   never poll-cycle counts — see `~/cyd/CLAUDE.md` for the flap this fixed.
+- **Screen sleep (`enterScreenSleep`/`exitScreenSleep`, main.cpp):** the
+  solid grey pill (`drawSleepButton`, `SLEEP_BTN_*`/`SLEEP_HIT_*` in state.h) is
+  drawn last on every screen, and its hit box is checked before every other
+  touch target. Anything else in the top-right sits to its left: the Battery
+  Save icon, the Weather AQI badge, the Settings title. Sleeping sets the
+  backlight to 0, sends panel DISPOFF + SLPIN (`displaySetSleep`), drops the
+  CPU to 80MHz, turns on WiFi modem sleep, and floors polls to
+  `BATTERY_SAVE_POLL_SEC`. `loop()` then only reads touch every 50ms. The
+  next press anywhere wakes the screen (after a 600ms guard) and is
+  swallowed. Nothing is presented while asleep, so the frame and any GIF
+  canvas are intact on wake. `applyEffectiveBrightness()` holds 0 while
+  asleep. Touch shares the AXS15231B with the panel but keeps reporting under
+  DISPOFF + SLPIN (verified on the board), which is what makes tap-to-wake
+  possible.
 - Device Stats reports internal SRAM and PSRAM separately (the S3's two
   pools) instead of the CYD's single DRAM constant; CPU% is the render
   loop's duty cycle with TE-wait time subtracted.

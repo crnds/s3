@@ -247,6 +247,7 @@ static bool drawGifPlaceholder(bool offline) {
   }
   if (currentPage == GIF_PAGE && !offline) drawSessionResetOverlay();
   drawBatterySaveIcon();
+  drawSleepButton();
   return true;
 }
 
@@ -346,6 +347,7 @@ bool gifTick(bool offline) {
 
   if (currentPage == GIF_PAGE && !offline) drawSessionResetOverlay();
   drawBatterySaveIcon();
+  drawSleepButton();
 
   // Rotate to a new random cat at the GIF's natural end, or early when the
   // Cat Shuffle interval says this one has played long enough. FIXED
