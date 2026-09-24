@@ -299,6 +299,14 @@ static int progressLineW() {
   if (elapsed > POLL_INTERVAL_MS) elapsed = POLL_INTERVAL_MS;
   return (int)((float)elapsed / POLL_INTERVAL_MS * SCREEN_W);
 }
+// How long one physical pixel of fill takes to appear at the current poll
+// interval, floored at TOK_MOTION_PROGRESS_FLOOR_MS: the finest step the
+// hairline can show is 1 px, so presenting any more often than that wastes a
+// present, and any less often is a visible jump.
+static uint32_t progressStepMs() {
+  uint32_t px = POLL_INTERVAL_MS / SCREEN_W;
+  return px > TOK_MOTION_PROGRESS_FLOOR_MS ? px : TOK_MOTION_PROGRESS_FLOOR_MS;
+}
 static int progressDrawnW = 0;  // how much of the hairline is currently in `frame`
 static uint32_t progressLastMs = 0;
 
@@ -330,12 +338,14 @@ static void drawStatusStrip() {
   progressDrawnW = w;
 }
 
-// Between-render top-up of the hairline, capped at motion.progress.maxHz
-// (4 Hz): at a 20s poll it would otherwise present ~24 times a second for a
-// single line. Only on pages with a strip (loop() gates it).
+// Between-render top-up of the hairline: re-presents every time the fill
+// would grow by 1 physical pixel (progressStepMs), the finest step it can
+// show, floored at motion.progress.maxHz (~30, design.md 12.7) so a short
+// poll interval can't out-pace the render loop. Only on pages with a strip
+// (loop() gates it).
 bool progressTick(uint32_t nowMs) {
   if (!cfgShowProgress || !connected) return false;
-  if (nowMs - progressLastMs < TOK_MOTION_PROGRESS_MIN_MS) return false;
+  if (nowMs - progressLastMs < progressStepMs()) return false;
   progressLastMs = nowMs;
   int w = progressLineW();
   if (w < progressDrawnW) {  // new poll cycle: clear and restart

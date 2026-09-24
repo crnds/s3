@@ -357,7 +357,7 @@ const TOK_TOGGLE_W = 52, TOK_TOGGLE_H = 28, TOK_TOAST_H = 36, TOK_PRESSED_DISC_R
 
 const TOK_MOTION_SPRING_STANDARD = [100, 250], TOK_MOTION_SPRING_SHEET = [100, 300], TOK_MOTION_SPRING_FLICK = [80, 300];
 const TOK_MOTION_LEAN_PX = 8, TOK_MOTION_SWEEP_MS = 600, TOK_MOTION_PULSE_FRAMES = 3, TOK_MOTION_FADE_FRAMES = 3;
-const TOK_MOTION_PROGRESS_MIN_MS = 250, TOK_MOTION_TOAST_MS = 2500;
+const TOK_MOTION_PROGRESS_FLOOR_MS = 33, TOK_MOTION_TOAST_MS = 2500;
 const TOK_MOTION_BACKLIGHT_SLEEP_MS = 200, TOK_MOTION_BACKLIGHT_WAKE_MS = 200, TOK_MOTION_BACKLIGHT_NIGHT_MS = 2000;
 const TOK_MOTION_BACKLIGHT_ADJUST_MS = 150, TOK_MOTION_BACKLIGHT_BREATH_MS = 1000;
 const TOK_MOTION_BACKLIGHT_BREATH_PCT = 40, TOK_MOTION_BACKLIGHT_BREATH_COUNT = 3;
@@ -945,6 +945,12 @@ function progressLineW() {
   const elapsed = Math.min(performance.now() - STATE.lastPollMs, pollMs);
   return Math.floor(elapsed / pollMs * SCREEN_W);
 }
+// How long one physical pixel of fill takes to appear, floored at
+// TOK_MOTION_PROGRESS_FLOOR_MS (display.cpp/pages.cpp twin).
+function progressStepMs() {
+  const px = Math.floor(effectivePollMs() / SCREEN_W);
+  return Math.max(px, TOK_MOTION_PROGRESS_FLOOR_MS);
+}
 let progressDrawnW = 0, progressLastMs = 0;
 function drawStatusStrip() {
   if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 12, 48, 24, 12, TOK_COLOR_FILL_PRESSED);
@@ -966,7 +972,7 @@ function drawStatusStrip() {
 }
 function progressTick(nowMs) {
   if (!STATE.cfgShowProgress || !STATE.connected) return false;
-  if (nowMs - progressLastMs < TOK_MOTION_PROGRESS_MIN_MS) return false;
+  if (nowMs - progressLastMs < progressStepMs()) return false;
   progressLastMs = nowMs;
   const w = progressLineW();
   if (w < progressDrawnW) { gfx.fillRect(0, PROGRESS_Y, SCREEN_W, 1, TOK_COLOR_BG_CANVAS); progressDrawnW = 0; }

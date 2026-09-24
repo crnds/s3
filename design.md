@@ -1200,8 +1200,10 @@ excluded on purpose are listed in §11.23.
 - **Anatomy:** 1 px, `text.secondary`, along y 319, filling left to right over the poll interval.
   It is the **one** element allowed inside the screen margin, because it's a
   system edge indicator.
-- **Rules:** re-present no faster than `motion.progress.maxHz` (4 Hz) (§12.7).
-  It is hidden while offline and when the Progress Bar setting is off.
+- **Rules:** re-presents as soon as the fill would grow by one physical pixel --
+  its finest visible step -- floored at `motion.progress.maxHz` so a short poll
+  interval can't out-pace the render loop (§12.7). It is hidden while offline
+  and when the Progress Bar setting is off.
 
 ### 11.14 Modal header
 
@@ -1391,7 +1393,7 @@ Why springs rather than today's 180 ms ease-out cubic:
 | `motion.pulse` | 3 frames | The status-dot pulse on each successful poll |
 | `motion.fade` | 3 frames (25 / 50 / 75%) | The reduced-motion replacement for springs (§12.9) |
 | `motion.ambient.maxHz` | 1 Hz | Continuous motion that isn't content (the second hand) |
-| `motion.progress.maxHz` | 4 Hz | How often the progress hairline re-presents |
+| `motion.progress.maxHz` | ~30 Hz (floor only) | The hairline re-presents on every 1 px of growth; this only caps how often, for a poll interval short enough that 1 px would arrive faster than the loop can present |
 | `motion.toast` | 2500 ms | How long a toast stays |
 | `motion.ack` | 100 ms (3 frames), non-blocking | Acknowledges a tap on a target with no visible control (§12.8). Unused after migration. |
 | `motion.backlight.*` | §12.10 | Backlight fades |
@@ -1469,7 +1471,7 @@ Why springs rather than today's 180 ms ease-out cubic:
 |---|---|
 | Clock second hand | 1 Hz, as today. This is the status page's one ambient motion. |
 | Cat GIFs | Content, so exempt. They play at their own frame delays. |
-| Progress hairline | ≤4 Hz. At a 20 s poll it would otherwise present about 24 times a second for a single line (§15.1). |
+| Progress hairline | Re-presents on every 1 px step -- ~24 Hz at the default 20 s poll (§15.1) -- floored at `motion.progress.maxHz` (~30 Hz) so a 5 s poll (96 px/s) can't out-pace the loop. A fixed low-Hz cap (4, then 8 Hz) made the fill visibly jump several px at once; matching the step to what the loop can actually deliver removes the jump instead of just slowing it. |
 | Status dot | **Steady**, with one `motion.pulse` (r 4 → 5 → 4) on each successful poll. That confirms data arrived; today's 1 Hz blink says nothing. |
 | Pace-bar highlight (the "shine") | **One `motion.sweep` per successful poll**, across the pace fills, then still. It means "fresh data". Never the perpetual 2.6 s loop, which at about 0.4 Hz is close to the slow oscillations Apple's accessibility guidance tells you to avoid. |
 | Hourly signal | Replace the 6 s full-screen inversion with a **backlight breath** (§12.10). An inversion is an abrupt jump in brightness across the whole screen. Until it's migrated, the inversion is an exception for alerts only, and no other feature may flash the screen. |
@@ -1617,7 +1619,7 @@ required.
 | Swipe paging | +300 KB PSRAM (the neighbour page, shared with the lean), about 30 presents a second while dragging | 1:1 direct manipulation. Tap halves stay primary. |
 | Momentum scroll and rubber band | Velocity ring buffer, plus about 30 presents a second while coasting (d = 0.995 keeps coasts short) | Settings is about 3.3 screens long; a hard stop at the ends reads as frozen. |
 | Continuous shine sweep (**deprecated**) | About 30 presents a second forever on 3 of 6 pages, which keeps the CPU duty and bus busy | Replaced by one sweep per poll. |
-| Progress hairline at ≤4 Hz | 4 presents a second, down from about 24 | Imperceptible for a 1 px line; saves most of the idle duty. |
+| Progress hairline at 1 px/present, floored at ~30 Hz | About 24 presents a second at the default 20 s poll, same as an uncapped naive fill | Every present shows real 1 px progress -- the smoothest this hairline can be -- while the floor still protects the loop from a 5 s poll's 96 px/s. |
 | Blinking status dot (**deprecated**) | A present every second | Replaced by a steady dot plus a per-poll pulse. |
 | Size-specific tracking and optical sizing | No extra flash (the advances change and the font count stays the same); a `make_vlw.py` run and simulator atlas regeneration; Inter 4 `opsz` source | Apple-style type that changes shape with size. The real cost is the parity round-trip, not memory. |
 | No alpha, so no translucency or shadows | — | Depth comes from surface steps; media gets opaque plates. |

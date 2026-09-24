@@ -189,7 +189,11 @@ const int TOK_MOTION_LEAN_PX = 8;
 const uint32_t TOK_MOTION_SWEEP_MS = 600;
 const int TOK_MOTION_PULSE_FRAMES = 3;
 const int TOK_MOTION_FADE_FRAMES = 3;
-const uint32_t TOK_MOTION_PROGRESS_MIN_MS = 250;     // motion.progress.maxHz = 4
+// motion.progress.maxHz: not a fixed rate -- the hairline re-presents as soon
+// as it would grow by one physical pixel (POLL_INTERVAL_MS/SCREEN_W), floored
+// here at ~30 Hz (the loop's own throughput ceiling, design.md 12.7) so a
+// short poll interval can't out-pace the render loop.
+const uint32_t TOK_MOTION_PROGRESS_FLOOR_MS = 33;
 const uint32_t TOK_MOTION_TOAST_MS = 2500;
 const uint32_t TOK_MOTION_BACKLIGHT_SLEEP_MS = 200;
 const uint32_t TOK_MOTION_BACKLIGHT_WAKE_MS = 200;
