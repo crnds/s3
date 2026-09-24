@@ -383,7 +383,7 @@ The type tokens map onto the nine generated fonts.
 | `type.title` | `FONT_LG` | 26 / 650 | 33 (1.27×) | 26 | **−1 px** (−0.038 em) | 17 | Glanceable key numbers (5h %, week %, digital time) and the values to type on the AP setup screen. **Not for screen titles:** every screen title is headline, in the modal header (§11.14). |
 | `type.headline` | `FONT_MDB` | 17 / 650 | 23 (1.35×) | 18 | 0 | 12 | Screen titles (modal header), row labels, button labels, emphasised values (BTC price, AQI number, the pace flag `!`). |
 | `type.body` | `FONT_MD` | 17 / 500 | 23 (1.35×) | 18 | 0 | 11 | Readable text and values: limits rows, reset lines, forecast temperatures, the date. |
-| `type.label` | `FONT_SMB` | 13 / 650 | 17 (1.31×) | 13 | **+1 px** (+0.077 em) | 10 | **UPPERCASE** section labels (`5H`, `WEEK`, `TOP PROJECTS`), 1–3 words. |
+| `type.label` | `FONT_SMB` | 13 / 650 | 17 (1.31×) | 13 | **+1 px** (+0.077 em) | 10 | **UPPERCASE** section labels (`5H`, `WK`, `TOP PROJECTS`), 1–3 words. |
 | `type.caption` | `FONT_SM` | 13 / 500 | 17 (1.31×) | 13 | 0 | 9 | Secondary information: units, axis labels, the status strip, subtitles. |
 | `type.mono.s` | `FONT_MONO1` | 11 / 450 | 15 (1.36×) | 11 | 0 (grid) | 7 | Note pane size 1 only (an *exception*, §5.3). |
 | `type.mono.m` | `FONT_MONO2` | 16 / 450 | 21 (1.31×) | 16 | 0 (grid) | 10 | Note pane size 2. |
@@ -554,17 +554,27 @@ The sums: 8 + 272 + 8 + 32 = 320 ✓, and 8 + 464 + 8 = 480 ✓.
 
 ### 7.2 Grid
 
-**Two columns** (the dashboard pages):
+**Two columns** (the dashboard pages). These are deliberately **unequal**. The left
+column is a narrow *reserved zone* for the limit and BTC cards (5h, week, BTC), fixed so
+that its content ends at x 180. The remaining width goes to the visual cards on the
+right (clock, weather, note, cats).
 
 | Token | Value |
 |---|---|
-| `layout.col.w` | 228 |
-| `layout.col.left.x` | 8 (8..235) |
-| `layout.col.right.x` | 244 (244..471) |
+| `layout.col.left.x` | 8 |
+| `layout.col.left.w` | 172 (x 8..179; content ends at x 180) |
+| `layout.col.right.x` | 188 |
+| `layout.col.right.w` | 284 (x 188..471) |
 
-8 + 228 + 8 + 228 + 8 = 480 ✓. The **page-navigation split at x = 240
-falls inside the gutter** (236..243), so no card straddles the line that
-decides "previous" vs "next".
+8 + 172 + 8 + 284 + 8 = 480 ✓. The left column's width is a **fixed reservation**. It
+doesn't grow for longer text; content that doesn't fit gets shorter labels or wraps
+onto a second caption line (§7.4).
+
+**Page-navigation halves are screen halves** (x < 240 and x ≥ 240). They don't follow the
+grid, so the split passes through the right column at x 240. That's intentional:
+navigation is a background layer (§9.2), and "left side goes back, right side goes
+forward" has to stay symmetric and predictable whatever the layout. Only tappable cards
+(which win in hit-testing) have to avoid depending on which half they're in.
 
 **One column** (full-width pages and overlays): x 8..471, 464 wide.
 
@@ -581,7 +591,7 @@ decides "previous" vs "next".
 **Rules**
 
 1. Everything aligns to the column edges or to the padding edges inside a card. A
-   left edge is always one of: 8, 20 (8 + card.pad), 244, 256, or the
+   left edge is always one of: 8, 16 or 20 (8 + a card's padding), 188, 196 or 200, or the
    left edge of a grid cell.
 2. **Primary content goes left (reading order), and the glanceable hero goes top-left.**
    Secondary and contextual content goes right or below.
@@ -628,39 +638,55 @@ This shows that the grid holds the real content with no cheating. Every number
 below is a token sum. It is the target for migrating page 0.
 
 ```
-x: 8                    235 244                   471
-y: 8  +-------------------+ +----------------[b]-[a]--+  <- corner slots
-      | 17%  5H           | |        .-----.          |
-      | ================  | |       /       \  r 56   |
-      | ========          | |      |   clock |        |
-      | Resets 16:30 (4h) | |       \       /         |
-  119 +-------------------+ |        '-----'          |
-  128 +-------------------+ |         12:27           |
-      | 8%  WEEK  ! 86h   | |    Thu 24 Sep  [51]     |
-      | ================  | |                         |
-      | ==                | +-------------------------+  199
-      | Resets Thu 05:00  | +-------------------------+  208
-  239 +-------------------+ | 28 (rain)  13  14  15  >|
-  248 +-------------------+ | 24  27     ..  ..  ..   |
-      | BTC        84,194 | |                         |
-  279 +-------------------+ +-------------------------+  279
+x: 8           179 188                                471
+y: 8  +----------+ +--------------------------[b]--[a]---+  <- corner slots
+      | 17%  5H  | |     .-------.                         |
+      | ======== | |    /         \                        |
+      | ====     | |   |           |      12:27            |
+      | Resets   | |   |   clock   |      Thu 24 Sep       |
+      | 16:30    | |   |   r 76    |      [51]             |
+  119 +----------+ |    \         /                        |
+  128 +----------+ |     '-------'                         |
+      |8% WK !86h| |                                       |
+      | ======== | +---------------------------------------+  199
+      | ==       | +---------------------------------------+  208
+      | Resets   | | 28 (rain)  13   14   15   16        > |
+  239 +----------+ | 24  27     ..   ..   ..   ..          |
+  248 +----------+ |                                       |
+      |BTC 84,194| |                                       |
+  279 +----------+ +---------------------------------------+  279
 ```
-(The reset lines are abbreviated in the sketch. The real caption, `Resets Thu 05:00  (6d 16h)`,
-measures 175 px in `type.caption` against the card's 204 px inner width.)
+(The left cards' text is abbreviated in the sketch. The real strings are measured with
+the firmware glyph advances and the §5.2 tracking in the table below.)
 
 | Card | Box | Internal budget (px) |
 |---|---|---|
-| 5H limit | 228 × 112, pad 12 | Vertical: numeral.lg line 33 + 8 + usage meter 8 + 4 + pace meter 6 + 12 + caption 17 = 88 = 112 − 24 ✓. Worst-case top row `100%  WEEK  ! 86h` = 170 px ≤ 204 ✓ |
-| Week limit | 228 × 112, pad 12 | same as 5H |
-| BTC (compact) | 228 × 32, pad 8/12 | headline 23 + 2 × 4.5 → vertically centred single line ✓ |
-| Clock (hero) | 228 × 192, pad 8 | clock ⌀ 113 (r 56) + 6 + numeral.lg 33 + body 23 = 175 ≤ 176 ✓ |
-| Weather (compact) | 228 × 72, pad 8/12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 204 inner = H/L 20 + now 40 + 3 × 40 hourly + 24 disclosure column ✓ |
+| 5H limit | 172 × 112, pad 8 / 12 (compact) | **Width:** 148 inner. Worst-case top row `99%  WK  ! 167h` = 142 px ✓. At 100% the flag has no duration (`formatPaceDur` returns ""), so `100%  WK  !` = 113 ✓. The label-to-flag gap is `space.xs`. **Vertical:** 96 inner = numeral.lg 33 + 4 + usage meter 8 + 4 + pace meter 6 + 4 + caption `Resets 16:30` / `Resets Thu 05:00` (≤113 px) 17 + caption `in 4h 03m` / `in 6d 16h` (≤63 px) 17 = 93 ✓, with 3 px of slack at the bottom (§7.2 rule 5). |
+| Week limit | 172 × 112, pad 8 / 12 | Same as 5H. The label stays `WK`: `WEEK` would push `99% WEEK ! 86h` to 149 px, over the 148 available. |
+| BTC (compact) | 172 × 32, pad 8 / 12 | caption `BTC` 26 + 8 + headline `123,456` 76 = 110 ≤ 148 ✓. Headline 23 is vertically centred. |
+| Clock (hero) | 284 × 192, pad 8 | **Side by side**, because the extra width lets the clock grow. Clock ⌀ 153 (r 76, up from today's 68) + 12 + readout column 103 = 268 ✓. The readout is numeral.lg `12:27` 75 px, 4, body `Thu 24 Sep` 92 px, 8, then the AQI badge (48 × 24) = 92 px tall, vertically centred (y 58..149). That keeps it clear of the corner slots, which end at y 31 plus 8 px of clearance. |
+| Weather (compact) | 284 × 72, pad 8 / 12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 260 inner = H/L 20 + now 40 + **4** × 44 hourly (one more hour than before) + 24 disclosure column ✓. |
 
 Left column: 112 + 8 + 112 + 8 + 32 = 272 ✓. Right column: 192 + 8 + 72 = 272 ✓.
 
-The migration merges each limit card's two reset lines into one caption line
-(`Resets 16:30  (4h 03m)`), shrinks the clock from r 68 to 56, and gives the
-Weather card a disclosure chevron because it is tappable.
+What the migration does to page 0:
+- The left column narrows from today's 236 px to its fixed 172 px reservation, and the
+  right column widens from 236 to 284.
+- Each limit card keeps two short caption lines, `Resets …` then `in …`, now in caption
+  rather than body.
+- The clock moves beside its readout and grows to r 76.
+- The Weather strip gains a fourth hour and a disclosure chevron, because it's tappable.
+
+**The same left column is shared** by the Mixed and Note pages (`drawLimitsCard` +
+`drawBtcCard`), so their right panes widen to 284 × 272 too:
+- **Note pane:** with a 260 px text width it holds 37 / 26 / 20 columns at mono.s / m / l
+  (today 31 / 22 / 16). That's still at least the CYD pane's 24 / 12 / 8, so the
+  `note.html` / `note.py` fit check stays a safe bound. The server's 480-character cap,
+  not the pane, still limits the text.
+- **Mixed cat pane:** becomes x 188..471 × y 8..279, and the cover-fit scale is recomputed
+  for that box (`MIXED_GIF_X0/W/Y0/H`).
+- The 5h/week shine strip geometry follows the new meter width (`SHINE_BAR_W`: 148 instead
+  of 208).
 
 ---
 
@@ -871,7 +897,7 @@ At 30 Hz, fewer than 3 samples is too noisy to use.
 ### 9.6 Touch zones (hit map, dashboard page)
 
 ```
-x: 0                        240 (split, inside gutter)            436     479
+x: 0                        240 (screen-half split)               436     479
    +---------------------------+-------------------------------+---------+  y 0
    |                           |                               |  SLEEP  |
    |                           |                               | 44 x 44 |  y 43
@@ -1641,8 +1667,10 @@ required.
 12. **Arbitrary insets:** 16 in limit cards, 9 in the note pane (`pages.cpp:591`), 15 on
     full-width pages, 18 in settings rows.
 13. **Arbitrary row steps:** 51 (limits), 35 (projects), 30 (5-day), 62 (settings).
-14. **The page split x=240 sits inside the right card** (which starts at 241). The split
-    and the layout disagree by 1 px, which is harmless but not intentional.
+14. **The page split and the layout aren't related by any rule.** The split at x 240 sits
+    1 px inside the right card, which starts at 241, by accident. The system makes the
+    split explicitly a screen-half rule, separate from the grid (§7.2), so the layout
+    can move without changing how navigation feels.
 
 **Touch**
 
@@ -1743,7 +1771,8 @@ required.
 | `COL_SHINE_*` | `green.shine.*`, used by the per-poll sweep only |
 | Raw `0x0000` plates | `color.plate` |
 | `FONT_XL/LG/MDB/MD/SMB/SM` | `type.display/title/headline/body/label/caption` |
-| `LEFT_X 3`, `RIGHT_X 241`, `*_W 236` | `layout.col.left.x 8`, `.right.x 244`, `layout.col.w 228` |
+| `LEFT_X 3`, `LEFT_W 236`, `RIGHT_X 241`, `RIGHT_W 236` | `layout.col.left.x 8` / `.left.w 172` (fixed reservation, content ends at x 180); `layout.col.right.x 188` / `.right.w 284` |
+| `MIXED_GIF_X0 240`, `MIXED_GIF_W 240`, `NOTE_TEXT_W 220` | The right column: 188 / 284; note text width 260 |
 | `CONTENT_Y1 290`, `FOOTER_Y0 292` | `layout.content.y1 280`, `layout.strip.y0 288` |
 | `SLEEP_BTN_*` pill | Sleep icon button in `corner.slot.a` |
 | `BATTERY_ICON_*` | Battery Save glyph in `corner.slot.b` |

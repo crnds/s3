@@ -18,7 +18,9 @@ Mac laptop                                   S3 board (on WiFi)
 ```
 
 `esp32-s3-spec.md` is the board reference (pins, connectors, frame-rate
-math). `docs/` (seller package, factory backup) is local-only, gitignored.
+math). `design.md` is the design system for the dashboard UI (tokens,
+components, touch, motion, migration plan) — follow it for any UI change.
+`docs/` (seller package, factory backup) is local-only, gitignored.
 The Mac side lives in `~/cyd` and is **not** duplicated here — for server,
 `note.py` and control-panel internals read `~/cyd/CLAUDE.md`. The two
 exceptions are the browser pages, which live here while their servers stay
