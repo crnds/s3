@@ -17,9 +17,6 @@ const int SCREEN_H = 320;
 bool displayBegin();
 // 0-255, LEDC PWM on the backlight MOSFET.
 void displaySetBrightness(uint8_t level);
-// Panel-side colour inversion (INVON/INVOFF) -- the hourly flash. Cheap: one
-// command, applied between frames by displayPresent().
-void displaySetInvert(bool on);
 // Screen sleep: true = DISPOFF + SLPIN (panel GRAM is kept), false = SLPOUT
 // + DISPON. Blocks ~120ms on wake. The backlight is the caller's job.
 void displaySetSleep(bool sleep);
@@ -41,9 +38,16 @@ void displayPresent(const uint16_t* frame, int shiftX, int shiftY, uint16_t bg);
 // forward = the new page enters from the right, backward = from the left.
 void displayPresentSlide(const uint16_t* from, const uint16_t* to, int offset, bool forward,
                          int shiftX, int shiftY, uint16_t bg);
-// Solid border overlay (touch feedback flash), applied in the rotate copy so it
-// never touches the frame itself. thickness 0 = off.
-void displaySetBorder(int thickness, uint16_t color);
+// Sheet rise/drop (design.md 12.5): `sheet` occupies the bottom `visibleH`
+// rows (its top row at y = 320 - visibleH; past 320 = overshoot, bg below it),
+// the page `behind` shows above it through a scrim step (0 none, 1 = 75%,
+// 2 = 50% -- design.md 8.4). Same cost as the horizontal slide: the offset and
+// the scrim are applied in the rotate copy that runs anyway.
+void displayPresentSheet(const uint16_t* behind, const uint16_t* sheet, int visibleH, int scrimLevel,
+                         int shiftX, int shiftY, uint16_t bg);
+// Reduce Motion cross-fade: level 1..3 = 25 / 50 / 75% of `to` over `from`.
+void displayPresentFade(const uint16_t* from, const uint16_t* to, int level,
+                        int shiftX, int shiftY, uint16_t bg);
 
 // Diagnostics for the serial log / Device Stats.
 uint32_t displayTeCount();          // TE edges seen since boot

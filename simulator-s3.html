@@ -189,12 +189,12 @@ pre {
 <body>
 <header>
   <h1>S3 Dashboard Simulator</h1>
-  <p>Simulates the 3.5&Prime; 480&times;320 JC3248W535EN (ESP32-S3) screen. Text is drawn from the firmware's own glyph bitmaps (sim/fonts.js), so widths and line breaks match the board. Click the right/left half to change page, exactly like the firmware.</p>
+  <p>Simulates the 3.5&Prime; 480&times;320 JC3248W535EN (ESP32-S3) screen. Text is drawn from the firmware's own glyph bitmaps (sim/fonts.js), so widths and line breaks match the board. Tap or swipe like the firmware: page halves, swipes, sheets that drag down, Settings swipe-back. Add <code>?slowmo=10</code> to review motion in slow motion (key <kbd>m</kbd> toggles it).</p>
 </header>
 
 <main class="layout">
   <section class="device" aria-label="Simulated JC3248W535EN device">
-    <canvas id="screen" width="480" height="320" tabindex="0" aria-label="Simulated 480 by 320 landscape display, click to change page"></canvas>
+    <canvas id="screen" width="480" height="320" tabindex="0" aria-label="Simulated 480 by 320 landscape display; tap or swipe like the device"></canvas>
     <div class="device-label">JC3248W535EN &middot; simulated</div>
   </section>
 
@@ -217,7 +217,7 @@ pre {
         <label class="toggle"><input type="checkbox" id="sim-offline"> Simulate server offline</label>
         <label class="toggle"><input type="checkbox" id="mock-data"> Use mock data</label>
         <label class="toggle"><input type="checkbox" id="sim-sd-missing"> Simulate SD card missing</label>
-        <label class="toggle"><input type="checkbox" id="force-hourly-flash"> Force hourly flash (test)</label>
+        <button id="hourly-signal">Play hourly signal</button>
       </div>
       <div class="status-line">
         <span id="conn-status"><span class="dot bad"></span>not connected</span>
@@ -240,45 +240,147 @@ pre {
 
 <script src="sim/fonts.js"></script>
 <script>
-// ── CONSTANTS (mirroring src/state.h / main.cpp) ─────────────
+// ── CONSTANTS (mirroring src/state.h / tokens.h / main.cpp) ──
 // PARITY: every number in this file that places pixels is a copy of the
-// firmware's. Change the firmware, change it here (CLAUDE.md).
+// firmware's. Change the firmware, change it here (CLAUDE.md). Design values
+// are design.md's tokens -- the TOKENS block mirrors src/tokens.h line for line.
 const SCREEN_W = 480, SCREEN_H = 320;
 const POLL_DEFAULT_MS = 20000;
 const PAGE_COUNT = 6;
 const GIF_PAGE = 3;    // cat GIFs on the device (placeholder here -- see drawGifPage)
 const MIXED_PAGE = 4;  // limits column + cats pane
 const NOTE_PAGE = 5;   // limits column + note pane (an ordinary render() page)
-const TOUCH_DEBOUNCE_MS = 350;
 const OFFLINE_AFTER_MS = 60000;  // wall-clock, like main.cpp -- never a poll-cycle count
-const SLIDE_MS = 180;            // pages.cpp's page slide
+const BOOT_PAGE_AUTO = -1;
 
-// Layout grid (state.h's LAYOUT section).
-const LEFT_X = 3, LEFT_W = 236;
-const RIGHT_X = 241, RIGHT_W = 236;
-const CONTENT_Y1 = 290;
-const FOOTER_Y0 = 292;
-const SWIPE_SPLIT_X = SCREEN_W / 2;
-const WEATHER_HIT_X0 = RIGHT_X, WEATHER_HIT_X1 = RIGHT_X + RIGHT_W;
-const WEATHER_HIT_Y0 = 221, WEATHER_HIT_Y1 = CONTENT_Y1;
-const DEVICE_HIT_X0 = 56, DEVICE_HIT_X1 = 330;
-const DEVICE_HIT_Y0 = FOOTER_Y0, DEVICE_HIT_Y1 = SCREEN_H;
+// ── TOKENS (src/tokens.h; RGB888 as the panel shows it, the 0x.... beside) ──
+const TOK_GRAY_0 = 'rgb(8,8,8)';        // 0x0841
+const TOK_GRAY_1 = 'rgb(25,24,25)';     // 0x18C3
+const TOK_GRAY_2 = 'rgb(41,40,41)';     // 0x2945
+const TOK_GRAY_3 = 'rgb(58,57,58)';     // 0x39C7
+const TOK_GRAY_4 = 'rgb(107,105,107)';  // 0x6B4D
+const TOK_GRAY_5 = 'rgb(156,154,156)';  // 0x9CD3
+const TOK_GRAY_6 = 'rgb(255,255,255)';  // 0xFFFF
+const TOK_GRAY_5_HC = 'rgb(189,190,189)';  // 0xBDF7
+const TOK_CORAL_500 = 'rgb(255,97,66)';  // 0xFB08
+const TOK_CORAL_600 = 'rgb(206,77,49)';  // 0xCA66
+const TOK_GREEN_500 = 'rgb(33,206,66)';  // 0x2668
+const TOK_GREEN_WEDGE = 'rgb(25,109,41)';     // 0x1B65
+const TOK_GREEN_SHINE_LO = 'rgb(90,219,115)';  // 0x5ECE
+const TOK_GREEN_SHINE_MID = 'rgb(148,231,165)'; // 0x9734
+const TOK_GREEN_SHINE_HI = 'rgb(214,247,214)';  // 0xD7BA
+const TOK_AMBER_500 = 'rgb(255,166,0)';  // 0xFD20
+const TOK_RED_500 = 'rgb(255,24,49)';    // 0xF8C6
+const TOK_BLUE_500 = 'rgb(58,130,247)';  // 0x3C1E
+const TOK_SUN_500 = 'rgb(255,206,0)';    // 0xFE60
+const TOK_BLACK = 'rgb(0,0,0)';          // 0x0000
+const TOK_AQI_GOOD = TOK_GREEN_500;
+const TOK_AQI_MODERATE = 'rgb(255,255,0)';        // 0xFFE0
+const TOK_AQI_USG = 'rgb(255,113,16)';            // 0xFB82
+const TOK_AQI_UNHEALTHY = TOK_RED_500;
+const TOK_AQI_VERY_UNHEALTHY = 'rgb(173,85,247)'; // 0xAABE
+const TOK_AQI_HAZARDOUS = 'rgb(123,28,25)';       // 0x78E3
+
+const TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
+const TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
+const TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
+const TOK_COLOR_FILL_PRESSED = TOK_GRAY_3;
+const TOK_COLOR_SEPARATOR = TOK_GRAY_3;
+const TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
+const TOK_COLOR_TEXT_TERTIARY = TOK_GRAY_4;
+const TOK_COLOR_TEXT_ON_ACCENT = TOK_GRAY_0;
+const TOK_COLOR_ACCENT = TOK_CORAL_500;
+const TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
+const TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
+const TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
+const TOK_COLOR_STATUS_ERROR = TOK_RED_500;
+const TOK_COLOR_STATUS_INFO = TOK_BLUE_500;
+const TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
+const TOK_COLOR_DATA_PACE = TOK_GREEN_500;
+const TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+const TOK_COLOR_DATA_SYSTEM = TOK_BLUE_500;
+const TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
+const TOK_COLOR_CONTENT_RAIN = TOK_BLUE_500;
+const TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
+const TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
+const TOK_COLOR_PLATE = TOK_BLACK;
+// Increase Contrast swaps these at runtime (applyContrast).
+let TOK_COLOR_TEXT_SECONDARY = TOK_GRAY_5;
+let TOK_COLOR_FILL_TRACK = TOK_GRAY_3;
+let TOK_CARD_OUTLINE = false;
+const TOK_COLOR_CARD_OUTLINE = TOK_GRAY_4;
+const TOK_NOTE_CODE = TOK_COLOR_STATUS_INFO;
+const TOK_NOTE_KEYWORD_BAD = TOK_COLOR_STATUS_ERROR;
+const TOK_NOTE_KEYWORD_GOOD = TOK_COLOR_STATUS_SUCCESS;
+const TOK_NOTE_NUMBER = TOK_COLOR_CONTENT_SUN;
+const TOK_NOTE_HEADING = TOK_COLOR_ACCENT;
+const TOK_NOTE_MARKER = TOK_COLOR_ACCENT;
+const TOK_NOTE_TEXT = TOK_COLOR_TEXT_PRIMARY;
+
+const TOK_TYPE_DISPLAY = 'XL', TOK_TYPE_TITLE = 'LG', TOK_TYPE_HEADLINE = 'MDB', TOK_TYPE_BODY = 'MD';
+const TOK_TYPE_LABEL = 'SMB', TOK_TYPE_CAPTION = 'SM';
+const TOK_TYPE_MONO_S = 'MONO1', TOK_TYPE_MONO_M = 'MONO2', TOK_TYPE_MONO_L = 'MONO3';
+const TOK_TYPE_NUMERAL_HERO = TOK_TYPE_DISPLAY, TOK_TYPE_NUMERAL_LG = TOK_TYPE_TITLE;
+const TOK_TYPE_NUMERAL_MD = TOK_TYPE_HEADLINE, TOK_TYPE_NUMERAL_SM = TOK_TYPE_CAPTION;
+
+const TOK_SPACE_HAIR = 2, TOK_SPACE_XS = 4, TOK_SPACE_SM = 8, TOK_SPACE_MD = 12, TOK_SPACE_LG = 16;
+const TOK_SPACE_XL = 24, TOK_SPACE_XXL = 32;
+const TOK_SPACE_GUTTER = TOK_SPACE_SM, TOK_SPACE_CARD_PAD = TOK_SPACE_MD;
+const TOK_SPACE_CARD_PAD_COMPACT_V = TOK_SPACE_SM, TOK_SPACE_CARD_PAD_COMPACT_H = TOK_SPACE_MD;
+const TOK_SPACE_CARD_PAD_HERO = TOK_SPACE_SM, TOK_SPACE_STACK_TIGHT = TOK_SPACE_XS, TOK_SPACE_STACK = TOK_SPACE_SM;
+const TOK_SPACE_LIST_GAP = TOK_SPACE_SM;
+
+const TOK_LAYOUT_CONTENT_X0 = 8, TOK_LAYOUT_CONTENT_X1 = 472;
+const TOK_LAYOUT_CONTENT_Y0 = 8, TOK_LAYOUT_CONTENT_Y1 = 280;
+const TOK_LAYOUT_CONTENT_W = TOK_LAYOUT_CONTENT_X1 - TOK_LAYOUT_CONTENT_X0;
+const TOK_LAYOUT_OVERLAY_CONTENT_Y1 = 312;
+const TOK_LAYOUT_HEADER_H = 44, TOK_LAYOUT_HEADER_CONTENT_Y = 52;
+const TOK_LAYOUT_COL_LEFT_X = 8, TOK_LAYOUT_COL_LEFT_W = 172;
+const TOK_LAYOUT_COL_RIGHT_X = 188, TOK_LAYOUT_COL_RIGHT_W = 284;
+const TOK_LAYOUT_HALF_SPLIT_X = 240;
+const TOK_CORNER_SLOT_A_X = 448, TOK_CORNER_SLOT_B_X = 404, TOK_CORNER_SLOT_Y = 8, TOK_CORNER_SLOT_SIZE = 24;
+const TOK_CORNER_HIT_X0 = 436, TOK_CORNER_HIT_Y1 = 44;
+const TOK_CORNER_INK_X1 = TOK_CORNER_SLOT_B_X - TOK_SPACE_SM;
+const TOK_CLOSE_SLOT_X = 8, TOK_CLOSE_SLOT_Y = 8, TOK_CLOSE_HIT_X1 = 52, TOK_CLOSE_HIT_Y1 = 52;
+const TOK_HEADER_TITLE_X = 60, TOK_HEADER_TITLE_Y = 11;
+const TOK_RADIUS_SM = 4, TOK_RADIUS_MD = 8;
+const TOK_STROKE_GLYPH_R = 1.0;
+
+const TOK_TOUCH_SLOP = 10, TOK_TOUCH_REARM_MS = 120, TOK_TOUCH_ARM_WINDOW_MS = 4000, TOK_TOUCH_WAKE_GUARD_MS = 600;
+const TOK_TOUCH_VELOCITY_WINDOW_MS = 100, TOK_TOUCH_DECEL = 0.995;
+const TOK_TOUCH_FLICK_COMMIT = 150, TOK_TOUCH_FLICK_BOUNCE = 300, TOK_TOUCH_RUBBERBAND = 0.55;
+const TOK_METER_SM = 6, TOK_METER_MD = 8;
+const TOK_BADGE_H = 24, TOK_BADGE_PAD_X = 6, TOK_BUTTON_LG = 56, TOK_OPTION_CELL_H = 64;
+const TOK_LIST_ROW_H = 56, TOK_LIST_ROW_INSET = TOK_SPACE_LG;
+const TOK_TOGGLE_W = 52, TOK_TOGGLE_H = 28, TOK_TOAST_H = 36, TOK_PRESSED_DISC_R = 20;
+
+const TOK_MOTION_SPRING_STANDARD = [100, 250], TOK_MOTION_SPRING_SHEET = [100, 300], TOK_MOTION_SPRING_FLICK = [80, 300];
+const TOK_MOTION_LEAN_PX = 8, TOK_MOTION_SWEEP_MS = 600, TOK_MOTION_PULSE_FRAMES = 3, TOK_MOTION_FADE_FRAMES = 3;
+const TOK_MOTION_PROGRESS_MIN_MS = 250, TOK_MOTION_TOAST_MS = 2500;
+const TOK_MOTION_BACKLIGHT_SLEEP_MS = 200, TOK_MOTION_BACKLIGHT_WAKE_MS = 200, TOK_MOTION_BACKLIGHT_NIGHT_MS = 2000;
+const TOK_MOTION_BACKLIGHT_ADJUST_MS = 150, TOK_MOTION_BACKLIGHT_BREATH_MS = 1000;
+const TOK_MOTION_BACKLIGHT_BREATH_PCT = 40, TOK_MOTION_BACKLIGHT_BREATH_COUNT = 3;
+
+// ── LAYOUT (state.h's LAYOUT block) ──────────────────────────
+const SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
+const LIMIT_CARD_H = 112, BTC_CARD_H = 32;
+const LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;
+const LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;
+const BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;
+const CLOCK_CARD_H = 192, WEATHER_CARD_H = 72;
+const CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;
+const WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;
+const WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
+const WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
+const STRIP_HIT_Y0 = TOK_LAYOUT_CONTENT_Y1;
+const HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;
 const SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
-const SETTINGS_HIT_Y0 = FOOTER_Y0, SETTINGS_HIT_Y1 = SCREEN_H;
-// Middle-third "next cat" band while Cat Shuffle is FIXED. Not playback --
-// it decides page navigation, so it is kept in parity (see state.h).
-const CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;  // GIF_PAGE: middle third of the screen
-// Screen-sleep pill (top-right of every screen) + its bigger hit box; the
-// Battery Save icon sits just left of it.
-const SLEEP_BTN_X0 = 432, SLEEP_BTN_Y0 = 8, SLEEP_BTN_W = 40, SLEEP_BTN_H = 9;
-const SLEEP_WAKE_GUARD_MS = 600;  // ignore the tap that put it to sleep
-const SLEEP_HIT_X0 = 416, SLEEP_HIT_X1 = SCREEN_W, SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = 36;
-const BATTERY_ICON_X0 = 400, BATTERY_ICON_X1 = 428, BATTERY_ICON_Y0 = 3, BATTERY_ICON_Y1 = 21;
-const MIXED_GIF_X0 = 240, MIXED_GIF_W = 240, MIXED_GIF_Y0 = 3, MIXED_GIF_H = CONTENT_Y1 - 3;
-// MIXED_PAGE: left half of the cat pane, bounded to the pane's own height --
-// twin of MIXED_CAT_ADVANCE_* in state.h.
-const MIXED_CAT_ADVANCE_X0 = MIXED_GIF_X0, MIXED_CAT_ADVANCE_X1 = MIXED_GIF_X0 + MIXED_GIF_W / 2;
-const MIXED_CAT_ADVANCE_Y0 = 0, MIXED_CAT_ADVANCE_Y1 = CONTENT_Y1;
+const STRIP_CY = 303;
+const SHUFFLE_DISC_R = 16, SHUFFLE_HIT = 48;
+const SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W, SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
+const MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
+const MIXED_GIF_Y0 = TOK_LAYOUT_CONTENT_Y0, MIXED_GIF_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+const NIGHT_MODE_DIM_VALUE = 64;
 
 const SHIFT_ORBIT = [[0,0],[1,0],[2,0],[2,-1],[2,-2],[1,-2],[0,-2],[0,-1]];
 let SHIFT_STEP_MS = 180000;  // firmware default; flash "pixel_shift_min" * 60000
@@ -287,20 +389,9 @@ const WEATHER_HOURLY_N = 6;
 const WEATHER_DAILY_N = 5;
 const LAST_USAGE_KEY = 's3dashboard_v1_lastusage';
 const LAST_WEATHER_KEY = 's3dashboard_v1_weather';
-
-// Settings geometry -- mirrors settings.cpp exactly.
-const SET_BACK_X0 = 0, SET_BACK_X1 = 150, SET_BACK_Y0 = 0, SET_BACK_Y1 = 46;
-const SET_BTN_X0 = 25, SET_BTN_Y = 128, SET_BTN_W = 81, SET_BTN_H = 76;
-const SET_BTN_STEP = 87, SET_BTN_STEP_Y = 84;
-const SET_ROW_X0 = 15, SET_ROW_Y0 = 48, SET_ROW_W = 450, SET_ROW_H = 56, SET_ROW_STEP = 62;
-const SET_WIDE_BTN_X0 = SET_ROW_X0, SET_WIDE_BTN_W = SET_ROW_W;
-const SETTINGS_VIEWPORT_Y0 = SET_ROW_Y0;
-const SETTINGS_VIEWPORT_H = SCREEN_H - 4 - SETTINGS_VIEWPORT_Y0;
-const SETTINGS_SCROLLBAR_X = 471, SETTINGS_SCROLLBAR_W = 5;
 const BRIGHTNESS_KEY = 's3dashboard_v1_brightness';
 const BOOT_PAGE_KEY = 's3dashboard_v1_bootpage';
 const LAST_PAGE_KEY = 's3dashboard_v1_lastpage';
-const BOOT_PAGE_AUTO = -1;
 const CAT_SHUFFLE_KEY = 's3dashboard_v1_catshuffle';
 const NIGHT_MODE_KEY = 's3dashboard_v1_nightmode';
 const ROTATION_KEY = 's3dashboard_v1_rotation';
@@ -309,6 +400,8 @@ const BATTERY_SAVE_KEY = 's3dashboard_v1_batterysave';
 const SHOW_AQI_KEY = 's3dashboard_v1_showaqi';
 const HOURLY_FLASH_KEY = 's3dashboard_v1_hourlyflash';
 const SHOW_PROGRESS_KEY = 's3dashboard_v1_showprogress';
+const REDUCE_MOTION_KEY = 's3dashboard_v1_reducemotion';
+const HIGH_CONTRAST_KEY = 's3dashboard_v1_highcontrast';
 const BATTERY_SAVE_POLL_SEC = 120;
 
 // localStorage can throw (private windows, blocked site data) -- every
@@ -316,203 +409,16 @@ const BATTERY_SAVE_POLL_SEC = 120;
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* best-effort */ } }
 
-// ── SETTINGS TABLE (mirrors settings.cpp's SETTINGS[]) ────────
-function getCurrentBrightness() { return STATE.cfgBrightness; }
-function applyBrightness(v) {
-  STATE.cfgBrightness = v;
-  lsSet(BRIGHTNESS_KEY, String(v));
-  applyEffectiveBrightnessFilter();
-}
-// Restart = page reload (STATE re-initializes, same as the board re-running setup()).
-function getCurrentNone() { return -1; }
-function applyRestart(v) { location.reload(); }
-function applyForgetWifi(v) {
-  console.log('[sim] Forget WiFi: on hardware this erases wifi_ssid/wifi_password from flash and restarts.');
-  location.reload();
-}
-// Cat shuffle: persisted only (no real GIF playback here to pace).
-function getCurrentCatShuffle() { return STATE.catShuffleSec; }
-function applyCatShuffle(v) {
-  STATE.catShuffleSec = v;
-  lsSet(CAT_SHUFFLE_KEY, String(v));
-}
-
-// Night mode: fixed 23:00-07:00, dims to 25% -- as a CSS filter here.
-let nightDimActive = false;
-let lastNightCheckMs = 0;
-function applyEffectiveBrightnessFilter() {
-  if (STATE.screenSleeping) { canvas.style.filter = 'brightness(0)'; return; }
-  if (nightDimActive) { canvas.style.filter = 'brightness(25%)'; return; }
-  applyBrightnessFilter();
-}
-function getCurrentNightMode() { return STATE.cfgNightModeOn ? 1 : 0; }
-function applyNightMode(v) {
-  STATE.cfgNightModeOn = v !== 0;
-  lsSet(NIGHT_MODE_KEY, String(v));
-  if (!STATE.cfgNightModeOn && nightDimActive) {
-    nightDimActive = false;
-    applyEffectiveBrightnessFilter();
-  }
-}
-function checkNightMode() {
-  const now = performance.now();
-  if (now - lastNightCheckMs < 1000) return;
-  lastNightCheckMs = now;
-  if (!STATE.cfgNightModeOn) return;
-  const bkk = bangkokParts();
-  const hour = parseInt(bkk.hour, 10);
-  const inWindow = hour >= 23 || hour < 7;
-  if (inWindow !== nightDimActive) {
-    nightDimActive = inWindow;
-    applyEffectiveBrightnessFilter();
-  }
-}
-
-const BATTERY_SAVE_OFF = 0, BATTERY_SAVE_ON = 1, BATTERY_SAVE_AUTO = 2;
-function batterySaveActive() {
-  if (STATE.cfgBatterySaveMode === BATTERY_SAVE_ON) return true;
-  if (STATE.cfgBatterySaveMode === BATTERY_SAVE_AUTO) return !!STATE.serverBatterySave;
-  return false;
-}
-function getCurrentBatterySave() { return STATE.cfgBatterySaveMode; }
-function applyBatterySave(v) {
-  STATE.cfgBatterySaveMode = Math.max(BATTERY_SAVE_OFF, Math.min(BATTERY_SAVE_AUTO, v));
-  lsSet(BATTERY_SAVE_KEY, String(STATE.cfgBatterySaveMode));
-  restartPollTimer();
-}
-function effectivePollMs() {
-  let sec = Number(document.getElementById('poll-interval').value) / 1000;
-  if (!Number.isFinite(sec) || sec <= 0) sec = POLL_DEFAULT_MS / 1000;
-  if ((batterySaveActive() || STATE.screenSleeping) && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
-  return sec * 1000;
-}
-
-// Rotation: the board flips its software rotate (display.cpp) and touch
-// mapping; a 180deg flip changes nothing about layout, so the sim only
-// persists the value.
-function getCurrentRotation() { return STATE.cfgScreenRotation; }
-function applyRotation(v) {
-  STATE.cfgScreenRotation = v;
-  lsSet(ROTATION_KEY, String(v));
-}
-function getCurrentShowCountdown() { return STATE.cfgShowCountdown ? 1 : 0; }
-function applyShowCountdown(v) { STATE.cfgShowCountdown = v !== 0; lsSet(SHOW_COUNTDOWN_KEY, String(v)); }
-function getCurrentShowAqi() { return STATE.cfgShowAqi ? 1 : 0; }
-function applyShowAqi(v) { STATE.cfgShowAqi = v !== 0; lsSet(SHOW_AQI_KEY, String(v)); }
-function getCurrentHourlyFlash() { return STATE.cfgHourlyFlash ? 1 : 0; }
-function applyHourlyFlash(v) { STATE.cfgHourlyFlash = v !== 0; lsSet(HOURLY_FLASH_KEY, String(v)); }
-function getCurrentShowProgress() { return STATE.cfgShowProgress ? 1 : 0; }
-function applyShowProgress(v) { STATE.cfgShowProgress = v !== 0; lsSet(SHOW_PROGRESS_KEY, String(v)); }
-function getCurrentPollInterval() { return Number(document.getElementById('poll-interval').value) / 1000; }
-function applyPollInterval(v) {
-  document.getElementById('poll-interval').value = String(v * 1000);
-  restartPollTimer();
-}
-function getCurrentPixelShift() { return SHIFT_STEP_MS / 60000; }
-function applyPixelShift(v) { SHIFT_STEP_MS = v * 60000; }
-function getCurrentBootPage() { return STATE.cfgBootPage; }
-function applyBootPage(v) {
-  STATE.cfgBootPage = v;
-  if (v !== BOOT_PAGE_AUTO) STATE.currentPage = v;
-  lsSet(BOOT_PAGE_KEY, String(v));
-}
-
-const SETTINGS = [
-  { label: 'BRIGHTNESS', leafTitle: 'BRIGHTNESS', subtitle: 'BACKLIGHT BRIGHTNESS',
-    hint: 'TAP A LEVEL TO APPLY', cols: 5, rows: 1, count: 5,
-    values: [0, 64, 128, 191, 255], valueLabels: ['0%', '25%', '50%', '75%', '100%'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentBrightness, apply: applyBrightness },
-  { label: 'POLL INTERVAL', leafTitle: 'POLL INTERVAL', subtitle: 'HOW OFTEN TO FETCH /API/USAGE',
-    hint: 'TAP A RATE TO APPLY', cols: 5, rows: 1, count: 5,
-    values: [5, 10, 20, 60, 300], valueLabels: ['5s', '10s', '20s', '60s', '5m'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentPollInterval, apply: applyPollInterval },
-  { label: 'PIXEL SHIFT', leafTitle: 'PIXEL SHIFT', subtitle: 'ANTI-RETENTION ORBIT INTERVAL',
-    hint: 'TAP A RATE TO APPLY', cols: 4, rows: 1, count: 4,
-    values: [0, 1, 3, 10], valueLabels: ['OFF', '1m', '3m', '10m'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentPixelShift, apply: applyPixelShift },
-  { label: 'BOOT PAGE', leafTitle: 'BOOT PAGE', subtitle: 'AUTO = RESUME LAST PAGE SHOWN',
-    hint: 'TAP A PAGE TO APPLY', cols: 4, rows: 2, count: 7,
-    values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5],
-    valueLabels: ['AUTO', 'STATUS', 'PROJECTS', 'LIMITS', 'CATS', 'MIXED', 'NOTE'],
-    btnTextSize: 1, destructive: false, getCurrent: getCurrentBootPage, apply: applyBootPage },
-  { label: 'RESTART', leafTitle: 'RESTART', subtitle: '',
-    hint: 'TAP TWICE TO RESTART THE BOARD', cols: 1, rows: 1, count: 1,
-    values: [0], valueLabels: ['RESTART'],
-    btnTextSize: 2, destructive: true, getCurrent: getCurrentNone, apply: applyRestart },
-  { label: 'FORGET WIFI', leafTitle: 'FORGET WIFI', subtitle: '',
-    hint: 'TAP TWICE TO ERASE WIFI CREDS', cols: 1, rows: 1, count: 1,
-    values: [0], valueLabels: ['FORGET WIFI'],
-    btnTextSize: 2, destructive: true, getCurrent: getCurrentNone, apply: applyForgetWifi },
-  { label: 'CAT SHUFFLE', leafTitle: 'CAT SHUFFLE', subtitle: 'HOW LONG EACH CAT GIF PLAYS',
-    hint: 'TAP A RATE TO APPLY', cols: 5, rows: 1, count: 5,
-    values: [-1, 0, 5, 10, 30], valueLabels: ['FIXED', 'OFF', '5s', '10s', '30s'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentCatShuffle, apply: applyCatShuffle },
-  { label: 'NIGHT MODE', leafTitle: 'NIGHT MODE', subtitle: '23:00-07:00, DIMS TO 25%',
-    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
-    values: [0, 1], valueLabels: ['OFF', 'ON'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentNightMode, apply: applyNightMode },
-  { label: 'BATTERY SAVE', leafTitle: 'BATTERY SAVE', subtitle: '2MIN POLL; AUTO = FOLLOW MAC',
-    hint: 'TAP A MODE TO APPLY', cols: 3, rows: 1, count: 3,
-    values: [0, 1, 2], valueLabels: ['OFF', 'ON', 'AUTO'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentBatterySave, apply: applyBatterySave },
-  { label: 'ROTATION', leafTitle: 'ROTATION', subtitle: 'FOR UPSIDE-DOWN MOUNTING',
-    hint: 'APPLIES IMMEDIATELY', cols: 2, rows: 1, count: 2,
-    values: [1, 3], valueLabels: ['NORMAL', 'FLIPPED'],
-    btnTextSize: 1, destructive: false, getCurrent: getCurrentRotation, apply: applyRotation },
-  { label: 'SHOW COUNTDOWN', leafTitle: 'SHOW COUNTDOWN', subtitle: 'GREEN BARS + CLOCK WEDGE',
-    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
-    values: [0, 1], valueLabels: ['OFF', 'ON'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentShowCountdown, apply: applyShowCountdown },
-  { label: 'SHOW AQI', leafTitle: 'SHOW AQI', subtitle: 'BADGE NEXT TO THE STATUS DATE',
-    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
-    values: [0, 1], valueLabels: ['OFF', 'ON'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentShowAqi, apply: applyShowAqi },
-  { label: 'HOURLY FLASH', leafTitle: 'HOURLY FLASH', subtitle: 'INVERT SIGNAL ON THE HOUR',
-    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
-    values: [0, 1], valueLabels: ['OFF', 'ON'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentHourlyFlash, apply: applyHourlyFlash },
-  { label: 'PROGRESS BAR', leafTitle: 'PROGRESS BAR', subtitle: 'POLL COUNTDOWN ALONG THE FOOT',
-    hint: 'TAP TO TOGGLE', cols: 2, rows: 1, count: 2,
-    values: [0, 1], valueLabels: ['OFF', 'ON'],
-    btnTextSize: 2, destructive: false, getCurrent: getCurrentShowProgress, apply: applyShowProgress },
-];
-const SETTINGS_COUNT = SETTINGS.length;
-const SETTINGS_CONTENT_H = SETTINGS_COUNT * SET_ROW_STEP - (SET_ROW_STEP - SET_ROW_H);
-const SETTINGS_SCROLL_MAX = Math.max(0, SETTINGS_CONTENT_H - SETTINGS_VIEWPORT_H);
-const CONFIRM_ARM_MS = 4000;
-
 // On-device figures with no browser equivalent: from the board's own boot
 // log (they only change on a reflash).
-const FLASH_USED_BYTES = 1549568, FLASH_TOTAL_BYTES = 8103168;
-const RAM_USED_BYTES = 153190, RAM_TOTAL_BYTES = 348700;
-const PSRAM_USED_BYTES = 994304, PSRAM_TOTAL_BYTES = 8388608;
+const FLASH_USED_BYTES = 1562241, FLASH_TOTAL_BYTES = 8103168;
+const RAM_USED_BYTES = 158720, RAM_TOTAL_BYTES = 348330;
+const PSRAM_USED_BYTES = 1301504, PSRAM_TOTAL_BYTES = 8388608;
 const SD_USED_BYTES = 2483027968, SD_TOTAL_BYTES = 7948206080;
-
-// RGB565 firmware colours as the panel shows them (the `// 0x....` is the
-// firmware's value -- keep them together when changing either).
-const COL_BG      = 'rgb(8,8,8)';       // 0x0841
-const COL_SURFACE = 'rgb(8,8,8)';       // 0x0841 (card fill = bg, no surface tint)
-const COL_BORDER  = 'rgb(58,57,58)';    // 0x39C7
-const COL_TEXT    = 'rgb(255,255,255)'; // 0xFFFF
-const COL_TEXT2   = 'rgb(156,154,156)'; // 0x9CD3
-const COL_ACCENT  = 'rgb(255,97,66)';   // 0xFB08
-const COL_BLUE    = 'rgb(58,130,247)';  // 0x3C1E
-const COL_YELLOW  = 'rgb(255,255,0)';   // 0xFFE0
-const COL_GOOD    = 'rgb(33,206,66)';   // 0x2668
-const COL_GOOD_50 = 'rgb(25,109,41)';   // 0x1B65
-const COL_SHINE_LO  = 'rgb(90,219,115)';  // 0x5ECE
-const COL_SHINE_MID = 'rgb(148,231,165)'; // 0x9734
-const COL_SHINE_HI  = 'rgb(214,247,214)'; // 0xD7BA
-const COL_WARN    = 'rgb(255,24,49)';   // 0xF8C6
-const COL_TRACK   = 'rgb(90,89,90)';    // 0x5ACB
-const COL_TRACK_BLACK = 'rgb(0,0,0)';   // 0x0000
-const COL_AQI_ORANGE = 'rgb(249,115,22)'; // 0xFB82
-const COL_PURPLE     = 'rgb(168,85,247)'; // 0xAABE
-const COL_MAROON     = 'rgb(127,29,29)';  // 0x78E3
 
 // ── STATE (mirroring the firmware UsageState struct + main.cpp globals) ──
 const STATE = {
-  screenSleeping: false,  // sleep pill: canvas filtered to black, render() paused
+  screenSleeping: false, sleepStartMs: 0,
   projects: [], trend: [0,0,0,0,0,0,0],
   haveData: false,
   cpuPercentAvg: 0,
@@ -532,22 +438,35 @@ const STATE = {
   currentPage: 0,
   connected: false, wifiOk: false,
   pollTimer: null,
-  shiftIdx: 0, lastShiftMs: 0,
+  shiftIdx: 0, lastShiftMs: 0, shiftX: 0, shiftY: 0, shiftDirty: false,
   settingsScreen: 'off',  // 'off' | 'list' | 'leaf' -- the firmware's SettingsScreen
   settingsScrollOffset: 0, settingsLeafIndex: -1,
   confirmArmedMs: 0, confirmArmedRow: -1,
   cfgBrightness: 200, cfgBootPage: 0, cfgLastPage: 0,
   catShuffleSec: 0,
-  cfgNightModeOn: false,
+  cfgNightModeOn: false, nightDimActive: false,
   cfgBatterySaveMode: 2, serverBatterySave: false,
   cfgShowCountdown: true, cfgShowAqi: true, cfgHourlyFlash: true, cfgShowProgress: true,
+  cfgReduceMotion: false, cfgHighContrast: false,
   cfgScreenRotation: 1,
-  lastTouchMs: 0,
+  pollOkSeq: 0,
 };
+let motionTimeScale = 1;
 
-// ── SIMULATED GFX (the LovyanGFX calls pages.cpp makes, on a 1:1 canvas) ──
+// ── SIMULATED GFX (the LovyanGFX calls the firmware makes) ──────
+// `ctx` draws into frameCanvas, the firmware's off-screen `frame`; presents
+// composite it onto the visible canvas (screenCtx), like display.cpp.
 const canvas = document.getElementById('screen');
-const ctx = canvas.getContext('2d');
+const screenCtx = canvas.getContext('2d');
+function makeFrame() {
+  const c = document.createElement('canvas');
+  c.width = SCREEN_W; c.height = SCREEN_H;
+  return c;
+}
+const frameCanvas = makeFrame();
+const ctx = frameCanvas.getContext('2d', { willReadFrequently: true });
+const prevFrame = makeFrame(), behindFrame = makeFrame();
+function copyFrame(dst, src) { dst.getContext('2d').drawImage(src, 0, 0); }
 
 // Text: the firmware's VLW glyphs, pre-tinted per colour into small canvases
 // and composited with source-over -- the same alpha blend LovyanGFX does
@@ -611,6 +530,11 @@ function drawTextR(font, xRight, y, s, color) { return drawText(font, xRight - t
 function drawTextC(font, cx, y, s, color) { return drawText(font, cx - Math.trunc(textW(font, s) / 2), y, s, color); }
 function drawChar(font, x, y, c, color) { drawText(font, x, y, c, color); }
 
+function rgbaOf(color, a) {
+  const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(color);
+  return `rgba(${m[1]},${m[2]},${m[3]},${a})`;
+}
+
 const gfx = {
   fillScreen(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, SCREEN_W, SCREEN_H); },
   fillRect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); },
@@ -618,19 +542,71 @@ const gfx = {
     ctx.strokeStyle = c; ctx.lineWidth = 1;
     ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   },
-  fillRoundRect(x, y, w, h, r, c) {
-    ctx.fillStyle = c; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
-  },
   drawRoundRect(x, y, w, h, r, c) {
     ctx.strokeStyle = c; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.stroke();
   },
-  fillCircle(x, y, r, c) {
-    ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r + 0.5, 0, Math.PI * 2); ctx.fill();
+  // Port of LovyanGFX 1.2.x fillSmoothRoundRect (LGFXBase.inl): solid spans
+  // plus 1px alpha-blended edge pixels -- same algorithm, same thresholds,
+  // so the AA corners land on the same pixels as the board's.
+  fillSmoothRoundRect(x, y, w, h, r, c) {
+    ctx.fillStyle = c;
+    if (r > (w >> 1)) r = w >> 1;
+    if (r > (h >> 1)) r = h >> 1;
+    y += r; h -= 2 * r;
+    if (h > 0 && w > 0) ctx.fillRect(x, y, w, h);
+    h--;
+    x += r; w -= 2 * r + 1;
+    const r1 = r * r;
+    r++;
+    const r2 = r * r;
+    const LO = 1 / 32, HI = 1 - LO;
+    let xs = 0, cx = 0;
+    for (let cy = r - 1; cy > 0; cy--) {
+      const dy2 = (r - cy) * (r - cy);
+      for (cx = xs; cx < r; cx++) {
+        const hyp2 = (r - cx) * (r - cx) + dy2;
+        if (hyp2 <= r1) break;
+        if (hyp2 >= r2) continue;
+        const alphaf = r - Math.sqrt(hyp2);
+        if (alphaf > HI) break;
+        xs = cx;
+        if (alphaf < LO) continue;
+        ctx.fillStyle = rgbaOf(c, Math.floor(alphaf * 255) / 255);
+        ctx.fillRect(x + cx - r, y + cy - r, 1, 1);
+        ctx.fillRect(x - cx + r + w, y + cy - r, 1, 1);
+        ctx.fillRect(x - cx + r + w, y - cy + r + h, 1, 1);
+        ctx.fillRect(x + cx - r, y - cy + r + h, 1, 1);
+        ctx.fillStyle = c;
+      }
+      const len = 2 * (r - cx) + 1 + w;
+      if (len > 0) {
+        ctx.fillStyle = c;
+        ctx.fillRect(x + cx - r, y + cy - r, len, 1);
+        ctx.fillRect(x + cx - r, y - cy + r + h, len, 1);
+      }
+    }
   },
-  drawCircle(x, y, r, c) {
-    ctx.strokeStyle = c; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r, 0, Math.PI * 2); ctx.stroke();
+  fillSmoothCircle(x, y, r, c) { this.fillSmoothRoundRect(x - r, y - r, r * 2 + 1, r * 2 + 1, r, c); },
+  // pages.cpp's aaRing: only the band's pixels, coverage = outer minus inner disc.
+  aaRing(cx, cy, r, t, c) {
+    const ro = r + 0.5, ri = r - t + 0.5;
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    for (let dy = -r - 1; dy <= r + 1; dy++) {
+      const xo2 = (ro + 1) * (ro + 1) - dy * dy;
+      if (xo2 < 0) continue;
+      const xo = Math.ceil(Math.sqrt(xo2));
+      const xi2 = (ri - 1) * (ri - 1) - dy * dy;
+      const xi = xi2 > 0 ? Math.floor(Math.sqrt(xi2)) : 0;
+      for (let dx = xi; dx <= xo; dx++) {
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const cov = clamp(ro - d) - clamp(ri - d);
+        if (cov < 1 / 32) continue;
+        ctx.fillStyle = cov >= 1 ? c : rgbaOf(c, Math.floor(cov * 255) / 255);
+        ctx.fillRect(cx + dx, cy + dy, 1, 1);
+        if (dx) ctx.fillRect(cx - dx, cy + dy, 1, 1);
+      }
+    }
   },
   fillTriangle(x0, y0, x1, y1, x2, y2, c) {
     ctx.fillStyle = c; ctx.beginPath();
@@ -657,6 +633,168 @@ const gfx = {
   clearClipRect() { if (this._clipped) { ctx.restore(); this._clipped = false; } },
 };
 
+// ── RGB565 MATERIALS (display.cpp's scrimPx / fadePx) ──────────
+// Pixels are quantised to RGB565, shifted/masked exactly as the firmware
+// does, and expanded back -- so a scrim or a fade matches the board.
+function to565(r, g, b) { return ((Math.round(r * 31 / 255) << 11) | (Math.round(g * 63 / 255) << 5) | Math.round(b * 31 / 255)); }
+function to888(c, out, i) {
+  out[i] = Math.round(((c >> 11) & 31) * 255 / 31);
+  out[i + 1] = Math.round(((c >> 5) & 63) * 255 / 63);
+  out[i + 2] = Math.round((c & 31) * 255 / 31);
+}
+function scrim565(c, level) {
+  if (level === 1) return (c - ((c >> 2) & 0x39E7)) & 0xFFFF;
+  return (c >> 1) & 0x7BEF;
+}
+function fade565(a, b, level) {
+  if (level === 1) return (a - ((a >> 2) & 0x39E7) + ((b >> 2) & 0x39E7)) & 0xFFFF;
+  if (level === 2) return (((a >> 1) & 0x7BEF) + ((b >> 1) & 0x7BEF)) & 0xFFFF;
+  return (((a >> 2) & 0x39E7) + b - ((b >> 2) & 0x39E7)) & 0xFFFF;
+}
+function scrimImage(img, level) {
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) to888(scrim565(to565(d[i], d[i + 1], d[i + 2]), level), d, i);
+}
+
+// ── SETTINGS TABLE (mirrors settings.cpp's SETTINGS[]) ────────
+// Night mode: fixed 23:00-07:00, dims to 25%. The backlight is the canvas
+// brightness filter (see BACKLIGHT below).
+let lastNightCheckMs = 0;
+function applyEffectiveBrightness(fadeMs = 0) {
+  if (STATE.screenSleeping) { backlightFadeTo(0, 0); return; }
+  backlightFadeTo(STATE.nightDimActive ? NIGHT_MODE_DIM_VALUE : STATE.cfgBrightness, fadeMs);
+}
+function applyContrast() {
+  TOK_COLOR_TEXT_SECONDARY = STATE.cfgHighContrast ? TOK_GRAY_5_HC : TOK_GRAY_5;
+  TOK_COLOR_FILL_TRACK = STATE.cfgHighContrast ? TOK_GRAY_4 : TOK_GRAY_3;
+  TOK_CARD_OUTLINE = STATE.cfgHighContrast;
+}
+
+const BATTERY_SAVE_OFF = 0, BATTERY_SAVE_ON = 1, BATTERY_SAVE_AUTO = 2;
+function batterySaveActive() {
+  if (STATE.cfgBatterySaveMode === BATTERY_SAVE_ON) return true;
+  if (STATE.cfgBatterySaveMode === BATTERY_SAVE_AUTO) return !!STATE.serverBatterySave;
+  return false;
+}
+function effectivePollMs() {
+  let sec = Number(document.getElementById('poll-interval').value) / 1000;
+  if (!Number.isFinite(sec) || sec <= 0) sec = POLL_DEFAULT_MS / 1000;
+  if ((batterySaveActive() || STATE.screenSleeping) && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
+  return sec * 1000;
+}
+
+function getCurrentBrightness() { return STATE.cfgBrightness; }
+function applyBrightness(v) {
+  STATE.cfgBrightness = v;
+  lsSet(BRIGHTNESS_KEY, String(v));
+  applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_ADJUST_MS);
+}
+function getCurrentNone() { return -1; }
+// Restart = page reload (STATE re-initializes, same as the board re-running setup()).
+function applyRestart() { setTimeout(() => location.reload(), 300); }
+function applyForgetWifi() {
+  console.log('[sim] Forget Wi-Fi: on hardware this erases wifi_ssid/wifi_password from flash and restarts.');
+  setTimeout(() => location.reload(), 300);
+}
+function getCurrentPollInterval() { return Number(document.getElementById('poll-interval').value) / 1000; }
+function applyPollInterval(v) {
+  document.getElementById('poll-interval').value = String(v * 1000);
+  restartPollTimer();
+}
+function getCurrentPixelShift() { return SHIFT_STEP_MS / 60000; }
+function applyPixelShift(v) { SHIFT_STEP_MS = v * 60000; }
+function getCurrentBootPage() { return STATE.cfgBootPage; }
+function applyBootPage(v) {
+  STATE.cfgBootPage = v;
+  if (v !== BOOT_PAGE_AUTO) STATE.currentPage = v;
+  lsSet(BOOT_PAGE_KEY, String(v));
+}
+function getCurrentCatShuffle() { return STATE.catShuffleSec; }
+function applyCatShuffle(v) { STATE.catShuffleSec = v; lsSet(CAT_SHUFFLE_KEY, String(v)); }
+function getCurrentBatterySave() { return STATE.cfgBatterySaveMode; }
+function applyBatterySave(v) {
+  STATE.cfgBatterySaveMode = Math.max(BATTERY_SAVE_OFF, Math.min(BATTERY_SAVE_AUTO, v));
+  lsSet(BATTERY_SAVE_KEY, String(STATE.cfgBatterySaveMode));
+  restartPollTimer();
+}
+// Rotation: the board flips its software rotate (display.cpp) and touch
+// mapping; a 180deg flip changes nothing about layout, so the sim only
+// persists the value.
+function getCurrentRotation() { return STATE.cfgScreenRotation; }
+function applyRotation(v) { STATE.cfgScreenRotation = v; lsSet(ROTATION_KEY, String(v)); }
+function getCurrentNightMode() { return STATE.cfgNightModeOn ? 1 : 0; }
+function applyNightMode(v) {
+  STATE.cfgNightModeOn = v !== 0;
+  lsSet(NIGHT_MODE_KEY, String(v));
+  if (!STATE.cfgNightModeOn && STATE.nightDimActive) {
+    STATE.nightDimActive = false;
+    applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_NIGHT_MS);
+  }
+}
+function getCurrentShowCountdown() { return STATE.cfgShowCountdown ? 1 : 0; }
+function applyShowCountdown(v) { STATE.cfgShowCountdown = v !== 0; lsSet(SHOW_COUNTDOWN_KEY, String(v)); }
+function getCurrentShowAqi() { return STATE.cfgShowAqi ? 1 : 0; }
+function applyShowAqi(v) { STATE.cfgShowAqi = v !== 0; lsSet(SHOW_AQI_KEY, String(v)); }
+function getCurrentHourlyFlash() { return STATE.cfgHourlyFlash ? 1 : 0; }
+function applyHourlyFlash(v) { STATE.cfgHourlyFlash = v !== 0; lsSet(HOURLY_FLASH_KEY, String(v)); }
+function getCurrentShowProgress() { return STATE.cfgShowProgress ? 1 : 0; }
+function applyShowProgress(v) { STATE.cfgShowProgress = v !== 0; lsSet(SHOW_PROGRESS_KEY, String(v)); }
+function getCurrentReduceMotion() { return STATE.cfgReduceMotion ? 1 : 0; }
+function applyReduceMotion(v) { STATE.cfgReduceMotion = v !== 0; lsSet(REDUCE_MOTION_KEY, String(v)); }
+function getCurrentHighContrast() { return STATE.cfgHighContrast ? 1 : 0; }
+function applyHighContrast(v) { STATE.cfgHighContrast = v !== 0; applyContrast(); lsSet(HIGH_CONTRAST_KEY, String(v)); }
+
+const ROW_NAV = 0, ROW_TOGGLE = 1, ROW_ACTION = 2;
+const BRIGHTNESS_VALUES = [0, 64, 128, 191, 255];
+const POLL_VALUES = [5, 10, 20, 60, 300];
+const ONOFF = { cols: 2, count: 2, values: [0, 1], valueLabels: ['Off', 'On'] };
+const SETTINGS = [
+  { label: 'Brightness', subtitle: 'Backlight brightness', hint: '', kind: ROW_NAV, cols: 5, count: 5,
+    values: BRIGHTNESS_VALUES, valueLabels: ['0%', '25%', '50%', '75%', '100%'],
+    getCurrent: getCurrentBrightness, apply: applyBrightness },
+  { label: 'Night mode', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentNightMode, apply: applyNightMode },
+  { label: 'Rotation', subtitle: 'For upside-down mounting', hint: '', kind: ROW_NAV, cols: 2, count: 2,
+    values: [1, 3], valueLabels: ['Normal', 'Flipped'], getCurrent: getCurrentRotation, apply: applyRotation },
+  { label: 'Boot page', subtitle: 'Page shown after a restart', hint: 'Auto resumes the last page shown',
+    kind: ROW_NAV, cols: 4, count: 7, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5],
+    valueLabels: ['Auto', 'Status', 'Projects', 'Limits', 'Cats', 'Status + cats', 'Note'],
+    getCurrent: getCurrentBootPage, apply: applyBootPage },
+  { label: 'Cat shuffle', subtitle: 'How long each cat plays', hint: 'Off plays each cat to its end; Fixed keeps one',
+    kind: ROW_NAV, cols: 5, count: 5, values: [-1, 0, 5, 10, 30], valueLabels: ['Fixed', 'Off', '5s', '10s', '30s'],
+    getCurrent: getCurrentCatShuffle, apply: applyCatShuffle },
+  { label: 'Pace bars', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentShowCountdown, apply: applyShowCountdown },
+  { label: 'Show AQI', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentShowAqi, apply: applyShowAqi },
+  { label: 'Hourly signal', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentHourlyFlash, apply: applyHourlyFlash },
+  { label: 'Poll progress', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentShowProgress, apply: applyShowProgress },
+  { label: 'Poll interval', subtitle: 'How often to fetch /api/usage', hint: '', kind: ROW_NAV, cols: 5, count: 5,
+    values: POLL_VALUES, valueLabels: ['5s', '10s', '20s', '60s', '5m'],
+    getCurrent: getCurrentPollInterval, apply: applyPollInterval },
+  { label: 'Battery save', subtitle: 'Polls at most every 2 min while on', hint: "Auto follows the Mac's power state",
+    kind: ROW_NAV, cols: 3, count: 3, values: [0, 1, 2], valueLabels: ['Off', 'On', 'Auto'],
+    getCurrent: getCurrentBatterySave, apply: applyBatterySave },
+  { label: 'Pixel shift', subtitle: 'Anti-retention orbit interval', hint: '', kind: ROW_NAV, cols: 4, count: 4,
+    values: [0, 1, 3, 10], valueLabels: ['Off', '1m', '3m', '10m'],
+    getCurrent: getCurrentPixelShift, apply: applyPixelShift },
+  { label: 'Reduce motion', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentReduceMotion, apply: applyReduceMotion },
+  { label: 'Increase contrast', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
+    getCurrent: getCurrentHighContrast, apply: applyHighContrast },
+  { label: 'Forget Wi-Fi', subtitle: 'Erase the saved network and reboot into setup', hint: 'Tap twice to erase Wi-Fi',
+    kind: ROW_ACTION, cols: 1, count: 1, values: [0], valueLabels: ['Forget Wi-Fi'],
+    getCurrent: getCurrentNone, apply: applyForgetWifi, doneToast: 'Wi-Fi forgotten, restarting...' },
+  { label: 'Restart', subtitle: 'Reboot the board', hint: 'Tap twice to restart the board',
+    kind: ROW_ACTION, cols: 1, count: 1, values: [0], valueLabels: ['Restart'],
+    getCurrent: getCurrentNone, apply: applyRestart, doneToast: 'Restarting...' },
+];
+const SETTINGS_COUNT = SETTINGS.length;
+const CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
+let toastText = '', toastUntilMs = 0;
+
 // ── FORMATTING (mirroring format.cpp) ─────────────────────────
 function fmtTokens(t) {
   if (t >= 1e9) return (t / 1e9).toFixed(2) + 'B';
@@ -671,231 +809,396 @@ function fmtCountdown(sec) {
   let m = Math.floor((sec + 30) / 60);
   const h = Math.floor(m / 60);
   m %= 60;
-  return h > 0 ? h + 'h:' + String(m).padStart(2, '0') + 'm' : m + 'm';
+  return h > 0 ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm';
 }
 function fmtCountdownDHM(sec) {
   if (sec < 0) return '';
   const totalMin = Math.floor((sec + 30) / 60);
   const days = Math.floor(totalMin / 1440);
-  if (days > 0) return days + 'd:' + Math.floor((totalMin % 1440) / 60) + 'h';
-  return Math.floor(totalMin / 60) + 'h:' + String(totalMin % 60).padStart(2, '0') + 'm';
+  if (days > 0) return days + 'd ' + Math.floor((totalMin % 1440) / 60) + 'h';
+  return Math.floor(totalMin / 60) + 'h ' + String(totalMin % 60).padStart(2, '0') + 'm';
 }
 function fmtKB(bytes) { return (bytes / 1024).toFixed(1) + 'KB'; }
 function fmtGB(bytes) { return (bytes / (1024 ** 3)).toFixed(1) + 'GB'; }
 const WDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// ── FOOTER (pages.cpp) ────────────────────────────────────────
-const FOOTER_TEXT_Y = 297, FOOTER_CY = 305, PROGRESS_Y = SCREEN_H - 1;
-
-function drawWifiIcon() {
-  const c = STATE.wifiOk ? COL_GOOD : COL_WARN;
-  gfx.fillRect(30, 307, 3, 4, c);
-  gfx.fillRect(35, 303, 3, 8, c);
-  gfx.fillRect(40, 299, 3, 12, c);
+// ── PRIMITIVES (pages.cpp twin) ───────────────────────────────
+function drawCardSurface(x, y, w, h, fill) {
+  gfx.fillSmoothRoundRect(x, y, w, h, TOK_RADIUS_MD, fill);
+  if (TOK_CARD_OUTLINE) gfx.drawRoundRect(x, y, w, h, TOK_RADIUS_MD, TOK_COLOR_CARD_OUTLINE);
 }
-
-function drawSettingsIcon() {
-  const cx = 452, cy = FOOTER_CY;
-  gfx.fillCircle(cx, cy, 5, COL_TEXT2);
-  gfx.fillCircle(cx, cy, 2, COL_BG);
-  gfx.drawWideLine(cx, cy - 9, cx, cy - 6, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx, cy + 6, cx, cy + 9, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx - 9, cy, cx - 6, cy, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx + 6, cy, cx + 9, cy, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx - 6, cy - 6, cx - 4, cy - 4, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx + 4, cy + 4, cx + 6, cy + 6, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx - 6, cy + 6, cx - 4, cy + 4, 1.5, COL_TEXT2);
-  gfx.drawWideLine(cx + 4, cy - 4, cx + 6, cy - 6, 1.5, COL_TEXT2);
-}
-
-function drawFooter() {
-  const onPhase = Math.floor(Date.now() / 1000) % 2;
-  if (STATE.wifiOk) {
-    if (!STATE.connected) gfx.fillCircle(18, FOOTER_CY, 4, COL_ACCENT);
-    else if (onPhase) gfx.fillCircle(18, FOOTER_CY, 5, COL_GOOD);
-  }
-  drawWifiIcon();
-  drawSettingsIcon();
-
-  drawTextR('SM', SETTINGS_HIT_X0 - 8, FOOTER_TEXT_Y, `${STATE.currentPage + 1} / ${PAGE_COUNT}`, COL_TEXT2);
-
-  const romPct = Math.round(FLASH_USED_BYTES / FLASH_TOTAL_BYTES * 100);
-  const ramPct = Math.round(RAM_USED_BYTES / RAM_TOTAL_BYTES * 100);
-  const cpuInt = Math.round(STATE.cpuPercentAvg);
-  let x = 52;
-  x = drawText('SM', x, FOOTER_TEXT_Y, 'CPU ', COL_TEXT2);
-  x = drawText('SM', x, FOOTER_TEXT_Y, cpuInt + '%', COL_TEXT);
-  x = drawText('SM', x, FOOTER_TEXT_Y, '   ROM ', COL_TEXT2);
-  x = drawText('SM', x, FOOTER_TEXT_Y, romPct + '%', COL_TEXT);
-  x = drawText('SM', x, FOOTER_TEXT_Y, '   RAM ', COL_TEXT2);
-  drawText('SM', x, FOOTER_TEXT_Y, ramPct + '%', COL_TEXT);
-
-  // Poll-progress line (firmware: drawFooter + progressTick top-ups).
-  if (!STATE.cfgShowProgress || !STATE.connected) return;
-  const pollMs = effectivePollMs();
-  const elapsed = Math.min(performance.now() - STATE.lastPollMs, pollMs);
-  const w = Math.floor(elapsed / pollMs * SCREEN_W);
-  if (w > 0) gfx.fillRect(0, PROGRESS_Y, w, 1, COL_TEXT2);
-}
-
-function drawBatterySaveIcon() {
-  if (!batterySaveActive()) return;
-  const boxW = BATTERY_ICON_X1 - BATTERY_ICON_X0 + 1, boxH = BATTERY_ICON_Y1 - BATTERY_ICON_Y0 + 1;
-  gfx.fillRect(BATTERY_ICON_X0, BATTERY_ICON_Y0, boxW, boxH, COL_BG);
-  const bodyX = BATTERY_ICON_X0 + 4, bodyY = 7, bodyW = 19, bodyH = 11, nubW = 3, nubH = 5;
-  gfx.fillRoundRect(bodyX, bodyY, bodyW, bodyH, 2, COL_YELLOW);
-  gfx.fillRect(bodyX + bodyW, bodyY + (bodyH - nubH) / 2, nubW, nubH, COL_YELLOW);
-}
-
-// Screen-sleep pill: solid grey, no stroke/icon. Twin of pages.cpp (radius
-// is the firmware's integer SLEEP_BTN_H / 2).
-function drawSleepButton() {
-  gfx.fillRoundRect(SLEEP_BTN_X0, SLEEP_BTN_Y0, SLEEP_BTN_W, SLEEP_BTN_H, Math.floor(SLEEP_BTN_H / 2), COL_TRACK);
-}
-
-// ── DRAWING HELPERS ───────────────────────────────────────────
-function drawPercentBar(x, y, w, h, percent, color, trackColor = COL_TRACK, minFillPx = 3) {
-  gfx.fillRect(x, y, w, h, trackColor);
+function drawCard(x, y, w, h) { drawCardSurface(x, y, w, h, TOK_COLOR_SURFACE_CARD); }
+function drawSectionLabel(x, y, label) { drawText(TOK_TYPE_LABEL, x, y, label, TOK_COLOR_TEXT_SECONDARY); }
+function drawMeter(x, y, w, h, percent, color) {
+  const r = h >> 1;
+  gfx.fillSmoothRoundRect(x, y, w, h, r, TOK_COLOR_FILL_TRACK);
   if (percent < 0) return -1;
   let fillW = Math.floor(Math.min(percent, 100) / 100 * w + 0.5);
-  if (fillW < minFillPx) fillW = minFillPx;
-  gfx.fillRect(x, y, fillW, h, color);
+  if (fillW < h) fillW = h;
+  gfx.fillSmoothRoundRect(x, y, fillW, h, r, color);
   return fillW;
 }
+function fitText(f, s, maxW) {
+  if (textW(f, s) <= maxW) return s;
+  let out = s;
+  while (out.length > 0 && textW(f, out) > maxW) out = out.slice(0, -1);
+  const sp = out.lastIndexOf(' ');
+  if (sp > 0 && out.length - sp <= 4) out = out.slice(0, sp);
+  return out;
+}
+
+// ── SYSTEM GLYPHS ─────────────────────────────────────────────
+function drawCloseGlyph(cx, cy, c) {
+  gfx.drawWideLine(cx - 6, cy - 6, cx + 6, cy + 6, TOK_STROKE_GLYPH_R, c);
+  gfx.drawWideLine(cx + 6, cy - 6, cx - 6, cy + 6, TOK_STROKE_GLYPH_R, c);
+}
+function drawBackGlyph(cx, cy, c) {
+  gfx.drawWideLine(cx + 4, cy - 7, cx - 4, cy, TOK_STROKE_GLYPH_R, c);
+  gfx.drawWideLine(cx - 4, cy, cx + 4, cy + 7, TOK_STROKE_GLYPH_R, c);
+}
+function drawChevron(cx, cy, c) {
+  gfx.drawWideLine(cx - 2, cy - 5, cx + 3, cy, TOK_STROKE_GLYPH_R, c);
+  gfx.drawWideLine(cx + 3, cy, cx - 2, cy + 5, TOK_STROKE_GLYPH_R, c);
+}
+function drawGearGlyph(cx, cy, c, bg) {
+  gfx.fillSmoothCircle(cx, cy, 6, c);
+  gfx.fillSmoothCircle(cx, cy, 4, bg);
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    gfx.drawWideLine(cx + Math.round(Math.cos(a) * 7), cy + Math.round(Math.sin(a) * 7),
+                     cx + Math.round(Math.cos(a) * 9), cy + Math.round(Math.sin(a) * 9), TOK_STROKE_GLYPH_R, c);
+  }
+}
+function drawIconButtonPressed(cx, cy) { gfx.fillSmoothCircle(cx, cy, TOK_PRESSED_DISC_R, TOK_COLOR_FILL_PRESSED); }
+function drawShuffleButton(cx, cy, pressed) {
+  gfx.fillSmoothCircle(cx, cy, SHUFFLE_DISC_R, pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_PLATE);
+  const c = TOK_COLOR_TEXT_PRIMARY, r = TOK_STROKE_GLYPH_R;
+  gfx.drawWideLine(cx - 7, cy - 4, cx - 3, cy - 4, r, c);
+  gfx.drawWideLine(cx - 3, cy - 4, cx + 3, cy + 4, r, c);
+  gfx.drawWideLine(cx + 3, cy + 4, cx + 7, cy + 4, r, c);
+  gfx.drawWideLine(cx - 7, cy + 4, cx - 3, cy + 4, r, c);
+  gfx.drawWideLine(cx - 3, cy + 4, cx + 3, cy - 4, r, c);
+  gfx.drawWideLine(cx + 3, cy - 4, cx + 7, cy - 4, r, c);
+  gfx.fillTriangle(cx + 8, cy - 4, cx + 5, cy - 7, cx + 5, cy - 1, c);
+  gfx.fillTriangle(cx + 8, cy + 4, cx + 5, cy + 1, cx + 5, cy + 7, c);
+}
+function shuffleCentre(mixed) {
+  const x1 = mixed ? MIXED_GIF_X0 + MIXED_GIF_W : SCREEN_W;
+  const y1 = mixed ? MIXED_GIF_Y0 + MIXED_GIF_H : SCREEN_H;
+  return [x1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1, y1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1];
+}
+
+// ── SYSTEM CORNER ─────────────────────────────────────────────
+function drawSystemCorner(overMedia) {
+  const ay = TOK_CORNER_SLOT_Y, sz = TOK_CORNER_SLOT_SIZE;
+  if (batterySaveActive()) {
+    const bx = TOK_CORNER_SLOT_B_X;
+    if (overMedia) gfx.fillRect(bx - 4, ay - 4, sz + 8, sz + 8, TOK_COLOR_PLATE);
+    const c = TOK_COLOR_STATUS_WARNING, x = bx + 3, y = ay + 7;
+    gfx.drawRoundRect(x, y, 16, 10, 2, c);
+    gfx.drawRoundRect(x + 1, y + 1, 14, 8, 1, c);
+    gfx.fillRect(x + 3, y + 3, 5, 4, c);
+    gfx.fillRect(x + 16, y + 3, 2, 4, c);
+  }
+  const ax = TOK_CORNER_SLOT_A_X;
+  if (overMedia) gfx.fillRect(ax - 4, ay - 4, sz + 8, sz + 8, TOK_COLOR_PLATE);
+  const cx = ax + sz / 2, cy = ay + sz / 2;
+  const pressed = NAV.pressedId === 'sleep';
+  const disc = pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_RAISED;
+  gfx.fillSmoothCircle(cx, cy, 11, disc);
+  gfx.fillSmoothCircle(cx, cy, 7, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
+  gfx.fillSmoothCircle(cx + 3, cy - 3, 6, disc);
+}
+
+function drawModalHeader(back, title, pressed) {
+  const cx = TOK_CLOSE_SLOT_X + 12, cy = TOK_CLOSE_SLOT_Y + 12;
+  if (pressed) drawIconButtonPressed(cx, cy);
+  const c = pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY;
+  if (back) drawBackGlyph(cx, cy, c); else drawCloseGlyph(cx, cy, c);
+  if (title) drawText(TOK_TYPE_HEADLINE, TOK_HEADER_TITLE_X, TOK_HEADER_TITLE_Y, title, TOK_COLOR_TEXT_PRIMARY);
+}
+
+// ── STATUS STRIP ──────────────────────────────────────────────
+const PROGRESS_Y = SCREEN_H - 1, DOT_CX = 12, WIFI_X0 = 24, GEAR_CX = 452;
+const DOTS_W = PAGE_COUNT * 6 + (PAGE_COUNT - 1) * 6;
+function drawStatusDot(r) {
+  const bg = NAV.pressedId === 'health' ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS;
+  if (STATE.connected) {
+    gfx.fillSmoothCircle(DOT_CX, STRIP_CY, r, TOK_COLOR_STATUS_SUCCESS);
+  } else {
+    gfx.fillSmoothCircle(DOT_CX, STRIP_CY, r, STATE.wifiOk ? TOK_COLOR_STATUS_WARNING : TOK_COLOR_TEXT_TERTIARY);
+    gfx.fillSmoothCircle(DOT_CX, STRIP_CY, r - 2, bg);
+  }
+}
+function drawWifiGlyph() {
+  const c = STATE.wifiOk ? TOK_COLOR_STATUS_SUCCESS : TOK_COLOR_STATUS_ERROR;
+  const bottom = STRIP_CY + 6;
+  for (let i = 0; i < 3; i++) {
+    const h = 4 * (i + 1), x = WIFI_X0 + 2 + i * 5;
+    if (STATE.wifiOk) gfx.fillRect(x, bottom - h, 3, h, c);
+    else gfx.drawRect(x, bottom - h, 3, h, c);
+  }
+}
+function progressLineW() {
+  const pollMs = effectivePollMs();
+  const elapsed = Math.min(performance.now() - STATE.lastPollMs, pollMs);
+  return Math.floor(elapsed / pollMs * SCREEN_W);
+}
+let progressDrawnW = 0, progressLastMs = 0;
+function drawStatusStrip() {
+  if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 12, 48, 24, 12, TOK_COLOR_FILL_PRESSED);
+  drawStatusDot(4);
+  drawWifiGlyph();
+  let x = TOK_LAYOUT_HALF_SPLIT_X - DOTS_W / 2;
+  for (let i = 0; i < PAGE_COUNT; i++, x += 12)
+    gfx.fillSmoothRoundRect(x, STRIP_CY - 3, 6, 6, 3, i === STATE.currentPage ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_FILL_TRACK);
+  const gp = NAV.pressedId === 'gear';
+  if (gp) drawIconButtonPressed(GEAR_CX, STRIP_CY);
+  drawGearGlyph(GEAR_CX, STRIP_CY, gp ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY,
+                gp ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS);
+  progressDrawnW = 0;
+  progressLastMs = performance.now();
+  if (!STATE.cfgShowProgress || !STATE.connected) return;
+  const w = progressLineW();
+  if (w > 0) gfx.fillRect(0, PROGRESS_Y, w, 1, TOK_COLOR_TEXT_SECONDARY);
+  progressDrawnW = w;
+}
+function progressTick(nowMs) {
+  if (!STATE.cfgShowProgress || !STATE.connected) return false;
+  if (nowMs - progressLastMs < TOK_MOTION_PROGRESS_MIN_MS) return false;
+  progressLastMs = nowMs;
+  const w = progressLineW();
+  if (w < progressDrawnW) { gfx.fillRect(0, PROGRESS_Y, SCREEN_W, 1, TOK_COLOR_BG_CANVAS); progressDrawnW = 0; }
+  if (w <= progressDrawnW) return false;
+  gfx.fillRect(progressDrawnW, PROGRESS_Y, w - progressDrawnW, 1, TOK_COLOR_TEXT_SECONDARY);
+  progressDrawnW = w;
+  return true;
+}
+const PULSE_R = [5, 5, 4];
+let pulseFrame = -1, pulseSeenSeq = 0;
+function pulseTick() {
+  if (STATE.pollOkSeq !== pulseSeenSeq) {
+    pulseSeenSeq = STATE.pollOkSeq;
+    if (!STATE.cfgReduceMotion) pulseFrame = 0;
+  }
+  if (pulseFrame < 0) return false;
+  const bg = NAV.pressedId === 'health' ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS;
+  gfx.fillRect(DOT_CX - 6, STRIP_CY - 6, 13, 13, bg);
+  drawStatusDot(PULSE_R[pulseFrame]);
+  if (++pulseFrame >= TOK_MOTION_PULSE_FRAMES) pulseFrame = -1;
+  return true;
+}
+
 function liveResetsInSec(baseSec) {
   if (baseSec < 0) return -1;
   const rem = baseSec - Math.floor((performance.now() - STATE.lastFetchOkMs) / 1000);
   return rem < 0 ? 0 : rem;
 }
-function drawLimitsRow(y, label, right, percent) {
-  drawText('MD', 15, y, label, COL_TEXT);
-  drawTextR('MD', 465, y, right, COL_TEXT2);
-  drawPercentBar(15, y + 27, 450, 10, percent, COL_ACCENT);
-}
-function limitRowText(percent, resets) {
-  if (percent < 0) return '--';
-  return (resets ? 'Resets ' + resets + '  ' : '') + percent + '%';
-}
 
+// ── LIMITS PAGE ───────────────────────────────────────────────
+const LIM_X = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD, LIM_R = TOK_LAYOUT_CONTENT_X1 - TOK_SPACE_CARD_PAD;
+const ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD, ROW_STEP = ROW_H + TOK_SPACE_STACK;
+function drawDataRow(x, r, y, label, detail, percent, meterColor) {
+  drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
+  const pct = percent >= 0 ? percent + '%' : '--';
+  drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  const vx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
+  if (detail) drawTextR(TOK_TYPE_BODY, vx, y, detail, TOK_COLOR_TEXT_SECONDARY);
+  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, meterColor);
+}
+function resetsDetail(resets) { return resets ? 'Resets ' + resets : ''; }
 function drawLimitsPage() {
-  drawText('SMB', 15, 8, 'USAGE LIMITS', COL_TEXT);
-  let y = 34;
-  const STEP = 51;
-  const ctxText = STATE.ctxTokens >= 0 ? fmtTokens(STATE.ctxTokens) + '  ' + STATE.ctxPercent + '%' : '--';
-  drawLimitsRow(y, 'Context window', ctxText, STATE.ctxPercent); y += STEP;
-  drawLimitsRow(y, '5-hour limit', limitRowText(STATE.sessionPercent, STATE.sessionResets), STATE.sessionPercent); y += STEP;
-  drawLimitsRow(y, 'Weekly (all models)', limitRowText(STATE.weekPercent, STATE.weekResets), STATE.weekPercent); y += STEP;
+  drawCard(TOK_LAYOUT_CONTENT_X0, TOK_LAYOUT_CONTENT_Y0, TOK_LAYOUT_CONTENT_W, TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0);
+  const top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
+  drawSectionLabel(LIM_X, top, 'USAGE LIMITS');
+  let y = top + 17 + TOK_SPACE_SM;
+  drawDataRow(LIM_X, LIM_R, y, 'Context window', STATE.ctxTokens >= 0 ? fmtTokens(STATE.ctxTokens) : '',
+              STATE.ctxTokens >= 0 ? STATE.ctxPercent : -1, TOK_COLOR_DATA_USAGE);
+  y += ROW_STEP;
+  drawDataRow(LIM_X, LIM_R, y, '5-hour limit', resetsDetail(STATE.sessionResets), STATE.sessionPercent, TOK_COLOR_DATA_USAGE);
+  y += ROW_STEP;
+  drawDataRow(LIM_X, LIM_R, y, 'Weekly (all models)', resetsDetail(STATE.weekResets), STATE.weekPercent, TOK_COLOR_DATA_USAGE);
+  y += ROW_STEP;
   if (STATE.weekModelPercent >= 0) {
-    const name = STATE.weekModelName || 'model';
-    drawLimitsRow(y, 'Weekly (' + name + ')', limitRowText(STATE.weekModelPercent, STATE.weekModelResets),
-                  STATE.weekModelPercent);
-    y += STEP;
+    drawDataRow(LIM_X, LIM_R, y, 'Weekly (' + (STATE.weekModelName || 'model') + ')',
+                resetsDetail(STATE.weekModelResets), STATE.weekModelPercent, TOK_COLOR_DATA_USAGE);
+    y += ROW_STEP;
   }
   if (STATE.creditsUsed >= 0) {
-    drawLimitsRow(y, 'Usage credits', fmtCost(STATE.creditsUsed) + ' of ' + fmtCost(STATE.creditsLimit),
-                  STATE.creditsPercent);
+    drawDataRow(LIM_X, LIM_R, y, 'Usage credits', fmtCost(STATE.creditsUsed) + ' of ' + fmtCost(STATE.creditsLimit),
+                STATE.creditsPercent, TOK_COLOR_DATA_USAGE);
   }
 }
 
+// ── PROJECTS PAGE ─────────────────────────────────────────────
+const PROJ_CARD_H = 165, TREND_CARD_H = 99;
+const TREND_CARD_Y = TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H + TOK_SPACE_GUTTER;
+const PROJ_ROW_STEP = 23 + TOK_SPACE_STACK, PROJ_VALUE_W = 56;
+function drawEmptyState(cx, y0, h, title, desc, isError, titleFont = TOK_TYPE_HEADLINE, titleColor = TOK_COLOR_TEXT_PRIMARY) {
+  const th = fontLineH(titleFont);
+  const total = th + TOK_SPACE_SM + 17;
+  const y = y0 + Math.trunc((h - total) / 2);
+  drawTextC(titleFont, cx, y, title, isError ? TOK_COLOR_STATUS_ERROR : titleColor);
+  drawTextC(TOK_TYPE_CAPTION, cx, y + th + TOK_SPACE_SM, desc, TOK_COLOR_TEXT_SECONDARY);
+}
 function drawProjectsPage() {
-  drawText('SMB', 15, 8, 'TOP PROJECTS (7D)', COL_TEXT);
+  const x0 = TOK_LAYOUT_CONTENT_X0, w = TOK_LAYOUT_CONTENT_W;
+  drawCard(x0, TOK_LAYOUT_CONTENT_Y0, w, PROJ_CARD_H);
+  const px = x0 + TOK_SPACE_CARD_PAD, pr = x0 + w - TOK_SPACE_CARD_PAD;
+  const top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
+  drawSectionLabel(px, top, 'TOP PROJECTS 7D');
   if (STATE.projects.length === 0) {
-    drawText('SM', 15, 34, 'No data yet', COL_TEXT2);
+    const ly = top + 17;
+    drawEmptyState(x0 + w / 2, ly, TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H - ly, 'No project data yet',
+                   'Projects appear after the first poll', false);
   } else {
     const shown = Math.min(STATE.projects.length, 4);
     let maxTokens = 1;
     for (let i = 0; i < shown; i++) maxTokens = Math.max(maxTokens, STATE.projects[i].tokens);
-    let y = 32;
-    const barMaxW = 360;
-    for (let i = 0; i < shown; i++) {
+    const meterX = TOK_LAYOUT_COL_RIGHT_X;
+    const meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - meterX;
+    const nameW = meterX - TOK_SPACE_SM - px;
+    let y = top + 17 + TOK_SPACE_SM;
+    for (let i = 0; i < shown; i++, y += PROJ_ROW_STEP) {
       const p = STATE.projects[i];
-      drawText('SM', 15, y, p.name, COL_TEXT);
-      const barW = Math.floor(p.tokens / maxTokens * barMaxW);
-      gfx.fillRect(15, y + 19, barMaxW, 10, COL_SURFACE);
-      gfx.fillRoundRect(15, y + 19, Math.max(barW, 5), 10, 2, COL_ACCENT);
-      drawText('SM', 15 + barMaxW + 12, y + 15, fmtTokens(p.tokens), COL_TEXT2);
-      y += 35;
+      drawText(TOK_TYPE_BODY, px, y, fitText(TOK_TYPE_BODY, p.name, nameW), TOK_COLOR_TEXT_PRIMARY);
+      const pct = Math.floor(p.tokens / maxTokens * 100 + 0.5);
+      drawMeter(meterX, y + 12 - TOK_METER_MD / 2, meterW, TOK_METER_MD, pct, TOK_COLOR_DATA_USAGE);
+      drawTextR(TOK_TYPE_NUMERAL_SM, pr, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION),
+                fmtTokens(p.tokens), TOK_COLOR_TEXT_SECONDARY);
     }
   }
-  gfx.fillRect(15, 176, 462, 1, COL_BORDER);
-  drawText('SMB', 15, 184, '7-DAY TREND', COL_TEXT);
-  const maxTrend = Math.max(1, ...STATE.trend);
-  const dayLabels = ['-6', '-5', '-4', '-3', '-2', '-1', 'today'];
-  const chartX = 36, chartY = 208, chartH = 62, barW = 51, gap = 12;
+  drawCard(x0, TREND_CARD_Y, w, TREND_CARD_H);
+  const ty = TREND_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  drawSectionLabel(px, ty, '7-DAY TREND');
+  let total = 0, maxTrend = 1;
+  for (let i = 0; i < 7; i++) { total += STATE.trend[i]; maxTrend = Math.max(maxTrend, STATE.trend[i]); }
+  drawText(TOK_TYPE_BODY, px, ty + 17 + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, px, ty + 17 + TOK_SPACE_SM + 23, 'tokens this week', TOK_COLOR_TEXT_SECONDARY);
+  const DAY_LABELS = ['-6', '-5', '-4', '-3', '-2', '-1', 'Today'];
+  const barW = 32, gap = TOK_SPACE_SM;
+  const axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - 17;
+  const feet = axisY - TOK_SPACE_XS;
+  const chartH = feet - ty;
   for (let i = 0; i < 7; i++) {
-    const barH = Math.floor(STATE.trend[i] / maxTrend * chartH);
-    const bx = chartX + i * (barW + gap);
-    gfx.fillRoundRect(bx, chartY + chartH - barH, barW, Math.max(barH, 3), 4, COL_ACCENT);
-    drawTextC('SM', bx + Math.trunc(barW / 2), chartY + chartH + 3, dayLabels[i], COL_TEXT2);
+    const bx = TOK_LAYOUT_COL_RIGHT_X + i * (barW + gap);
+    let bh = Math.trunc(STATE.trend[i] / maxTrend * chartH);
+    if (bh < 4) bh = 4;
+    gfx.fillSmoothRoundRect(bx, feet - bh, barW, bh, TOK_RADIUS_SM, TOK_COLOR_DATA_USAGE);
+    drawTextC(TOK_TYPE_CAPTION, bx + barW / 2, axisY, DAY_LABELS[i], i === 6 ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_TERTIARY);
   }
 }
 
-// Vector weather icon centred on (cx, cy), scaled by k (pages.cpp twin).
+// ── WEATHER GLYPHS ────────────────────────────────────────────
 function drawWeatherIcon(cx, cy, code, k) {
   const S = (v) => Math.round(v * k);
   const lw = 1.0 * k;
-  if (code < 0) { drawTextC('SM', cx, cy - Math.trunc(fontLineH('SM') / 2), '--', COL_TEXT2); return; }
+  if (code < 0) { drawTextC(TOK_TYPE_CAPTION, cx, cy - Math.trunc(fontLineH(TOK_TYPE_CAPTION) / 2), '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  const sun = TOK_COLOR_CONTENT_SUN;
   if (code === 0 || code === 1) {
-    gfx.fillCircle(cx, cy, S(4), COL_YELLOW);
-    gfx.drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, COL_YELLOW);
-    gfx.drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, COL_YELLOW);
-    gfx.drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, COL_YELLOW);
-    gfx.drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, COL_YELLOW);
-    gfx.drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, COL_YELLOW);
-    gfx.drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, COL_YELLOW);
-    gfx.drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, COL_YELLOW);
-    gfx.drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, COL_YELLOW);
+    gfx.fillSmoothCircle(cx, cy, S(4), sun);
+    gfx.drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, sun);
+    gfx.drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, sun);
+    gfx.drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, sun);
+    gfx.drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, sun);
+    gfx.drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, sun);
+    gfx.drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, sun);
+    gfx.drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, sun);
+    gfx.drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, sun);
     return;
   }
   if (code >= 95) {
-    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), COL_YELLOW);
-    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), COL_YELLOW);
-    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), COL_YELLOW);
-    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), COL_YELLOW);
+    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), sun);
+    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), sun);
+    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), sun);
+    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), sun);
     return;
   }
   if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
-    gfx.drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, COL_TEXT);
-    gfx.drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, COL_TEXT);
-    gfx.drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, COL_TEXT);
+    const c = TOK_COLOR_CONTENT_SNOW;
+    gfx.drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, c);
+    gfx.drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, c);
+    gfx.drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, c);
     return;
   }
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
-    gfx.fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), COL_BLUE);
-    gfx.fillCircle(cx - S(6), cy - S(3), S(2), COL_BLUE);
-    gfx.fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), COL_BLUE);
-    gfx.fillCircle(cx + S(5), cy - S(1), S(2), COL_BLUE);
-    gfx.fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), COL_BLUE);
-    gfx.fillCircle(cx - S(1), cy + S(6), S(3), COL_BLUE);
+    const c = TOK_COLOR_CONTENT_RAIN;
+    gfx.fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), c);
+    gfx.fillSmoothCircle(cx - S(6), cy - S(3), S(2), c);
+    gfx.fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), c);
+    gfx.fillSmoothCircle(cx + S(5), cy - S(1), S(2), c);
+    gfx.fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), c);
+    gfx.fillSmoothCircle(cx - S(1), cy + S(6), S(3), c);
     return;
   }
-  gfx.fillCircle(cx - S(4), cy - S(2), S(4), COL_TEXT2);
-  gfx.fillCircle(cx + S(3), cy - S(3), S(5), COL_TEXT2);
-  gfx.fillRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), COL_TEXT2);
+  const c = TOK_COLOR_CONTENT_CLOUD;
+  gfx.fillSmoothCircle(cx - S(4), cy - S(2), S(4), c);
+  gfx.fillSmoothCircle(cx + S(3), cy - S(3), S(5), c);
+  gfx.fillSmoothRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), c);
+}
+function drawDegreeRing(x, capTop, bg) {
+  gfx.fillSmoothCircle(x + 4, capTop + 4, 4, TOK_COLOR_TEXT_SECONDARY);
+  gfx.fillSmoothCircle(x + 4, capTop + 4, 2, bg);
+  return x + 9;
+}
+function drawTempC(f, cx, y, t, have) {
+  if (!have) { drawTextC(f, cx, y, '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  const v = String(t);
+  const w = textW(f, v) + textW(TOK_TYPE_CAPTION, 'C');
+  const x = drawText(f, cx - Math.trunc(w / 2), y, v, TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, x, y + fontAscent(f) - fontAscent(TOK_TYPE_CAPTION), 'C', TOK_COLOR_TEXT_SECONDARY);
 }
 
-function drawMiniBar(x, y, w, percent, color, trackColor = COL_TRACK, h = 8) {
-  return drawPercentBar(x, y, w, h, percent, color, trackColor, h);
-}
-
-// ── SHINE SWEEP (pages.cpp twin; drawn whole every frame here) ────────────
-const SHINE_PERIOD_MS = 2600, SHINE_BAND_R = 10;
-const SHINE_BAR_X = 16, SHINE_BAR_W = 208, SHINE_BAR_H = 6;
-const SHINE_BAR_Y = [70, 195];
+// ── PACE SWEEP (one per successful poll) ──────────────────────
+const SHINE_BAND_R = 10;
+const SHINE_BAR_X = TOK_LAYOUT_COL_LEFT_X + TOK_SPACE_CARD_PAD_COMPACT_H;
+const SHINE_BAR_W = TOK_LAYOUT_COL_LEFT_W - 2 * TOK_SPACE_CARD_PAD_COMPACT_H;
+const SHINE_BAR_H = TOK_METER_SM;
+const shineBarY = [-1, -1], shineFillPx = [-1, -1], shinePrevCenter = [null, null];
+let sweepStartMs = 0, sweepActive = false, sweepSeenSeq = 0;
 function shineColor(i, center) {
   const d = Math.abs(i - center);
-  return d <= 2 ? COL_SHINE_HI : d <= 6 ? COL_SHINE_MID : d <= SHINE_BAND_R ? COL_SHINE_LO : COL_GOOD;
+  return d <= 2 ? TOK_GREEN_SHINE_HI : d <= 6 ? TOK_GREEN_SHINE_MID : d <= SHINE_BAND_R ? TOK_GREEN_SHINE_LO : TOK_COLOR_DATA_PACE;
 }
-function drawShineStrip(x, y, fillW, nowMs) {
-  if (fillW < 14) return;
-  const phase = (nowMs % SHINE_PERIOD_MS) / SHINE_PERIOD_MS;
-  const center = -SHINE_BAND_R + Math.floor(phase * (SHINE_BAR_W + 2 * SHINE_BAND_R));
-  for (let i = 2; i <= fillW - 3; i++) gfx.fillRect(x + i, y, 1, SHINE_BAR_H, shineColor(i, center));
+function drawShineStrip(barIdx, center, force) {
+  const fillW = shineFillPx[barIdx], y = shineBarY[barIdx];
+  if (fillW < 14 || y < 0) return false;
+  const prev = force ? null : shinePrevCenter[barIdx];
+  if (prev === center) return false;
+  shinePrevCenter[barIdx] = center;
+  let changed = false;
+  for (let i = 2; i <= fillW - 3; i++) {
+    const c = shineColor(i, center);
+    if (prev !== null && c === shineColor(i, prev)) continue;
+    gfx.fillRect(SHINE_BAR_X + i, y, 1, SHINE_BAR_H, c);
+    changed = true;
+  }
+  return changed;
+}
+function leftColumnPage() { return STATE.currentPage === 0 || STATE.currentPage === MIXED_PAGE || STATE.currentPage === NOTE_PAGE; }
+function sweepCenter(nowMs) {
+  const t = Math.min(1, (nowMs - sweepStartMs) / (TOK_MOTION_SWEEP_MS * motionTimeScale));
+  return -SHINE_BAND_R + Math.trunc(t * (SHINE_BAR_W + 2 * SHINE_BAND_R));
+}
+function shineTick(nowMs) {
+  if (STATE.pollOkSeq !== sweepSeenSeq) {
+    sweepSeenSeq = STATE.pollOkSeq;
+    if (!STATE.cfgReduceMotion && STATE.cfgShowCountdown && leftColumnPage()) {
+      sweepActive = true; sweepStartMs = nowMs;
+      shinePrevCenter[0] = shinePrevCenter[1] = null;
+    }
+  }
+  if (!sweepActive) return false;
+  if (!leftColumnPage() || !STATE.cfgShowCountdown) { sweepActive = false; return false; }
+  const center = sweepCenter(nowMs);
+  const done = center >= SHINE_BAR_W + SHINE_BAND_R;
+  let changed = false;
+  for (let i = 0; i < 2; i++) if (drawShineStrip(i, center, false)) changed = true;
+  if (done) sweepActive = false;
+  return changed;
 }
 
-function drawCardLabel(x, y, label) { drawText('SMB', x, y, label, COL_TEXT2); }
-function drawCard(x, y, w, h) { gfx.fillRect(x, y, w, h, COL_SURFACE); gfx.drawRect(x, y, w, h, COL_BORDER); }
-
+// ── SHARED LEFT COLUMN ────────────────────────────────────────
 const SESSION_WINDOW_SEC = 5 * 3600, WEEK_WINDOW_SEC = 7 * 24 * 3600;
 function elapsedPercentOfWindow(remainingSec, windowSec) {
   if (remainingSec < 0) return -1;
@@ -913,42 +1216,44 @@ function formatPaceDur(currentPct, elapsedSec, remainingSec) {
 }
 function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec) {
   if (!ahead) return;
-  const x2 = drawText('MDB', x, baseline - fontAscent('MDB'), '!', COL_WARN);
+  const x2 = drawText(TOK_TYPE_HEADLINE, x, baseline - fontAscent(TOK_TYPE_HEADLINE), '!', TOK_COLOR_STATUS_ERROR);
   const dur = formatPaceDur(currentPct, elapsedSec, remainingSec);
-  if (dur) drawText('MD', x2 + 3, baseline - fontAscent('MD'), dur, COL_TEXT2);
+  if (dur) drawText(TOK_TYPE_BODY, x2 + TOK_SPACE_HAIR, baseline - fontAscent(TOK_TYPE_BODY), dur, TOK_COLOR_TEXT_SECONDARY);
 }
-
-function drawLimitHalf(topY, label, percent, ahead, elapsed, rem, pace, barIdx, resets, inText, resetsFont) {
-  const pctStr = percent >= 0 ? percent + '%' : '--';
-  const pctY = topY + 9;
-  const baseline = pctY + fontAscent('LG');
-  const x = drawText('LG', 16, pctY, pctStr, COL_ACCENT);
-  drawCardLabel(x + 8, baseline - fontAscent('SMB'), label);
-  drawPaceFlag(x + 8 + textW('SMB', label) + 8, baseline, ahead, percent, elapsed, rem);
-
-  const barY = SHINE_BAR_Y[barIdx] - 14;
-  drawMiniBar(16, barY, SHINE_BAR_W, percent, COL_ACCENT);
+function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx, resets, inText) {
+  drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
+  const x = SHINE_BAR_X;
+  const top = cardY + TOK_SPACE_CARD_PAD_COMPACT_V;
+  const baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
+  const xe = percent >= 0 ? drawText(TOK_TYPE_NUMERAL_LG, x, top, percent + '%', TOK_COLOR_DATA_USAGE)
+                          : drawText(TOK_TYPE_NUMERAL_LG, x, top, '--', TOK_COLOR_TEXT_TERTIARY);
+  const lx = xe + TOK_SPACE_SM;
+  drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);
+  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem);
+  let y = top + fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_STACK_TIGHT;
+  drawMeter(x, y, SHINE_BAR_W, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
+  y += TOK_METER_MD + TOK_SPACE_STACK_TIGHT;
   if (STATE.cfgShowCountdown) {
-    const fill = drawMiniBar(16, SHINE_BAR_Y[barIdx], SHINE_BAR_W, pace, COL_GOOD, COL_TRACK_BLACK, SHINE_BAR_H);
-    drawShineStrip(SHINE_BAR_X, SHINE_BAR_Y[barIdx], fill, performance.now());
+    shineBarY[barIdx] = y;
+    shineFillPx[barIdx] = drawMeter(x, y, SHINE_BAR_W, SHINE_BAR_H, pace, TOK_COLOR_DATA_PACE);
+    if (sweepActive) drawShineStrip(barIdx, sweepCenter(performance.now()), true);
+    y += SHINE_BAR_H + TOK_SPACE_STACK_TIGHT;
+  } else {
+    shineBarY[barIdx] = -1; shineFillPx[barIdx] = -1;
   }
-  const resetsY = SHINE_BAR_Y[barIdx] + 12;
-  drawText(resetsFont, 16, resetsY, resets ? 'resets ' + resets : 'resets --', COL_TEXT2);
-  if (inText) drawText('MD', 16, resetsY + 23, inText, COL_TEXT);
+  const rx = drawText(TOK_TYPE_CAPTION, x, y, 'Resets ', TOK_COLOR_TEXT_SECONDARY);
+  if (resets) drawText(TOK_TYPE_CAPTION, rx, y, resets, TOK_COLOR_TEXT_SECONDARY);
+  else drawText(TOK_TYPE_CAPTION, rx, y, '--', TOK_COLOR_TEXT_TERTIARY);
+  if (inText) drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
 }
-
-// Twin of pages.cpp's weekResetWeekdayLabel(): swap the server's "Oct 1,
-// 04:59" for a locally computed weekday name, "Thu, 04:59".
+// Twin of pages.cpp's weekResetWeekdayLabel(): "Oct 1, 04:59" -> "Thu 04:59".
 function weekResetWeekdayLabel(weekRem, resets) {
   if (!resets) return resets;
   const commaIdx = resets.indexOf(',');
   if (weekRem < 0 || commaIdx < 0) return resets;
-  return bangkokWeekdayAt(weekRem) + resets.slice(commaIdx);
+  return bangkokWeekdayAt(weekRem) + ' ' + resets.slice(commaIdx + 1).trimStart();
 }
-
-function drawLimitsCard() {
-  drawCard(LEFT_X, 3, LEFT_W, 132);
-  drawCard(LEFT_X, 137, LEFT_W, 116);
+function drawLimitsColumn() {
   const sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
   const weekRem = liveResetsInSec(STATE.weekResetsInSec);
   const sessionPace = elapsedPercentOfWindow(sessionRem, SESSION_WINDOW_SEC);
@@ -957,39 +1262,40 @@ function drawLimitsCard() {
   const weekAhead = STATE.weekPercent >= 0 && weekPace >= 0 && STATE.weekPercent > weekPace + 2;
   const sessionElapsed = sessionRem >= 0 ? SESSION_WINDOW_SEC - sessionRem : -1;
   const weekElapsed = weekRem >= 0 ? WEEK_WINDOW_SEC - weekRem : -1;
-  drawLimitHalf(3, '5H', STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem, sessionPace, 0,
-                STATE.sessionResets, sessionRem >= 0 ? 'in ' + fmtCountdown(sessionRem) : '', 'MD');
-  drawLimitHalf(137, 'WK', STATE.weekPercent, weekAhead, weekElapsed, weekRem, weekPace, 1,
-                weekResetWeekdayLabel(weekRem, STATE.weekResets),
-                weekRem >= 0 ? 'in ' + fmtCountdownDHM(weekRem) : '', 'MD');
+  drawLimitCard(LIMIT5H_Y, '5H', STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem, sessionPace, 0,
+                STATE.sessionResets, sessionRem >= 0 ? 'in ' + fmtCountdown(sessionRem) : '');
+  drawLimitCard(LIMITWK_Y, 'WK', STATE.weekPercent, weekAhead, weekElapsed, weekRem, weekPace, 1,
+                weekResetWeekdayLabel(weekRem, STATE.weekResets), weekRem >= 0 ? 'in ' + fmtCountdownDHM(weekRem) : '');
 }
-
 function drawBtcCard() {
-  drawCard(LEFT_X, 255, LEFT_W, 35);
-  const baseline = 279;
-  const x = drawText('SM', 16, baseline - fontAscent('SM'), 'BTCUSDT', COL_TEXT2);
-  drawText('MDB', x + 10, baseline - fontAscent('MDB'), fmtBtc(STATE.btcPrice), COL_TEXT);
+  drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
+  const top = BTC_Y + Math.trunc((BTC_CARD_H - fontLineH(TOK_TYPE_HEADLINE)) / 2);
+  const baseline = top + fontAscent(TOK_TYPE_HEADLINE);
+  const x = drawText(TOK_TYPE_CAPTION, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_CAPTION), 'BTC', TOK_COLOR_TEXT_SECONDARY);
+  if (STATE.btcPrice >= 0) drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
+  else drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, '--', TOK_COLOR_TEXT_TERTIARY);
 }
 
 // ── NOTE PAGE (pages.cpp twin) ────────────────────────────────
-const NOTE_X = RIGHT_X, NOTE_Y = 3, NOTE_W = RIGHT_W, NOTE_H = CONTENT_Y1 - 3;
-const NOTE_TX = NOTE_X + 9;
-const NOTE_TY = 26;
-const NOTE_TY_MAX = NOTE_Y + NOTE_H - 5;
-const NOTE_TEXT_W = 220;
-const NOTE_FONTS = ['MONO1', 'MONO2', 'MONO3'];
+const NOTE_X = TOK_LAYOUT_COL_RIGHT_X, NOTE_Y = TOK_LAYOUT_CONTENT_Y0;
+const NOTE_W = TOK_LAYOUT_COL_RIGHT_W, NOTE_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+const NOTE_TX = NOTE_X + TOK_SPACE_CARD_PAD;
+const NOTE_TY = NOTE_Y + TOK_SPACE_CARD_PAD + 17 + TOK_SPACE_SM;
+const NOTE_TY_MAX = NOTE_Y + NOTE_H - TOK_SPACE_CARD_PAD;
+const NOTE_TEXT_W = NOTE_W - 2 * TOK_SPACE_CARD_PAD;
+const NOTE_FONTS = [TOK_TYPE_MONO_S, TOK_TYPE_MONO_M, TOK_TYPE_MONO_L];
 
 // ── Syntax highlighting ───────────────────────────────────────────────────
 // Same rule set as src/pages.cpp (and ~/cyd's pages.cpp, simulator.html,
 // note.html, note.py). Precedence, first match wins:
-//   1. inside a `backtick span`      -> COL_BLUE (delimiters included)
-//   2. word is TODO/FIXME/BUG        -> COL_WARN
-//      word is DONE/OK               -> COL_GOOD
-//      word is numeric               -> COL_YELLOW
-//   3. line begins '#'               -> COL_ACCENT (whole line)
-//      line begins '>'               -> COL_TEXT2  (whole line)
-//   4. leading "- ", "* ", "+ "      -> COL_ACCENT (the marker char only)
-//   5. otherwise                     -> COL_TEXT
+//   1. inside a `backtick span`      -> note.code (delimiters included)
+//   2. word is TODO/FIXME/BUG        -> note.keyword.bad
+//      word is DONE/OK               -> note.keyword.good
+//      word is numeric               -> note.number
+//   3. line begins '#'               -> note.heading (whole line)
+//      line begins '>'               -> note.quote   (whole line)
+//   4. leading "- ", "* ", "+ "      -> note.marker (the marker char only)
+//   5. otherwise                     -> note.text
 // Keywords are matched case-SENSITIVE uppercase-only.
 function notePunctOpen(c) { return c === '(' || c === '[' || c === '{' || c === '"' || c === "'"; }
 function notePunctClose(c) {
@@ -1006,19 +1312,19 @@ function noteWordColor(s, a, b) {
   while (b > a && notePunctClose(s[b - 1])) b--;
   if (b === a) return null;
   const w = s.slice(a, b);
-  if (w === 'TODO' || w === 'FIXME' || w === 'BUG') return COL_WARN;
-  if (w === 'DONE' || w === 'OK') return COL_GOOD;
+  if (w === 'TODO' || w === 'FIXME' || w === 'BUG') return TOK_NOTE_KEYWORD_BAD;
+  if (w === 'DONE' || w === 'OK') return TOK_NOTE_KEYWORD_GOOD;
   let hasDigit = false;
   for (let i = a; i < b; i++) {
     if (!noteIsNumChar(s[i])) return null;
     if (noteIsDigit(s[i])) hasDigit = true;
   }
-  return hasDigit ? COL_YELLOW : null;
+  return hasDigit ? TOK_NOTE_NUMBER : null;
 }
 
 function drawNotePane() {
   drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
-  drawCardLabel(NOTE_TX, 7, 'NOTE');
+  drawSectionLabel(NOTE_TX, NOTE_Y + TOK_SPACE_CARD_PAD, 'NOTE');
   const s = STATE.note || '';
   const size = Math.min(3, Math.max(1, STATE.noteSize || 1));
   const font = NOTE_FONTS[size - 1];
@@ -1026,14 +1332,10 @@ function drawNotePane() {
   const glyphH = fontLineH(font);
   const lineH = glyphH;
   const cols = Math.floor(NOTE_TEXT_W / glyphW);
-
   if (s.length === 0) {
-    const cx = NOTE_X + Math.trunc(NOTE_W / 2);
-    drawTextC('SM', cx, 132, 'no note yet', COL_TEXT2);
-    drawTextC('SM', cx, 152, 'edit at :8787/note', COL_TEXT2);
+    drawEmptyState(NOTE_X + NOTE_W / 2, NOTE_Y, NOTE_H, 'No note yet', 'Edit at :8787/note', false);
     return;
   }
-
   let y = NOTE_TY, col = 0, i = 0;
   const n = s.length;
   while (i < n) {
@@ -1043,8 +1345,8 @@ function drawNotePane() {
     while (p < lineEnd && s[p] === ' ') p++;
     let lineColor = null, markerIdx = -1;
     if (p < lineEnd) {
-      if (s[p] === '#') lineColor = COL_ACCENT;
-      else if (s[p] === '>') lineColor = COL_TEXT2;
+      if (s[p] === '#') lineColor = TOK_NOTE_HEADING;
+      else if (s[p] === '>') lineColor = TOK_COLOR_TEXT_SECONDARY;  // note.quote
       else if ((s[p] === '-' || s[p] === '*' || s[p] === '+') && (p + 1 === lineEnd || s[p + 1] === ' ')) markerIdx = p;
     }
     let inCode = false;
@@ -1068,12 +1370,12 @@ function drawNotePane() {
       while (i < wEnd) {
         if (col >= cols) { y += lineH; col = 0; if (y + glyphH > NOTE_TY_MAX) return; }
         let c;
-        if (s[i] === '`') { inCode = !inCode; c = COL_BLUE; }
-        else if (inCode) c = COL_BLUE;
+        if (s[i] === '`') { inCode = !inCode; c = TOK_NOTE_CODE; }
+        else if (inCode) c = TOK_NOTE_CODE;
         else if (wordColor) c = wordColor;
         else if (lineColor) c = lineColor;
-        else if (i === markerIdx) c = COL_ACCENT;
-        else c = COL_TEXT;
+        else if (i === markerIdx) c = TOK_NOTE_MARKER;
+        else c = TOK_NOTE_TEXT;
         drawChar(font, NOTE_TX + col * glyphW, y, s[i], c);
         col++; i++;
       }
@@ -1083,86 +1385,77 @@ function drawNotePane() {
     if (y + glyphH > NOTE_TY_MAX) return;
   }
 }
+function drawNotePage() { drawLimitsColumn(); drawBtcCard(); drawNotePane(); }
 
-function drawNotePage() { drawLimitsCard(); drawBtcCard(); drawNotePane(); }
-
-// Mixed page: static half (pages.cpp's drawMixedPageStatic) + the cat pane,
-// which on the device is the 2x-downscaled GIF -- a placeholder here, like
-// the CYD simulator's (cat playback is the one firmware-only surface).
-function drawMixedPage() {
-  gfx.fillScreen(COL_BG);
-  drawLimitsCard();
+// Mixed page's static half (pages.cpp's drawMixedPageStatic).
+function drawMixedPageStatic() {
+  gfx.fillRect(0, 0, MIXED_GIF_X0, SCREEN_H, TOK_COLOR_BG_CANVAS);
+  gfx.fillRect(MIXED_GIF_X0, TOK_LAYOUT_CONTENT_Y1, SCREEN_W - MIXED_GIF_X0, SCREEN_H - TOK_LAYOUT_CONTENT_Y1, TOK_COLOR_BG_CANVAS);
+  gfx.fillRect(MIXED_GIF_X0 + MIXED_GIF_W, 0, SCREEN_W - MIXED_GIF_X0 - MIXED_GIF_W, SCREEN_H, TOK_COLOR_BG_CANVAS);
+  gfx.fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, MIXED_GIF_Y0, TOK_COLOR_BG_CANVAS);
+  drawLimitsColumn();
   drawBtcCard();
-  drawFooter();
-  gfx.fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, 'rgb(0,0,0)');
-  const cx = MIXED_GIF_X0 + MIXED_GIF_W / 2;
-  if (catsAvailable()) {
-    drawTextC('LG', cx, 118, 'CATS', COL_ACCENT);
-    drawTextC('SM', cx, 158, 'cat GIFs play here', COL_TEXT2);
-    drawTextC('SM', cx, 176, 'on the device', COL_TEXT2);
-  } else {
-    gfx.fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, COL_BG);
-    drawTextC('LG', cx, 118, 'CATS', COL_ACCENT);   // gif_player.cpp's no-GIFs placeholder
-    drawTextC('SM', cx, 158, 'no GIFs', COL_TEXT2);
-  }
+  drawStatusStrip();
 }
-function catsAvailable() { return !document.getElementById('sim-sd-missing').checked; }
 
-// ── CLOCK (pages.cpp twin) ────────────────────────────────────
+// ── CLOCK ─────────────────────────────────────────────────────
 function drawTimerWedge(cx, cy, r, startAngle, endAngle) {
   let delta = (endAngle - startAngle) % 360;
   if (delta < 0) delta += 360;
-  gfx.fillArc(cx, cy, r, startAngle, startAngle + delta, COL_GOOD_50);
+  gfx.fillArc(cx, cy, r, startAngle, startAngle + delta, TOK_COLOR_DATA_PACE_WEDGE);
 }
 function drawAnalogClock(cx, cy, r, hour24, minute, second, haveReset, resetHour24, resetMinute) {
   const hourAngle = ((hour24 % 12) + minute / 60) * 30 - 90;
   const minAngle = (minute + second / 60) * 6 - 90;
   const secAngle = second * 6 - 90;
   const rad = (a) => a * Math.PI / 180;
-  if (haveReset && STATE.cfgShowCountdown) {
-    drawTimerWedge(cx, cy, r - 1, hourAngle, ((resetHour24 % 12) + resetMinute / 60) * 30 - 90);
-  }
-  gfx.drawCircle(cx, cy, r, COL_TEXT);
-  gfx.drawCircle(cx, cy, r - 1, COL_TEXT);
+  gfx.aaRing(cx, cy, r, 2, TOK_COLOR_TEXT_PRIMARY);
+  if (haveReset && STATE.cfgShowCountdown)
+    drawTimerWedge(cx, cy, r - 2, hourAngle, ((resetHour24 % 12) + resetMinute / 60) * 30 - 90);
   for (let i = 0; i < 12; i++) {
     const t = rad(i * 30 - 90);
     gfx.drawWideLine(cx + Math.trunc(Math.cos(t) * (r - 2)), cy + Math.trunc(Math.sin(t) * (r - 2)),
-                     cx + Math.trunc(Math.cos(t) * (r - 8)), cy + Math.trunc(Math.sin(t) * (r - 8)), 1.0, COL_TEXT);
+                     cx + Math.trunc(Math.cos(t) * (r - 8)), cy + Math.trunc(Math.sin(t) * (r - 8)), 1.0, TOK_COLOR_TEXT_PRIMARY);
   }
   const hx = cx + Math.trunc(Math.cos(rad(hourAngle)) * r * 0.5), hy = cy + Math.trunc(Math.sin(rad(hourAngle)) * r * 0.5);
   const mx = cx + Math.trunc(Math.cos(rad(minAngle)) * r * 0.8), my = cy + Math.trunc(Math.sin(rad(minAngle)) * r * 0.8);
   const sx = cx + Math.trunc(Math.cos(rad(secAngle)) * (r - 3)), sy = cy + Math.trunc(Math.sin(rad(secAngle)) * (r - 3));
-  gfx.drawWideLine(cx, cy, hx, hy, 3.0, COL_TEXT);
-  gfx.drawWideLine(cx, cy, mx, my, 2.0, COL_TEXT);
+  gfx.drawWideLine(cx, cy, hx, hy, 3.0, TOK_COLOR_TEXT_PRIMARY);
+  gfx.drawWideLine(cx, cy, mx, my, 2.0, TOK_COLOR_TEXT_PRIMARY);
   if (haveReset) {
     const ra = rad(((resetHour24 % 12) + resetMinute / 60) * 30 - 90);
-    gfx.drawWideLine(cx, cy, cx + Math.trunc(Math.cos(ra) * (r - 3)), cy + Math.trunc(Math.sin(ra) * (r - 3)), 0.8, COL_GOOD);
+    gfx.drawWideLine(cx, cy, cx + Math.trunc(Math.cos(ra) * (r - 3)), cy + Math.trunc(Math.sin(ra) * (r - 3)), 0.8, TOK_COLOR_DATA_PACE);
   }
-  gfx.drawWideLine(cx, cy, sx, sy, 1.2, COL_ACCENT);
-  gfx.fillCircle(cx, cy, 3, COL_TEXT);
+  gfx.drawWideLine(cx, cy, sx, sy, 1.2, TOK_COLOR_ACCENT);
+  gfx.fillSmoothCircle(cx, cy, 3, TOK_COLOR_TEXT_PRIMARY);
 }
 
 function aqiColors(aqi) {
-  if (aqi <= 50)  return [COL_GOOD, COL_TRACK_BLACK];
-  if (aqi <= 100) return [COL_YELLOW, COL_TRACK_BLACK];
-  if (aqi <= 150) return [COL_AQI_ORANGE, COL_TRACK_BLACK];
-  if (aqi <= 200) return [COL_WARN, COL_TRACK_BLACK];
-  if (aqi <= 300) return [COL_PURPLE, COL_TRACK_BLACK];
-  return [COL_MAROON, COL_TEXT];
+  if (aqi <= 50) return [TOK_AQI_GOOD, TOK_GRAY_0];
+  if (aqi <= 100) return [TOK_AQI_MODERATE, TOK_GRAY_0];
+  if (aqi <= 150) return [TOK_AQI_USG, TOK_GRAY_0];
+  if (aqi <= 200) return [TOK_AQI_UNHEALTHY, TOK_GRAY_0];
+  if (aqi <= 300) return [TOK_AQI_VERY_UNHEALTHY, TOK_GRAY_0];
+  return [TOK_AQI_HAZARDOUS, TOK_GRAY_6];
 }
-const AQI_BADGE_H = 24;
-function aqiBadgeW(aqi) { return textW('MDB', String(aqi)) + 12; }
+function aqiBadgeW(aqi) { return textW(TOK_TYPE_HEADLINE, String(aqi)) + 2 * TOK_BADGE_PAD_X; }
 function drawAqiBadge(x, y, aqi) {
   const [bg, fg] = aqiColors(aqi);
-  gfx.fillRoundRect(x, y, aqiBadgeW(aqi), AQI_BADGE_H, 5, bg);
-  drawText('MDB', x + 6, y + Math.trunc((AQI_BADGE_H - fontLineH('MDB')) / 2), String(aqi), fg);
+  gfx.fillSmoothRoundRect(x, y, aqiBadgeW(aqi), TOK_BADGE_H, TOK_RADIUS_SM, bg);
+  drawText(TOK_TYPE_HEADLINE, x + TOK_BADGE_PAD_X, y + Math.trunc((TOK_BADGE_H - fontLineH(TOK_TYPE_HEADLINE)) / 2), String(aqi), fg);
 }
 
+// ── STATUS PAGE ───────────────────────────────────────────────
+const CLOCK_R = 76;
+const CLOCK_CX = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_HERO + CLOCK_R;
+const CLOCK_CY = CLOCK_CARD_Y + CLOCK_CARD_H / 2;
+const READOUT_X = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_HERO + 2 * CLOCK_R + 1 + TOK_SPACE_MD;
 function drawStatusPage() {
-  drawLimitsCard();
+  drawLimitsColumn();
   drawBtcCard();
-  drawCard(RIGHT_X, 3, RIGHT_W, 216);
-  drawCard(RIGHT_X, 221, RIGHT_W, 69);
+  drawCard(TOK_LAYOUT_COL_RIGHT_X, CLOCK_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, CLOCK_CARD_H);
+  const wxBg = NAV.pressedId === 'weather' ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD;
+  drawCardSurface(TOK_LAYOUT_COL_RIGHT_X, WEATHER_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, WEATHER_CARD_H, wxBg);
 
   const bkk = bangkokParts();
   const hour = parseInt(bkk.hour, 10), minute = parseInt(bkk.minute, 10), second = parseInt(bkk.second, 10);
@@ -1174,385 +1467,972 @@ function drawStatusPage() {
     resetHour = Math.floor(totalSec / 3600);
     resetMinute = Math.floor((totalSec % 3600) / 60);
   }
-  const clockCx = RIGHT_X + RIGHT_W / 2, clockCy = 80, clockR = 68;
-  drawAnalogClock(clockCx, clockCy, clockR, hour, minute, second, haveReset, resetHour, resetMinute);
-  drawTextC('LG', clockCx, 152, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), COL_TEXT);
+  drawAnalogClock(CLOCK_CX, CLOCK_CY, CLOCK_R, hour, minute, second, haveReset, resetHour, resetMinute);
 
-  const buf = `${bkk.weekday} ${parseInt(bkk.day, 10)} ${bkk.month}`;
-  const dateW = textW('MD', buf);
   const haveAqi = STATE.cfgShowAqi && STATE.aqi >= 0;
-  const badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
-  const gap = haveAqi ? 8 : 0;
-  const startX = clockCx - Math.trunc((dateW + gap + badgeW) / 2);
-  const dateY = 190;
-  drawText('MD', startX, dateY, buf, COL_TEXT2);
-  if (haveAqi) drawAqiBadge(startX + dateW + gap, dateY - 1, STATE.aqi);
+  const readH = fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_XS + fontLineH(TOK_TYPE_BODY) +
+                (haveAqi ? TOK_SPACE_SM + TOK_BADGE_H : 0);
+  let y = CLOCK_CARD_Y + TOK_SPACE_CARD_PAD_HERO + Math.trunc((CLOCK_CARD_H - 2 * TOK_SPACE_CARD_PAD_HERO - readH) / 2);
+  drawText(TOK_TYPE_NUMERAL_LG, READOUT_X, y, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), TOK_COLOR_TEXT_PRIMARY);
+  y += fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_XS;
+  drawText(TOK_TYPE_BODY, READOUT_X, y, `${bkk.weekday} ${parseInt(bkk.day, 10)} ${bkk.month}`, TOK_COLOR_TEXT_SECONDARY);
+  y += fontLineH(TOK_TYPE_BODY) + TOK_SPACE_SM;
+  if (haveAqi) drawAqiBadge(READOUT_X, y, STATE.aqi);
 
-  gfx.fillRect(323, 229, 1, 53, COL_BORDER);
-  drawText('SM', 250, 231, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--', COL_TEXT);
-  drawText('SM', 250, 263, STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--', COL_TEXT2);
-
-  const NOW_CENTER_X = 295;
-  drawWeatherIcon(NOW_CENTER_X, 241, STATE.weatherCode, 1.4);
-  if (STATE.weatherTempC > -900) {
-    const tempStr = String(Math.round(STATE.weatherTempC));
-    const tw = textW('MDB', tempStr) + textW('SM', 'C');
-    let x = NOW_CENTER_X - Math.trunc(tw / 2);
-    const baseline = 279;
-    x = drawText('MDB', x, baseline - fontAscent('MDB'), tempStr, COL_TEXT);
-    drawText('SM', x, baseline - fontAscent('SM'), 'C', COL_TEXT2);
-  } else {
-    drawTextC('MDB', NOW_CENTER_X, 261, '--', COL_TEXT);
-  }
-
-  const SLOT_X = 324, SLOT_W = 51;
-  for (let i = 0; i < 3; i++) {
+  const ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;
+  const iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  const glyphCy = iy + 17 + 11, lowY = iy + 17 + 22;
+  drawText(TOK_TYPE_NUMERAL_SM, ix, iy, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--',
+           STATE.weatherHigh > -900 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  drawText(TOK_TYPE_NUMERAL_SM, ix, lowY, STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--',
+           STATE.weatherLow > -900 ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
+  const nowCx = ix + 20 + 20;
+  drawTextC(TOK_TYPE_CAPTION, nowCx, iy, 'Now', TOK_COLOR_ACCENT);
+  drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2);
+  drawTempC(TOK_TYPE_NUMERAL_SM, nowCx, lowY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
+  for (let i = 0; i < 4; i++) {
     const idx = i + 1;
-    const cx = SLOT_X + i * SLOT_W + Math.trunc(SLOT_W / 2);
+    const cx = ix + 60 + i * 44 + 22;
     const have = STATE.weatherHourly.length > idx;
     const hr = have ? STATE.weatherHourly[idx] : null;
-    drawTextC('SM', cx, 225, have ? String(hr.h).padStart(2, '0') : '--', COL_TEXT2);
-    drawWeatherIcon(cx, 254, have ? hr.code : -1, 1.2);
-    drawTextC('SM', cx, 268, have ? hr.tempC + 'C' : '--', COL_TEXT);
+    drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? String(hr.h).padStart(2, '0') : '--',
+              have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
+    drawWeatherIcon(cx, glyphCy, have ? hr.code : -1, 1.2);
+    drawTempC(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? hr.tempC : 0, have);
   }
+  drawChevron(TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - TOK_SPACE_CARD_PAD_COMPACT_H - 8,
+              WEATHER_CARD_Y + WEATHER_CARD_H / 2, TOK_COLOR_TEXT_TERTIARY);
 }
 
-function drawFullStatBlock(y, title, percent, sub, color) {
-  drawText('SMB', 15, y, title, COL_TEXT2);
-  const barX = 15, barY = y + 19, barW = 369, barH = 14;
-  drawPercentBar(barX, barY, barW, barH, percent, color);
-  drawText('MDB', barX + barW + 12, barY + Math.trunc((barH - fontLineH('MDB')) / 2),
-           percent >= 0 ? percent + '%' : '--', COL_TEXT);
-  if (sub) drawText('SM', 15, barY + barH + 2, sub, COL_TEXT2);
+// ── DEVICE STATS SHEET ────────────────────────────────────────
+function drawDeviceRow(y, label, detail, percent) {
+  const x = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD, r = TOK_LAYOUT_CONTENT_X1 - TOK_SPACE_CARD_PAD;
+  drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
+  const pct = percent >= 0 ? percent + '%' : '--';
+  drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  const dx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
+  if (detail) drawTextR(TOK_TYPE_CAPTION, dx, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), detail, TOK_COLOR_TEXT_SECONDARY);
+  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent,
+            percent >= 80 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_DATA_SYSTEM);
 }
-
 function drawDevicePage() {
-  drawText('LG', 15, 8, 'Device Stats', COL_TEXT);
-  const cpuInt = Math.round(STATE.cpuPercentAvg);
-  drawFullStatBlock(48, 'CPU USAGE (render loop duty cycle, live)', cpuInt, '', cpuInt >= 80 ? COL_WARN : COL_BLUE);
+  drawModalHeader(false, 'Device stats', NAV.pressedId === 'close');
+  const cardY = TOK_LAYOUT_HEADER_CONTENT_Y;
+  drawCard(TOK_LAYOUT_CONTENT_X0, cardY, TOK_LAYOUT_CONTENT_W, 5 * ROW_H + 4 * TOK_SPACE_STACK + 2 * TOK_SPACE_CARD_PAD);
+  let y = cardY + TOK_SPACE_CARD_PAD;
   const pct = (u, t) => Math.round(u / t * 100);
-  const f = pct(FLASH_USED_BYTES, FLASH_TOTAL_BYTES);
-  drawFullStatBlock(98, 'FLASH (APP PARTITION)', f, fmtKB(FLASH_USED_BYTES) + ' / ' + fmtKB(FLASH_TOTAL_BYTES), f >= 80 ? COL_WARN : COL_BLUE);
-  const r = pct(RAM_USED_BYTES, RAM_TOTAL_BYTES);
-  drawFullStatBlock(152, 'INTERNAL RAM', r, fmtKB(RAM_USED_BYTES) + ' / ' + fmtKB(RAM_TOTAL_BYTES), r >= 80 ? COL_WARN : COL_BLUE);
-  const p = pct(PSRAM_USED_BYTES, PSRAM_TOTAL_BYTES);
-  drawFullStatBlock(206, 'PSRAM', p, fmtKB(PSRAM_USED_BYTES) + ' / ' + fmtKB(PSRAM_TOTAL_BYTES), p >= 80 ? COL_WARN : COL_BLUE);
+  drawDeviceRow(y, 'CPU', 'Render loop duty cycle', Math.round(STATE.cpuPercentAvg)); y += ROW_STEP;
+  drawDeviceRow(y, 'Flash (app partition)', fmtKB(FLASH_USED_BYTES) + ' / ' + fmtKB(FLASH_TOTAL_BYTES), pct(FLASH_USED_BYTES, FLASH_TOTAL_BYTES)); y += ROW_STEP;
+  drawDeviceRow(y, 'Internal RAM', fmtKB(RAM_USED_BYTES) + ' / ' + fmtKB(RAM_TOTAL_BYTES), pct(RAM_USED_BYTES, RAM_TOTAL_BYTES)); y += ROW_STEP;
+  drawDeviceRow(y, 'PSRAM', fmtKB(PSRAM_USED_BYTES) + ' / ' + fmtKB(PSRAM_TOTAL_BYTES), pct(PSRAM_USED_BYTES, PSRAM_TOTAL_BYTES)); y += ROW_STEP;
   const sdMissing = document.getElementById('sim-sd-missing').checked;
   const sdPct = sdMissing ? -1 : pct(SD_USED_BYTES, SD_TOTAL_BYTES);
-  drawFullStatBlock(260, 'SD CARD', sdPct,
-                    sdPct >= 0 ? fmtGB(SD_USED_BYTES) + ' / ' + fmtGB(SD_TOTAL_BYTES) : 'SD CARD NOT FOUND',
-                    sdPct >= 80 ? COL_WARN : COL_BLUE);
+  drawDeviceRow(y, 'SD card', sdPct >= 0 ? fmtGB(SD_USED_BYTES) + ' / ' + fmtGB(SD_TOTAL_BYTES) : 'Not found', sdPct);
 }
 
+// ── WEATHER SHEET ─────────────────────────────────────────────
+const WX_HERO_X = TOK_HEADER_TITLE_X, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
+const WX_HERO_W = TOK_LAYOUT_CONTENT_X1 - WX_HERO_X, WX_HERO_H = 64;
+const WX_HOURLY_Y = WX_HERO_Y + WX_HERO_H + TOK_SPACE_GUTTER;
+const WX_HOURLY_H = 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS + 23 + 2 * TOK_SPACE_CARD_PAD_COMPACT_V;
+const WX_DAILY_Y = WX_HOURLY_Y + WX_HOURLY_H + TOK_SPACE_GUTTER;
+const WX_DAILY_H = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - WX_DAILY_Y;
 function drawWeatherPage() {
-  gfx.fillScreen(COL_BG);
-  const CARD_X = 15, CARD_W = 450;
-  drawCard(CARD_X, 5, CARD_W, 72);
-  drawWeatherIcon(44, 41, STATE.weatherCode, 2.0);
-  const tempX = 72;
+  drawModalHeader(false, null, NAV.pressedId === 'close');
+  drawCard(WX_HERO_X, WX_HERO_Y, WX_HERO_W, WX_HERO_H);
+  const hx = WX_HERO_X + TOK_SPACE_CARD_PAD_HERO;
+  drawWeatherIcon(hx + 18, WX_HERO_Y + WX_HERO_H / 2, STATE.weatherCode, 2.0);
+  const tempY = WX_HERO_Y + Math.trunc((WX_HERO_H - fontLineH(TOK_TYPE_DISPLAY)) / 2);
+  const tempX = hx + 36 + TOK_SPACE_SM;
   let metaX;
   if (STATE.weatherTempC > -900) {
-    const x = drawText('XL', tempX, 16, String(Math.round(STATE.weatherTempC)), COL_TEXT);
-    gfx.drawCircle(x + 6, 24, 4, COL_TEXT2);
-    gfx.drawCircle(x + 6, 24, 3, COL_TEXT2);
-    metaX = x + 24;
+    const x = drawText(TOK_TYPE_NUMERAL_HERO, tempX, tempY, String(Math.round(STATE.weatherTempC)), TOK_COLOR_TEXT_PRIMARY);
+    const capTop = tempY + fontAscent(TOK_TYPE_DISPLAY) - 29;
+    metaX = drawDegreeRing(x + TOK_SPACE_HAIR, capTop, TOK_COLOR_SURFACE_CARD) + TOK_SPACE_LG;
   } else {
-    metaX = drawText('XL', tempX, 16, '--', COL_TEXT2) + 20;
+    metaX = drawText(TOK_TYPE_NUMERAL_HERO, tempX, tempY, '--', TOK_COLOR_TEXT_TERTIARY) + TOK_SPACE_LG;
   }
   const haveAqi = STATE.cfgShowAqi && STATE.aqi >= 0;
   const badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
-  const badgeX = BATTERY_ICON_X0 - 8 - badgeW;  // left of the battery box + sleep pill
-  const metaMaxX = (haveAqi ? badgeX : BATTERY_ICON_X0) - 10;
+  const badgeX = TOK_CORNER_INK_X1 - badgeW;
+  const metaMaxX = haveAqi ? badgeX - TOK_SPACE_SM : TOK_CORNER_INK_X1;
+  const metaY = WX_HERO_Y + Math.trunc((WX_HERO_H - (23 + TOK_SPACE_XS + 23)) / 2);
+  drawText(TOK_TYPE_HEADLINE, metaX, metaY, fitText(TOK_TYPE_HEADLINE, STATE.weatherCondition || '--', metaMaxX - metaX),
+           STATE.weatherCondition ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   {
-    const cond = STATE.weatherCondition || '--';
-    let n = 0;
-    while (n < cond.length && n < 19) {
-      if (metaX + textW('MDB', cond.slice(0, n + 1)) > metaMaxX) break;
-      n++;
-    }
-    drawText('MDB', metaX, 14, cond.slice(0, n), STATE.weatherCondition ? COL_TEXT : COL_TEXT2);
+    const y = metaY + 23 + TOK_SPACE_XS;
+    let x = drawText(TOK_TYPE_BODY, metaX, y, 'H ', TOK_COLOR_TEXT_SECONDARY);
+    x = STATE.weatherHigh > -900 ? drawText(TOK_TYPE_BODY, x, y, String(STATE.weatherHigh), TOK_COLOR_TEXT_PRIMARY)
+                                 : drawText(TOK_TYPE_BODY, x, y, '--', TOK_COLOR_TEXT_TERTIARY);
+    x = drawText(TOK_TYPE_BODY, x + TOK_SPACE_LG, y, 'L ', TOK_COLOR_TEXT_SECONDARY);
+    if (STATE.weatherLow > -900) drawText(TOK_TYPE_BODY, x, y, String(STATE.weatherLow), TOK_COLOR_TEXT_PRIMARY);
+    else drawText(TOK_TYPE_BODY, x, y, '--', TOK_COLOR_TEXT_TERTIARY);
   }
-  {
-    const hStr = STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--';
-    const lStr = STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--';
-    let x = metaX;
-    x = drawText('MD', x, 43, 'H ', COL_TEXT2);
-    x = drawText('MD', x, 43, hStr, COL_TEXT);
-    x = drawText('MD', x + 16, 43, 'L ', COL_TEXT2);
-    drawText('MD', x, 43, lStr, COL_TEXT);
-  }
-  if (haveAqi) drawAqiBadge(badgeX, 12, STATE.aqi);
+  if (haveAqi) drawAqiBadge(badgeX, WX_HERO_Y + Math.trunc((WX_HERO_H - TOK_BADGE_H) / 2), STATE.aqi);
 
-  drawCard(CARD_X, 81, CARD_W, 78);
-  const hourCount = STATE.weatherHourly.length > 0 ? STATE.weatherHourly.length : WEATHER_HOURLY_N;
-  const slotW = 75;
-  for (let i = 0; i < hourCount && i < WEATHER_HOURLY_N; i++) {
-    const sx = CARD_X + i * slotW;
-    const cx = sx + Math.trunc(slotW / 2);
+  drawCard(TOK_LAYOUT_CONTENT_X0, WX_HOURLY_Y, TOK_LAYOUT_CONTENT_W, WX_HOURLY_H);
+  const innerX = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD_COMPACT_H;
+  const innerW = TOK_LAYOUT_CONTENT_W - 2 * TOK_SPACE_CARD_PAD_COMPACT_H;
+  const slotW = Math.trunc(innerW / WEATHER_HOURLY_N);
+  const slotX0 = innerX + Math.trunc((innerW - slotW * WEATHER_HOURLY_N) / 2);
+  const hy = WX_HOURLY_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  for (let i = 0; i < WEATHER_HOURLY_N; i++) {
+    const cx = slotX0 + i * slotW + Math.trunc(slotW / 2);
     const have = i < STATE.weatherHourly.length;
     const hr = have ? STATE.weatherHourly[i] : null;
-    if (i === 0) gfx.fillRoundRect(sx + 10, 83, slotW - 20, 3, 1, COL_ACCENT);
-    drawTextC('SM', cx, 89, have && hr.h >= 0 ? String(hr.h).padStart(2, '0') : '--', i === 0 ? COL_ACCENT : COL_TEXT2);
-    drawWeatherIcon(cx, 118, have ? hr.code : -1, 1.5);
-    drawTextC('MD', cx, 133, have ? String(hr.tempC) : '--', have ? COL_TEXT : COL_TEXT2);
+    const okHour = have && hr.h >= 0;
+    drawTextC(TOK_TYPE_NUMERAL_SM, cx, hy, okHour ? String(hr.h).padStart(2, '0') : '--',
+              i === 0 ? TOK_COLOR_ACCENT : (have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY));
+    drawWeatherIcon(cx, hy + 17 + TOK_SPACE_XS + 14, have ? hr.code : -1, 1.5);
+    const ty = hy + 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS;
+    if (have) drawTextC(TOK_TYPE_BODY, cx, ty, String(hr.tempC), TOK_COLOR_TEXT_PRIMARY);
+    else drawTextC(TOK_TYPE_BODY, cx, ty, '--', TOK_COLOR_TEXT_TERTIARY);
   }
 
-  drawCard(CARD_X, 163, CARD_W, 152);
+  drawCard(TOK_LAYOUT_CONTENT_X0, WX_DAILY_Y, TOK_LAYOUT_CONTENT_W, WX_DAILY_H);
   let minT = 100, maxT = -100;
   for (const d of STATE.weatherDaily) { minT = Math.min(minT, d.low); maxT = Math.max(maxT, d.high); }
   if (maxT <= minT) { minT = 20; maxT = 40; }
-  const dayY0 = 166, dayStep = 30, barX = 144, barW = 264, barH = 8;
-  const dayCount = STATE.weatherDaily.length > 0 ? STATE.weatherDaily.length : WEATHER_DAILY_N;
-  for (let i = 0; i < dayCount && i < WEATHER_DAILY_N; i++) {
-    const y = dayY0 + i * dayStep;
+  const dayX = innerX, iconCx = innerX + 64, lowR = innerX + 120;
+  const barX = TOK_LAYOUT_COL_RIGHT_X - 36, barW = 260, highX = barX + barW + TOK_SPACE_SM;
+  const rowH = fontLineH(TOK_TYPE_BODY);
+  const dy0 = WX_DAILY_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  for (let i = 0; i < WEATHER_DAILY_N; i++) {
+    const y = dy0 + i * rowH;
     const have = i < STATE.weatherDaily.length;
     const d = have ? STATE.weatherDaily[i] : null;
-    const textY = y + Math.trunc((dayStep - fontLineH('MD')) / 2);
-    const barY = y + Math.trunc((dayStep - barH) / 2);
-    drawText('MD', 28, textY, have && d.wd >= 0 && d.wd < 7 ? WDAY_ABBR[d.wd] : '---', i === 0 ? COL_ACCENT : COL_TEXT);
-    drawWeatherIcon(90, y + dayStep / 2, have ? d.code : -1, 1.2);
-    drawTextR('MD', barX - 8, textY, have ? String(d.low) : '--', COL_TEXT2);
-    gfx.fillRoundRect(barX, barY, barW, barH, 4, COL_TRACK);
-    if (have && maxT > minT) {
+    const haveWd = have && d.wd >= 0 && d.wd < 7;
+    drawText(TOK_TYPE_BODY, dayX, y, haveWd ? WDAY_ABBR[d.wd] : '--',
+             !haveWd ? TOK_COLOR_TEXT_TERTIARY : (i === 0 ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_PRIMARY));
+    drawWeatherIcon(iconCx, y + Math.trunc(rowH / 2), have ? d.code : -1, 1.0);
+    if (have) drawTextR(TOK_TYPE_BODY, lowR, y, String(d.low), TOK_COLOR_TEXT_SECONDARY);
+    else drawTextR(TOK_TYPE_BODY, lowR, y, '--', TOK_COLOR_TEXT_TERTIARY);
+    const barY = y + 12 - TOK_METER_MD / 2;
+    gfx.fillSmoothRoundRect(barX, barY, barW, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_FILL_TRACK);
+    if (have) {
       const span = maxT - minT;
       const x0 = barX + Math.trunc((d.low - minT) / span * barW);
       let x1 = barX + Math.trunc((d.high - minT) / span * barW);
-      if (x1 - x0 < barH) x1 = x0 + barH;
-      gfx.fillRoundRect(x0, barY, x1 - x0, barH, 4, COL_ACCENT);
+      if (x1 - x0 < TOK_METER_MD) x1 = x0 + TOK_METER_MD;
+      gfx.fillSmoothRoundRect(x0, barY, x1 - x0, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_TEXT_PRIMARY);
     }
-    drawText('MD', barX + barW + 8, textY, have ? String(d.high) : '--', COL_TEXT);
+    if (have) drawText(TOK_TYPE_BODY, highX, y, String(d.high), TOK_COLOR_TEXT_PRIMARY);
+    else drawText(TOK_TYPE_BODY, highX, y, '--', TOK_COLOR_TEXT_TERTIARY);
   }
 }
 
-// ── CAT PAGE (placeholder -- the firmware-only surface) ──────────────────
+// ── CAT PAGES (placeholder -- the firmware-only surface) ──────────────────
 // The device plays random GIFs from /cats/ (gif_player.cpp); the canvas
-// can't, so this shows the firmware's own no-GIFs placeholder layout with a
-// note. Same session overlay rule: GIF_PAGE only, never while offline.
-function drawGifPage() {
-  gfx.fillScreen(COL_BG);
-  drawTextC('XL', SCREEN_W / 2, 118, 'CATS', COL_ACCENT);
-  drawTextC('SM', SCREEN_W / 2, 176,
-            catsAvailable() ? 'random cat GIFs play here on the device' : 'insert an SD card with /cats/ GIFs',
-            COL_TEXT2);
-  if (STATE.currentPage === GIF_PAGE && STATE.haveData) drawSessionResetOverlay();
-}
-function drawSessionResetOverlay() {
+// can't, so this shows the firmware's own placeholder layout plus the same
+// overlays (reset plate, shuffle button, corner plates).
+function catsAvailable() { return !document.getElementById('sim-sd-missing').checked; }
+function drawResetPlate() {
   const percent = STATE.sessionPercent, resets = STATE.sessionResets;
   if (percent < 0 || !resets) return;
-  const a = percent + '% ', b = 'reset: ';
-  const padX = 8, padY = 6;
-  const tw = textW('MD', a) + textW('MD', b) + textW('MD', resets);
-  const boxW = tw + padX * 2, boxH = fontLineH('MD') + padY * 2;
-  const boxY = SCREEN_H - boxH;
-  gfx.fillRect(0, boxY, boxW, boxH, 'rgb(0,0,0)');
-  let x = drawText('MD', padX, boxY + padY, a, COL_TEXT);
-  x = drawText('MD', x, boxY + padY, b, COL_TEXT2);
-  drawText('MD', x, boxY + padY, resets, COL_TEXT);
+  const a = percent + '%', b = 'Resets ' + resets;
+  const padX = TOK_SPACE_SM, padY = 6, gap = TOK_SPACE_SM;
+  const w = textW(TOK_TYPE_HEADLINE, a) + gap + textW(TOK_TYPE_HEADLINE, b) + 2 * padX;
+  const h = fontLineH(TOK_TYPE_HEADLINE) + 2 * padY;
+  const x = TOK_SPACE_SM, y = SCREEN_H - TOK_SPACE_SM - h;
+  gfx.fillSmoothRoundRect(x, y, w, h, TOK_RADIUS_SM, TOK_COLOR_PLATE);
+  const tx = drawText(TOK_TYPE_HEADLINE, x + padX, y + padY, a, TOK_COLOR_DATA_USAGE);
+  drawText(TOK_TYPE_HEADLINE, tx + gap, y + padY, b, TOK_COLOR_TEXT_PRIMARY);
+}
+function drawMediaOverlays(offline) {
+  const mixed = STATE.currentPage === MIXED_PAGE && !offline;
+  if (!mixed) drawResetPlate();
+  if (STATE.catShuffleSec < 0 && catsAvailable()) {
+    const [cx, cy] = shuffleCentre(mixed);
+    drawShuffleButton(cx, cy, NAV.pressedId === 'shuffle');
+  }
+  drawSystemCorner(true);
+}
+function drawGifPage(offline) {
+  const mixed = STATE.currentPage === MIXED_PAGE && !offline;
+  if (mixed) {
+    gfx.fillScreen(TOK_COLOR_BG_CANVAS);
+    drawMixedPageStatic();
+    drawCardSurface(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_SURFACE_CARD);
+    if (catsAvailable())
+      drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'Cats play here', 'Cover-fit GIFs on the device', false);
+    else
+      drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'No SD card', 'Insert a card with /cats/ GIFs', true);
+  } else {
+    gfx.fillScreen(TOK_COLOR_BG_CANVAS);
+    if (catsAvailable())
+      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'Cats play here', 'Random GIFs from /cats/ on the device', false,
+                     TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
+    else
+      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'No SD card', 'Insert an SD card with /cats/ GIFs', true);
+  }
+  drawMediaOverlays(offline);
+}
+
+// ── RENDER (pages.cpp's render(); presents at the end) ──────────
+function render() {
+  gfx.fillScreen(TOK_COLOR_BG_CANVAS);
+  if (STATE.weatherPageOpen) drawWeatherPage();
+  else if (STATE.devicePageOpen) drawDevicePage();
+  else if (navCatLayout()) { drawGifPage(!STATE.haveData); presentFrame(); return; }
+  else {
+    switch (STATE.currentPage) {
+      case 0: drawStatusPage(); break;
+      case 1: drawProjectsPage(); break;
+      case 2: drawLimitsPage(); break;
+      case 5: drawNotePage(); break;
+    }
+    drawStatusStrip();
+  }
+  drawSystemCorner(false);
+  presentFrame();
 }
 
 // ── SETTINGS (settings.cpp twin) ──────────────────────────────
-function btnFont(size) { return size >= 2 ? 'MDB' : 'SMB'; }
+const LIST_X = TOK_LAYOUT_CONTENT_X0, LIST_W = TOK_LAYOUT_CONTENT_W;
+const LIST_VIEW_Y0 = TOK_LAYOUT_HEADER_H, LIST_ROW0_Y = TOK_LAYOUT_HEADER_CONTENT_Y;
+const LIST_STEP = TOK_LIST_ROW_H + TOK_SPACE_LIST_GAP;
+const LIST_TRAIL_R = LIST_X + LIST_W - TOK_LIST_ROW_INSET;
+function settingsScrollMax() { return Math.max(0, LIST_ROW0_Y + SETTINGS_COUNT * LIST_STEP - SCREEN_H); }
+function rowY(idx) { return LIST_ROW0_Y + idx * LIST_STEP - STATE.settingsScrollOffset; }
+function currentValueText(d) {
+  const cur = d.getCurrent();
+  for (let i = 0; i < d.count; i++) if (d.values[i] === cur) return d.valueLabels[i];
+  if (d.values === BRIGHTNESS_VALUES) return Math.trunc((cur * 100 + 127) / 255) + '%';
+  if (d.values === POLL_VALUES) return cur + 's';
+  return '--';
+}
+function drawTogglePill(xRight, cy, on) {
+  const x = xRight - TOK_TOGGLE_W, y = cy - TOK_TOGGLE_H / 2;
+  gfx.fillSmoothRoundRect(x, y, TOK_TOGGLE_W, TOK_TOGGLE_H, TOK_TOGGLE_H / 2, on ? TOK_COLOR_ACCENT : TOK_COLOR_FILL_TRACK);
+  drawTextC(TOK_TYPE_HEADLINE, x + TOK_TOGGLE_W / 2, cy - Math.trunc(fontLineH(TOK_TYPE_HEADLINE) / 2), on ? 'On' : 'Off',
+            on ? TOK_COLOR_TEXT_ON_ACCENT : TOK_COLOR_TEXT_SECONDARY);
+}
+// Scroll-edge shade: rows y 44..51 at material.scrim once scrolled.
+function shadeRows(y0, y1) {
+  const img = ctx.getImageData(0, y0, SCREEN_W, y1 - y0);
+  scrimImage(img, 2);
+  ctx.putImageData(img, 0, y0);
+}
 function drawSettingsList() {
-  gfx.fillScreen(COL_BG);
-  gfx.drawWideLine(20, 16, 36, 32, 2.0, COL_ACCENT);
-  gfx.drawWideLine(36, 16, 20, 32, 2.0, COL_ACCENT);
-  drawTextR('SMB', SLEEP_BTN_X0 - 12, 16, 'SETTINGS', COL_ACCENT);  // left of the sleep pill
-  gfx.setClipRect(0, SETTINGS_VIEWPORT_Y0, SCREEN_W, SETTINGS_VIEWPORT_H);
+  gfx.fillScreen(TOK_COLOR_BG_CANVAS);
+  gfx.setClipRect(0, LIST_VIEW_Y0, SCREEN_W, SCREEN_H - LIST_VIEW_Y0);
   for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
-    const y = SETTINGS_VIEWPORT_Y0 + idx * SET_ROW_STEP - STATE.settingsScrollOffset;
-    if (y + SET_ROW_H < SETTINGS_VIEWPORT_Y0 || y > SETTINGS_VIEWPORT_Y0 + SETTINGS_VIEWPORT_H) continue;
-    gfx.fillRoundRect(SET_ROW_X0, y, SET_ROW_W, SET_ROW_H, 8, COL_SURFACE);
-    gfx.drawRoundRect(SET_ROW_X0, y, SET_ROW_W, SET_ROW_H, 8, COL_BORDER);
-    drawText('MDB', SET_ROW_X0 + 18, y + Math.trunc((SET_ROW_H - fontLineH('MDB')) / 2), SETTINGS[idx].label, COL_TEXT);
-    const cx = SET_ROW_X0 + SET_ROW_W - 26, cy = y + SET_ROW_H / 2;
-    gfx.drawWideLine(cx - 4, cy - 7, cx + 3, cy, 1.5, COL_ACCENT);
-    gfx.drawWideLine(cx + 3, cy, cx - 4, cy + 7, 1.5, COL_ACCENT);
+    const d = SETTINGS[idx];
+    const y = rowY(idx);
+    if (y + TOK_LIST_ROW_H < LIST_VIEW_Y0 || y >= SCREEN_H) continue;
+    const pressed = NAV.pressedId === 'row' && NAV.pressedIndex === idx;
+    drawCardSurface(LIST_X, y, LIST_W, TOK_LIST_ROW_H, pressed ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD);
+    const cy = y + TOK_LIST_ROW_H / 2;
+    drawText(TOK_TYPE_HEADLINE, LIST_X + TOK_LIST_ROW_INSET, cy - Math.trunc(fontLineH(TOK_TYPE_HEADLINE) / 2), d.label,
+             d.kind === ROW_ACTION ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_TEXT_PRIMARY);
+    if (d.kind === ROW_TOGGLE) {
+      drawTogglePill(LIST_TRAIL_R, cy, d.getCurrent() !== 0);
+    } else {
+      const chevCx = LIST_TRAIL_R - 4;
+      drawChevron(chevCx, cy, TOK_COLOR_TEXT_TERTIARY);
+      if (d.kind === ROW_NAV)
+        drawTextR(TOK_TYPE_BODY, chevCx - 2 - TOK_SPACE_SM, cy - Math.trunc(fontLineH(TOK_TYPE_BODY) / 2),
+                  currentValueText(d), TOK_COLOR_TEXT_SECONDARY);
+    }
   }
   gfx.clearClipRect();
-  if (SETTINGS_SCROLL_MAX > 0) {
-    gfx.fillRoundRect(SETTINGS_SCROLLBAR_X, SETTINGS_VIEWPORT_Y0, SETTINGS_SCROLLBAR_W, SETTINGS_VIEWPORT_H, 2, COL_BORDER);
-    const thumbH = Math.max(24, Math.trunc(SETTINGS_VIEWPORT_H * SETTINGS_VIEWPORT_H / SETTINGS_CONTENT_H));
-    const thumbY = SETTINGS_VIEWPORT_Y0 + Math.trunc((SETTINGS_VIEWPORT_H - thumbH) * STATE.settingsScrollOffset / SETTINGS_SCROLL_MAX);
-    gfx.fillRoundRect(SETTINGS_SCROLLBAR_X, thumbY, SETTINGS_SCROLLBAR_W, thumbH, 2, COL_ACCENT);
+  if (STATE.settingsScrollOffset > 0) shadeRows(LIST_VIEW_Y0, LIST_ROW0_Y);
+  const maxS = settingsScrollMax();
+  if (maxS > 0) {
+    const trackY = LIST_ROW0_Y, trackH = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - LIST_ROW0_Y;
+    const contentH = SETTINGS_COUNT * LIST_STEP;
+    const thumbH = Math.max(24, Math.trunc(trackH * trackH / contentH));
+    const off = Math.max(0, Math.min(maxS, STATE.settingsScrollOffset));
+    const thumbY = trackY + Math.trunc((trackH - thumbH) * off / maxS);
+    gfx.fillSmoothRoundRect(LIST_X + LIST_W - 6, thumbY, 4, thumbH, 2, TOK_COLOR_TEXT_TERTIARY);
   }
+  drawModalHeader(false, 'Settings', NAV.pressedId === 'close');
 }
-function leafButtonRect(def, i) {
-  const col = i % def.cols, row = Math.floor(i / def.cols);
-  return {
-    x: def.count === 1 ? SET_WIDE_BTN_X0 : SET_BTN_X0 + col * SET_BTN_STEP,
-    y: SET_BTN_Y + row * SET_BTN_STEP_Y,
-    w: def.count === 1 ? SET_WIDE_BTN_W : SET_BTN_W,
-  };
+const CELL_W_BY_COLS = [0, 464, 228, 149, 110, 86];
+function gridTop(d) {
+  let y = TOK_LAYOUT_HEADER_CONTENT_Y;
+  if (d.subtitle) y += fontLineH(TOK_TYPE_BODY) + TOK_SPACE_XL;
+  return y;
+}
+function cellRect(d, i) {
+  const row = i < d.cols ? 0 : 1;
+  const n = row === 0 ? Math.min(d.cols, d.count) : d.count - d.cols;
+  const k = row === 0 ? i : i - d.cols;
+  const w = CELL_W_BY_COLS[n];
+  const h = d.kind === ROW_ACTION ? TOK_BUTTON_LG : TOK_OPTION_CELL_H;
+  const total = n * w + (n - 1) * TOK_SPACE_SM;
+  return { x: TOK_LAYOUT_CONTENT_X0 + Math.trunc((TOK_LAYOUT_CONTENT_W - total) / 2) + k * (w + TOK_SPACE_SM),
+           y: gridTop(d) + row * (TOK_OPTION_CELL_H + TOK_SPACE_SM), w, h };
+}
+function armedNow(now) {
+  return STATE.confirmArmedRow === STATE.settingsLeafIndex && now - STATE.confirmArmedMs < CONFIRM_ARM_MS;
+}
+function drawToast() {
+  if (!toastText || performance.now() >= toastUntilMs) return;
+  const padX = TOK_SPACE_MD;
+  const w = textW(TOK_TYPE_BODY, toastText) + 2 * padX;
+  const x = Math.trunc((SCREEN_W - w) / 2), y = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - TOK_TOAST_H;
+  gfx.fillSmoothRoundRect(x, y, w, TOK_TOAST_H, TOK_RADIUS_SM, TOK_COLOR_SURFACE_RAISED);
+  drawText(TOK_TYPE_BODY, x + padX, y + Math.trunc((TOK_TOAST_H - fontLineH(TOK_TYPE_BODY)) / 2), toastText, TOK_COLOR_TEXT_PRIMARY);
 }
 function drawSettingsLeaf() {
-  const def = SETTINGS[STATE.settingsLeafIndex];
-  gfx.fillScreen(COL_BG);
-  gfx.drawWideLine(24, 17, 17, 24, 1.5, COL_ACCENT);
-  gfx.drawWideLine(17, 24, 24, 31, 1.5, COL_ACCENT);
-  drawText('MDB', 34, 13, 'BACK', COL_ACCENT);
-  drawText('LG', 15, 52, def.leafTitle, COL_ACCENT);
-  if (def.subtitle) drawText('SM', 15, 94, def.subtitle, COL_TEXT2);
-  const current = def.destructive ? -1 : def.getCurrent();
-  const armed = def.destructive && STATE.confirmArmedRow === STATE.settingsLeafIndex &&
-                performance.now() - STATE.confirmArmedMs < CONFIRM_ARM_MS;
-  const bf = btnFont(def.btnTextSize);
-  for (let i = 0; i < def.count; i++) {
-    const { x, y, w } = leafButtonRect(def, i);
-    const on = armed || (!def.destructive && def.values[i] === current);
-    const fill = armed ? COL_WARN : (on ? COL_ACCENT : COL_SURFACE);
-    const border = armed ? COL_WARN : (on ? COL_ACCENT : COL_BORDER);
-    gfx.fillRoundRect(x, y, w, SET_BTN_H, 8, fill);
-    gfx.drawRoundRect(x, y, w, SET_BTN_H, 8, border);
-    drawTextC(bf, x + Math.trunc(w / 2), y + Math.trunc((SET_BTN_H - fontLineH(bf)) / 2),
-              armed ? 'TAP AGAIN' : def.valueLabels[i], on ? COL_BG : COL_TEXT);
+  const d = SETTINGS[STATE.settingsLeafIndex];
+  gfx.fillScreen(TOK_COLOR_BG_CANVAS);
+  drawModalHeader(true, d.label, NAV.pressedId === 'close');
+  if (d.subtitle) drawText(TOK_TYPE_BODY, TOK_LAYOUT_CONTENT_X0, TOK_LAYOUT_HEADER_CONTENT_Y, d.subtitle, TOK_COLOR_TEXT_SECONDARY);
+  const current = d.kind === ROW_ACTION ? NaN : d.getCurrent();
+  const armed = d.kind === ROW_ACTION && armedNow(performance.now());
+  let bottom = 0;
+  for (let i = 0; i < d.count; i++) {
+    const { x, y, w, h } = cellRect(d, i);
+    const pressed = NAV.pressedId === 'cell' && NAV.pressedIndex === i;
+    let fill, ink, label = d.valueLabels[i];
+    if (d.kind === ROW_ACTION) {
+      fill = armed ? TOK_COLOR_STATUS_ERROR : (pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_CARD);
+      ink = armed ? TOK_COLOR_TEXT_ON_ACCENT : TOK_COLOR_STATUS_ERROR;
+      if (armed) label = 'Tap again';
+    } else {
+      const sel = d.values[i] === current;
+      fill = sel ? (pressed ? TOK_COLOR_ACCENT_PRESSED : TOK_COLOR_ACCENT) : (pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_CARD);
+      ink = sel ? TOK_COLOR_TEXT_ON_ACCENT : TOK_COLOR_TEXT_PRIMARY;
+    }
+    drawCardSurface(x, y, w, h, fill);
+    drawTextC(TOK_TYPE_HEADLINE, x + Math.trunc(w / 2), y + Math.trunc((h - fontLineH(TOK_TYPE_HEADLINE)) / 2), label, ink);
+    bottom = y + h;
   }
-  drawTextC('SM', SCREEN_W / 2, def.rows > 1 ? 298 : 222, def.hint, COL_TEXT2);
+  if (d.hint) drawTextC(TOK_TYPE_CAPTION, SCREEN_W / 2, bottom + TOK_SPACE_LG, d.hint, TOK_COLOR_TEXT_SECONDARY);
+  drawToast();
+}
+function drawSettingsScreen() {
+  if (STATE.settingsScreen === 'leaf') drawSettingsLeaf(); else drawSettingsList();
+  drawSystemCorner(false);
+}
+function renderSettings() { drawSettingsScreen(); presentFrame(); }
+function settingsListHit(x, y) {
+  if (y < LIST_VIEW_Y0 || x < LIST_X || x >= LIST_X + LIST_W) return -1;
+  for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
+    const ry = rowY(idx);
+    if (y >= ry && y < ry + TOK_LIST_ROW_H) return idx;
+  }
+  return -1;
+}
+function settingsListActivate(idx) {
+  const d = SETTINGS[idx];
+  if (!d) return false;
+  if (d.kind === ROW_TOGGLE) { d.apply(d.getCurrent() ? 0 : 1); return false; }
+  STATE.settingsLeafIndex = idx;
+  STATE.confirmArmedRow = -1;
+  return true;
+}
+function settingsLeafHit(x, y) {
+  if (STATE.settingsLeafIndex < 0) return -1;
+  const d = SETTINGS[STATE.settingsLeafIndex];
+  for (let i = 0; i < d.count; i++) {
+    const r = cellRect(d, i);
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i;
+  }
+  return -1;
+}
+function settingsLeafActivate(i, now) {
+  const d = SETTINGS[STATE.settingsLeafIndex];
+  if (d.kind === ROW_ACTION) {
+    if (armedNow(now)) {
+      STATE.confirmArmedRow = -1;
+      toastText = d.doneToast;
+      toastUntilMs = now + TOK_MOTION_TOAST_MS;
+      renderSettings();
+      d.apply(d.values[i]);
+      return;
+    }
+    STATE.confirmArmedRow = STATE.settingsLeafIndex;
+    STATE.confirmArmedMs = now;
+    return;
+  }
+  d.apply(d.values[i]);
 }
 
-// ── RENDER ────────────────────────────────────────────────────
-function applyBrightnessFilter() {
-  canvas.style.filter = 'brightness(' + Math.round(STATE.cfgBrightness / 255 * 100) + '%)';
+// ── MOTION (motion.cpp twin) ──────────────────────────────────
+function makeSpring() { return { x: 0, v: 0, target: 0, zeta: 1, w: 25.13, active: false }; }
+function springTo(s, target, [zeta100, responseMs]) {
+  s.target = target;
+  s.zeta = zeta100 / 100;
+  s.w = 2 * Math.PI / (responseMs / 1000 * motionTimeScale);
+  s.active = true;
 }
-function loadInt(key, fn) {
-  const raw = lsGet(key);
-  if (raw === null) return;
-  const v = parseInt(raw, 10);
-  if (!Number.isNaN(v)) fn(v);
+function springStep(s, dt) {
+  if (!s.active) return false;
+  if (dt > 0.05) dt = 0.05;
+  const h = dt / 4;
+  for (let i = 0; i < 4; i++) {
+    const a = -s.w * s.w * (s.x - s.target) - 2 * s.zeta * s.w * s.v;
+    s.v += a * h;
+    s.x += s.v * h;
+  }
+  if (Math.abs(s.x - s.target) < 0.5 && Math.abs(s.v) < 15) { s.x = s.target; s.v = 0; s.active = false; }
+  return true;
 }
-function loadSettings() {
-  loadInt(BRIGHTNESS_KEY, v => { STATE.cfgBrightness = v; });
-  loadInt(LAST_PAGE_KEY, v => { STATE.cfgLastPage = v; });
-  loadInt(BOOT_PAGE_KEY, v => {
-    STATE.cfgBootPage = v;
-    STATE.currentPage = (v === BOOT_PAGE_AUTO) ? STATE.cfgLastPage : v;
-  });
-  loadInt(CAT_SHUFFLE_KEY, v => { STATE.catShuffleSec = v; });
-  loadInt(NIGHT_MODE_KEY, v => { STATE.cfgNightModeOn = v !== 0; });
-  loadInt(ROTATION_KEY, v => { STATE.cfgScreenRotation = v; });
-  loadInt(SHOW_COUNTDOWN_KEY, v => { STATE.cfgShowCountdown = v !== 0; });
-  loadInt(SHOW_AQI_KEY, v => { STATE.cfgShowAqi = v !== 0; });
-  loadInt(HOURLY_FLASH_KEY, v => { STATE.cfgHourlyFlash = v !== 0; });
-  loadInt(SHOW_PROGRESS_KEY, v => { STATE.cfgShowProgress = v !== 0; });
-  loadInt(BATTERY_SAVE_KEY, v => { STATE.cfgBatterySaveMode = Math.max(0, Math.min(2, v)); });
+function makeVelocity() { return { s: [] }; }
+function velocityAdd(vt, x, y, t) { vt.s.push({ x, y, t }); if (vt.s.length > 4) vt.s.shift(); }
+function velocityGet(vt, now) {
+  const s = vt.s;
+  if (s.length < 2) return [0, 0];
+  const newest = s[s.length - 1];
+  if (now - newest.t > 50) return [0, 0];
+  let oldest = newest;
+  for (let k = s.length - 2; k >= 0; k--) {
+    if (newest.t - s[k].t > TOK_TOUCH_VELOCITY_WINDOW_MS) break;
+    oldest = s[k];
+  }
+  const dt = newest.t - oldest.t;
+  if (dt <= 0) return [0, 0];
+  const clamp = (v) => Math.max(-4000, Math.min(4000, v));
+  return [clamp((newest.x - oldest.x) * 1000 / dt), clamp((newest.y - oldest.y) * 1000 / dt)];
+}
+function projectDistance(v) { return (v / 1000) * TOK_TOUCH_DECEL / (1 - TOK_TOUCH_DECEL); }
+function rubberband(over, dim) { return over * dim * TOK_TOUCH_RUBBERBAND / (dim + TOK_TOUCH_RUBBERBAND * Math.abs(over)); }
+
+// Backlight animator: the canvas brightness filter stands in for the PWM.
+const BL = { level: 0, from: 0, target: 0, start: 0, dur: 0, breathLeft: 0, breathStart: 0 };
+function blApply() { canvas.style.filter = 'brightness(' + (BL.level / 255 * 100).toFixed(1) + '%)'; }
+function backlightFadeTo(target, fadeMs) {
+  BL.from = BL.level; BL.target = target; BL.start = performance.now(); BL.dur = fadeMs * motionTimeScale;
+  if (BL.dur === 0) { BL.level = target; blApply(); }
+}
+function backlightBreath() { BL.breathLeft = TOK_MOTION_BACKLIGHT_BREATH_COUNT; BL.breathStart = performance.now(); }
+function backlightTick(now) {
+  let base = BL.target;
+  if (BL.dur > 0) {
+    const el = now - BL.start;
+    if (el >= BL.dur) BL.dur = 0;
+    else { const t = el / BL.dur; base = BL.from + (BL.target - BL.from) * t * t * (3 - 2 * t); }
+  }
+  let level = base;
+  if (BL.breathLeft > 0) {
+    const dur = TOK_MOTION_BACKLIGHT_BREATH_MS * motionTimeScale;
+    let el = now - BL.breathStart;
+    if (el >= dur) { BL.breathLeft--; BL.breathStart = now; el = 0; }
+    if (BL.breathLeft > 0) {
+      const dip = 0.5 - 0.5 * Math.cos(2 * Math.PI * el / dur);
+      level = base * (1 - dip * (1 - TOK_MOTION_BACKLIGHT_BREATH_PCT / 100));
+    }
+  }
+  if (BL.dur === 0 && BL.breathLeft === 0) level = BL.target;
+  if (Math.abs(level - BL.level) >= 0.5 || level !== BL.level) { BL.level = level; blApply(); }
 }
 
-// The page slide (pages.cpp's pageTransitionRun): an off-screen snapshot of
-// the outgoing frame composited against the live incoming one, same easing.
-let slide = null;  // {from: canvas, t0, forward}
-const offscreen = document.createElement('canvas');
-offscreen.width = SCREEN_W; offscreen.height = SCREEN_H;
+// ── PRESENT (display.cpp twin) ────────────────────────────────
+let transitionDirty = false, presentHold = false;
+function presentFrame() {
+  if (presentHold) return;
+  if (navTransitionActive()) { transitionDirty = true; return; }
+  presentPlain();
+}
+function presentPlain() {
+  screenCtx.fillStyle = TOK_COLOR_BG_CANVAS;
+  screenCtx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  screenCtx.drawImage(frameCanvas, STATE.shiftX, STATE.shiftY);
+  STATE.shiftDirty = false;
+}
+function presentSlide(from, to, off, forward) {
+  off = Math.max(0, Math.min(SCREEN_W, off));
+  const sx = STATE.shiftX, sy = STATE.shiftY;
+  screenCtx.fillStyle = TOK_COLOR_BG_CANVAS;
+  screenCtx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  if (forward) { screenCtx.drawImage(from, sx - off, sy); screenCtx.drawImage(to, sx + SCREEN_W - off, sy); }
+  else { screenCtx.drawImage(from, sx + off, sy); screenCtx.drawImage(to, sx + off - SCREEN_W, sy); }
+}
+function presentSheet(behind, sheet, vis, level) {
+  vis = Math.max(0, vis);
+  const sx = STATE.shiftX, sy = STATE.shiftY;
+  const top = SCREEN_H - vis;
+  screenCtx.fillStyle = TOK_COLOR_BG_CANVAS;
+  screenCtx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  if (top > 0) {
+    const bctx = behind.getContext('2d', { willReadFrequently: true });
+    const img = bctx.getImageData(0, 0, SCREEN_W, top);
+    if (level > 0) scrimImage(img, level);
+    screenCtx.putImageData(img, sx, sy);
+  }
+  screenCtx.drawImage(sheet, 0, 0, SCREEN_W, Math.min(SCREEN_H, vis), sx, sy + top, SCREEN_W, Math.min(SCREEN_H, vis));
+}
+function presentFade(from, to, level) {
+  const a = from.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, SCREEN_W, SCREEN_H);
+  const b = to.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, SCREEN_W, SCREEN_H);
+  const d = a.data, e = b.data;
+  for (let i = 0; i < d.length; i += 4)
+    to888(fade565(to565(d[i], d[i + 1], d[i + 2]), to565(e[i], e[i + 1], e[i + 2]), level), d, i);
+  screenCtx.fillStyle = TOK_COLOR_BG_CANVAS;
+  screenCtx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  screenCtx.putImageData(a, STATE.shiftX, STATE.shiftY);
+}
 
-// Screen sleep (twin of main.cpp's enter/exitScreenSleep): the backlight is
-// the canvas brightness filter; the frame is left as-is while asleep.
+// ── NAV (nav.cpp twin) ────────────────────────────────────────
+const NAV = {
+  pressedId: null, pressedIndex: -1,
+  tKind: null,           // null | 'page' | 'sheet' | 'push' | 'fade'
+  spring: makeSpring(), tForward: true, tFromPage: 0, sheetClosing: false,
+  fadeFrom: null, fadeStep: 0, tHeld: false, lastTickMs: 0,
+  saved: null,
+  listCoasting: false, listPos: 0, listV: 0, listSpring: makeSpring(),
+  G: null, vt: makeVelocity(), lastUpMs: -1e9, wasDown: false,
+};
+const LIST_VIEW_H = SCREEN_H - TOK_LAYOUT_HEADER_H;
+function isCatPage(p) { return p === GIF_PAGE || p === MIXED_PAGE; }
+function navCatLayout() { return isCatPage(STATE.currentPage) || !STATE.haveData; }
+function navTransitionActive() { return NAV.tKind !== null; }
+function navSheetOpen() { return STATE.weatherPageOpen || STATE.devicePageOpen || STATE.settingsScreen !== 'off'; }
+function withHold(fn) { const h = presentHold; presentHold = true; fn(); presentHold = h; }
+function preparePage() { withHold(render); }
+function redrawScreen() {
+  if (STATE.settingsScreen !== 'off') renderSettings(); else render();
+}
+function setPressed(id, idx = -1) {
+  if (NAV.pressedId === id && NAV.pressedIndex === idx) return;
+  NAV.pressedId = id; NAV.pressedIndex = idx;
+  redrawScreen();
+}
+function clearPressed() { setPressed(null, -1); }
+function sheetScrimLevel(vis) {
+  if (STATE.cfgReduceMotion) return 0;
+  return vis < SCREEN_H / 3 ? 0 : vis < 2 * SCREEN_H / 3 ? 1 : 2;
+}
+function presentComposite() {
+  const off = Math.round(NAV.spring.x);
+  switch (NAV.tKind) {
+    case 'page': case 'push': presentSlide(prevFrame, frameCanvas, off, NAV.tForward); break;
+    case 'sheet':
+      if (!NAV.sheetClosing) presentSheet(behindFrame, frameCanvas, off, sheetScrimLevel(off));
+      else presentSheet(frameCanvas, prevFrame, off, sheetScrimLevel(off));
+      break;
+    case 'fade': presentFade(NAV.fadeFrom, frameCanvas, NAV.fadeStep); break;
+    default: return;
+  }
+  STATE.shiftDirty = false;
+  transitionDirty = false;
+}
+function startFade(from) { NAV.tKind = 'fade'; NAV.fadeFrom = from; NAV.fadeStep = 1; transitionDirty = true; }
+function endTransition() {
+  NAV.tKind = null; NAV.tHeld = false; NAV.spring.active = false; transitionDirty = false;
+  presentFrame();
+}
+function saveLastPage() { STATE.cfgLastPage = STATE.currentPage; lsSet(LAST_PAGE_KEY, String(STATE.currentPage)); }
+function beginPageTransition(page, forward) {
+  copyFrame(prevFrame, frameCanvas);
+  NAV.tFromPage = STATE.currentPage;
+  STATE.currentPage = page;
+  preparePage();
+  NAV.tKind = 'page'; NAV.tForward = forward;
+  Object.assign(NAV.spring, { x: 0, v: 0, active: false });
+  transitionDirty = true;
+}
+function commitPageEnd() { saveLastPage(); endTransition(); }
+function revertPage() {
+  STATE.currentPage = NAV.tFromPage;
+  copyFrame(frameCanvas, prevFrame);
+  NAV.tKind = null; NAV.tHeld = false;
+  presentFrame();
+}
+function neighbour(forward) { return forward ? (STATE.currentPage + 1) % PAGE_COUNT : (STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT; }
+function navGoToPage(page, forward) {
+  navFinishTransition();
+  if (!STATE.haveData) { STATE.currentPage = page; saveLastPage(); return; }
+  beginPageTransition(page, forward);
+  if (STATE.cfgReduceMotion) { startFade(prevFrame); saveLastPage(); return; }
+  springTo(NAV.spring, SCREEN_W, TOK_MOTION_SPRING_STANDARD);
+}
+function drawSheetInto() { withHold(() => { if (STATE.settingsScreen !== 'off') drawSettingsScreen(); else render(); }); }
+function navOpenSheet(which) {
+  navFinishTransition();
+  copyFrame(behindFrame, frameCanvas);
+  STATE.weatherPageOpen = which === 0;
+  STATE.devicePageOpen = which === 1;
+  if (which === 2) { STATE.settingsScreen = 'list'; STATE.settingsScrollOffset = 0; }
+  drawSheetInto();
+  if (STATE.cfgReduceMotion) { startFade(behindFrame); return; }
+  NAV.tKind = 'sheet'; NAV.sheetClosing = false;
+  Object.assign(NAV.spring, { x: 0, v: 0 });
+  springTo(NAV.spring, SCREEN_H, TOK_MOTION_SPRING_SHEET);
+  transitionDirty = true;
+}
+function beginSheetDrop() {
+  copyFrame(prevFrame, frameCanvas);
+  NAV.saved = { w: STATE.weatherPageOpen, d: STATE.devicePageOpen, s: STATE.settingsScreen };
+  STATE.weatherPageOpen = STATE.devicePageOpen = false;
+  STATE.settingsScreen = 'off';
+  STATE.confirmArmedRow = -1;
+  withHold(render);
+  NAV.sheetClosing = true;
+}
+function undoSheetDrop() {
+  copyFrame(behindFrame, frameCanvas);
+  copyFrame(frameCanvas, prevFrame);
+  STATE.weatherPageOpen = NAV.saved.w; STATE.devicePageOpen = NAV.saved.d; STATE.settingsScreen = NAV.saved.s;
+  NAV.sheetClosing = false;
+}
+function closeSheetWith(v) {
+  const from = NAV.tKind === 'sheet' ? NAV.spring.x : SCREEN_H;
+  if (NAV.tKind !== 'sheet' || !NAV.sheetClosing) beginSheetDrop();
+  if (STATE.cfgReduceMotion) { startFade(prevFrame); return; }
+  NAV.tKind = 'sheet'; NAV.tHeld = false;
+  NAV.spring.x = from; NAV.spring.v = v;
+  springTo(NAV.spring, 0, Math.abs(v) > TOK_TOUCH_FLICK_BOUNCE ? TOK_MOTION_SPRING_FLICK : TOK_MOTION_SPRING_STANDARD);
+  transitionDirty = true;
+}
+function navCloseSheet() {
+  if (!navSheetOpen() && !(NAV.tKind === 'sheet' && NAV.sheetClosing)) return;
+  if (NAV.tKind !== 'sheet') navFinishTransition();
+  closeSheetWith(0);
+}
+function pushDetail() {
+  copyFrame(prevFrame, frameCanvas);
+  STATE.settingsScreen = 'leaf';
+  drawSheetInto();
+  if (STATE.cfgReduceMotion) { startFade(prevFrame); return; }
+  NAV.tKind = 'push'; NAV.tForward = true;
+  Object.assign(NAV.spring, { x: 0, v: 0 });
+  springTo(NAV.spring, SCREEN_W, TOK_MOTION_SPRING_STANDARD);
+  transitionDirty = true;
+}
+function beginPop() {
+  copyFrame(prevFrame, frameCanvas);
+  STATE.settingsScreen = 'list';
+  STATE.confirmArmedRow = -1;
+  drawSheetInto();
+  NAV.tKind = 'push'; NAV.tForward = false;
+  Object.assign(NAV.spring, { x: 0, v: 0, active: false });
+  transitionDirty = true;
+}
+function popDetail() {
+  beginPop();
+  if (STATE.cfgReduceMotion) { NAV.tKind = null; startFade(prevFrame); return; }
+  springTo(NAV.spring, SCREEN_W, TOK_MOTION_SPRING_STANDARD);
+}
+function revertPop() {
+  copyFrame(frameCanvas, prevFrame);
+  STATE.settingsScreen = 'leaf';
+  NAV.tKind = null; NAV.tHeld = false;
+  presentFrame();
+}
+function settleTransition() {
+  const x = NAV.spring.x;
+  switch (NAV.tKind) {
+    case 'page': if (x >= SCREEN_W - 0.5) commitPageEnd(); else revertPage(); break;
+    case 'sheet':
+      if (NAV.sheetClosing && x <= 0.5) endTransition();
+      else if (!NAV.sheetClosing && x >= SCREEN_H - 0.5) endTransition();
+      else if (NAV.sheetClosing) { undoSheetDrop(); endTransition(); }
+      else { beginSheetDrop(); endTransition(); }
+      break;
+    case 'push':
+      if (x >= SCREEN_W - 0.5) endTransition();
+      else if (!NAV.tForward) revertPop();
+      else endTransition();
+      break;
+    case 'fade': endTransition(); break;
+  }
+}
+function navFinishTransition() {
+  if (!NAV.tKind) return;
+  if (NAV.tKind === 'fade') { endTransition(); return; }
+  Object.assign(NAV.spring, { x: NAV.spring.target, v: 0, active: false });
+  settleTransition();
+}
+
+// List momentum.
+function listStop() { NAV.listCoasting = false; NAV.listSpring.active = false; }
+function listRelease(v) {
+  NAV.listPos = STATE.settingsScrollOffset;
+  const maxS = settingsScrollMax();
+  if (NAV.listPos < 0 || NAV.listPos > maxS) {
+    Object.assign(NAV.listSpring, { x: NAV.listPos, v });
+    springTo(NAV.listSpring, NAV.listPos < 0 ? 0 : maxS, TOK_MOTION_SPRING_STANDARD);
+    NAV.listCoasting = true;
+    return;
+  }
+  NAV.listV = v;
+  NAV.listCoasting = Math.abs(v) >= 20;
+}
+function listStep(dt) {
+  if (!NAV.listCoasting) return false;
+  const maxS = settingsScrollMax();
+  if (NAV.listSpring.active) {
+    springStep(NAV.listSpring, dt);
+    NAV.listPos = NAV.listSpring.x;
+    if (!NAV.listSpring.active) NAV.listCoasting = false;
+  } else {
+    NAV.listV *= Math.pow(TOK_TOUCH_DECEL, dt * 1000 / motionTimeScale);
+    NAV.listPos += NAV.listV * dt;
+    if (NAV.listPos < 0 || NAV.listPos > maxS) {
+      Object.assign(NAV.listSpring, { x: NAV.listPos, v: NAV.listV });
+      springTo(NAV.listSpring, NAV.listPos < 0 ? 0 : maxS, TOK_MOTION_SPRING_STANDARD);
+    } else if (Math.abs(NAV.listV) < 20) NAV.listCoasting = false;
+  }
+  const off = Math.round(NAV.listPos);
+  if (off === STATE.settingsScrollOffset) return false;
+  STATE.settingsScrollOffset = off;
+  return true;
+}
+
+// ── GESTURES (nav.cpp twin) ───────────────────────────────────
+function inRect(x, y, x0, y0, x1, y1) { return x >= x0 && x < x1 && y >= y0 && y < y1; }
+function stripPage() { return STATE.haveData && STATE.currentPage !== GIF_PAGE; }
+function hitTest(x, y) {
+  if (inRect(x, y, SLEEP_HIT_X0, SLEEP_HIT_Y0, SLEEP_HIT_X1, SLEEP_HIT_Y1)) return ['sleep', -1];
+  const closeHit = inRect(x, y, 0, 0, TOK_CLOSE_HIT_X1, TOK_CLOSE_HIT_Y1);
+  if (STATE.settingsScreen === 'list') {
+    if (closeHit) return ['close', -1];
+    const i = settingsListHit(x, y);
+    return i >= 0 ? ['row', i] : [null, -1];
+  }
+  if (STATE.settingsScreen === 'leaf') {
+    if (closeHit) return ['close', -1];
+    const i = settingsLeafHit(x, y);
+    return i >= 0 ? ['cell', i] : [null, -1];
+  }
+  if (STATE.weatherPageOpen || STATE.devicePageOpen) return [closeHit ? 'close' : 'sheetAny', -1];
+  const offline = !STATE.haveData;
+  if (!offline && STATE.currentPage === 0 && inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return ['weather', -1];
+  if (stripPage() && y >= STRIP_HIT_Y0) {
+    if (x >= HEALTH_HIT_X0 && x < HEALTH_HIT_X1) return ['health', -1];
+    if (x >= SETTINGS_HIT_X0 && x < SETTINGS_HIT_X1) return ['gear', -1];
+  }
+  if (STATE.catShuffleSec < 0 && navCatLayout()) {
+    const [cx, cy] = shuffleCentre(STATE.currentPage === MIXED_PAGE && !offline);
+    const h = SHUFFLE_HIT / 2;
+    if (inRect(x, y, cx - h, cy - h, cx + h, cy + h)) return ['shuffle', -1];
+  }
+  return ['half', -1];
+}
+const PRESSABLE = new Set(['sleep', 'close', 'row', 'cell', 'weather', 'health', 'gear', 'shuffle']);
+
+function onDown(x, y, now) {
+  const G = NAV.G = { active: true, x0: x, y0: y, x, y, target: null, index: -1, drag: null, grab: 0, gx: 0, gy: 0, grabbedSheet: false };
+  NAV.vt = makeVelocity();
+  velocityAdd(NAV.vt, x, y, now);
+  if (NAV.listCoasting) {
+    listStop();
+    STATE.settingsScrollOffset = Math.max(0, Math.min(settingsScrollMax(), STATE.settingsScrollOffset));
+    renderSettings();
+  }
+  if (NAV.tKind === 'sheet' && !NAV.tHeld) {
+    NAV.spring.active = false; NAV.tHeld = true; G.grabbedSheet = true;
+    return;
+  }
+  navFinishTransition();
+  [G.target, G.index] = hitTest(x, y);
+  if (G.target === 'half') {
+    if (!STATE.haveData || STATE.cfgReduceMotion) return;
+    const forward = x >= SWIPE_SPLIT_X;
+    beginPageTransition(neighbour(forward), forward);
+    NAV.tHeld = true;
+    springTo(NAV.spring, TOK_MOTION_LEAN_PX, TOK_MOTION_SPRING_STANDARD);
+    return;
+  }
+  if (PRESSABLE.has(G.target)) setPressed(G.target, G.index);
+}
+function dragFor(horizontal, dx) {
+  const G = NAV.G;
+  if (G.grabbedSheet) return horizontal ? 'dead' : 'sheet';
+  if (STATE.settingsScreen === 'list') return horizontal ? 'dead' : 'list';
+  if (STATE.settingsScreen === 'leaf') {
+    if (STATE.cfgReduceMotion) return 'dead';
+    if (horizontal) return dx > 0 ? 'back' : 'dead';
+    return 'sheet';
+  }
+  if (STATE.weatherPageOpen || STATE.devicePageOpen) return (horizontal || STATE.cfgReduceMotion) ? 'dead' : 'sheet';
+  if (horizontal && STATE.haveData && !STATE.cfgReduceMotion) return 'page';
+  return 'dead';
+}
+function pageDragMove() {
+  const G = NAV.G;
+  const dx = G.x - G.gx;
+  let off = G.grab + (NAV.tForward ? -dx : dx);
+  if (off < 0) {
+    STATE.currentPage = NAV.tFromPage;
+    copyFrame(frameCanvas, prevFrame);
+    NAV.tForward = !NAV.tForward;
+    beginPageTransition(neighbour(NAV.tForward), NAV.tForward);
+    G.grab = 0; G.gx = G.x; off = 0;
+  }
+  NAV.spring.x = Math.min(off, SCREEN_W);
+  transitionDirty = true;
+}
+function startDrag(d) {
+  const G = NAV.G;
+  G.drag = d; G.gx = G.x; G.gy = G.y;
+  if (NAV.pressedId) clearPressed();
+  if (d === 'page') {
+    const forward = G.x < G.x0;
+    if (NAV.tKind === 'page' && NAV.tForward !== forward) revertPage();
+    if (NAV.tKind !== 'page') beginPageTransition(neighbour(forward), forward);
+    NAV.tHeld = true; NAV.spring.active = false; G.grab = NAV.spring.x;
+  } else if (d === 'sheet') {
+    if (NAV.tKind !== 'sheet') { NAV.tKind = 'sheet'; NAV.sheetClosing = false; NAV.spring.x = SCREEN_H; NAV.spring.v = 0; }
+    NAV.tHeld = true; NAV.spring.active = false; G.grab = NAV.spring.x;
+  } else if (d === 'list') {
+    G.grab = STATE.settingsScrollOffset;
+  } else if (d === 'back') {
+    beginPop(); NAV.tHeld = true; G.grab = 0;
+  }
+}
+function sheetDragTo(raw) {
+  if (raw > SCREEN_H) raw = SCREEN_H + rubberband(raw - SCREEN_H, SCREEN_H);
+  NAV.spring.x = raw;
+  transitionDirty = true;
+}
+function onMove(x, y, now) {
+  const G = NAV.G;
+  G.x = x; G.y = y;
+  velocityAdd(NAV.vt, x, y, now);
+  const dx = x - G.x0, dy = y - G.y0;
+  if (!G.drag) {
+    if (Math.abs(dx) <= TOK_TOUCH_SLOP && Math.abs(dy) <= TOK_TOUCH_SLOP) return;
+    const d = dragFor(Math.abs(dx) > Math.abs(dy), dx);
+    if (d === 'dead') {
+      G.drag = 'dead';
+      if (NAV.pressedId) clearPressed();
+      if (NAV.tKind === 'page' && NAV.tHeld) { NAV.tHeld = false; springTo(NAV.spring, 0, TOK_MOTION_SPRING_STANDARD); }
+      return;
+    }
+    startDrag(d);
+  }
+  switch (G.drag) {
+    case 'page': pageDragMove(); break;
+    case 'sheet': sheetDragTo(G.grab - (y - G.gy)); break;
+    case 'list': {
+      const raw = G.grab - (y - G.gy);
+      const maxS = settingsScrollMax();
+      if (raw < 0 && !STATE.cfgReduceMotion) {
+        STATE.settingsScrollOffset = 0;
+        if (NAV.tKind !== 'sheet') { NAV.tKind = 'sheet'; NAV.sheetClosing = false; NAV.tHeld = true; }
+        sheetDragTo(SCREEN_H + raw);
+        return;
+      }
+      if (NAV.tKind === 'sheet') { NAV.tKind = null; NAV.tHeld = false; NAV.spring.x = SCREEN_H; presentFrame(); }
+      let off;
+      if (raw < 0) off = Math.round(rubberband(raw, LIST_VIEW_H));
+      else if (raw > maxS) off = maxS + Math.round(rubberband(raw - maxS, LIST_VIEW_H));
+      else off = Math.round(raw);
+      if (off !== STATE.settingsScrollOffset) { STATE.settingsScrollOffset = off; renderSettings(); }
+      break;
+    }
+    case 'back':
+      NAV.spring.x = Math.max(0, Math.min(SCREEN_W, x - G.gx));
+      transitionDirty = true;
+      break;
+  }
+}
+function releaseSheet(vy) {
+  const vOpen = -vy;
+  const open = Math.abs(vOpen) > TOK_TOUCH_FLICK_COMMIT ? vOpen > 0 : NAV.spring.x + projectDistance(vOpen) > SCREEN_H / 2;
+  NAV.tHeld = false;
+  if (open) {
+    if (NAV.sheetClosing) undoSheetDrop();
+    NAV.spring.v = vOpen;
+    springTo(NAV.spring, SCREEN_H, Math.abs(vOpen) > TOK_TOUCH_FLICK_BOUNCE ? TOK_MOTION_SPRING_FLICK : TOK_MOTION_SPRING_STANDARD);
+    transitionDirty = true;
+  } else {
+    closeSheetWith(vOpen);
+  }
+}
+function releaseSlide(v) {
+  const commit = Math.abs(v) > TOK_TOUCH_FLICK_COMMIT ? v > 0 : NAV.spring.x + projectDistance(v) > SCREEN_W / 2;
+  NAV.tHeld = false;
+  NAV.spring.v = v;
+  springTo(NAV.spring, commit ? SCREEN_W : 0, TOK_MOTION_SPRING_STANDARD);
+  transitionDirty = true;
+}
+function commitTap(now) {
+  const { target, index } = NAV.G;
+  NAV.pressedId = null; NAV.pressedIndex = -1;
+  switch (target) {
+    case 'sleep': redrawScreen(); enterScreenSleep(); break;
+    case 'close': if (STATE.settingsScreen === 'leaf') popDetail(); else navCloseSheet(); break;
+    case 'sheetAny': navCloseSheet(); break;
+    case 'row': if (settingsListActivate(index)) pushDetail(); else renderSettings(); break;
+    case 'cell': settingsLeafActivate(index, now); renderSettings(); break;
+    case 'weather': redrawScreen(); navOpenSheet(0); break;
+    case 'health': redrawScreen(); navOpenSheet(1); break;
+    case 'gear': redrawScreen(); navOpenSheet(2); break;
+    case 'shuffle':
+      console.log('[sim] shuffle: the device opens a new random cat here.');
+      redrawScreen();
+      break;
+    case 'half':
+      if (NAV.tKind === 'page') { NAV.tHeld = false; springTo(NAV.spring, SCREEN_W, TOK_MOTION_SPRING_STANDARD); }
+      else { const f = NAV.G.x0 >= SWIPE_SPLIT_X; navGoToPage(neighbour(f), f); }
+      break;
+  }
+}
+function onUp(now) {
+  const G = NAV.G;
+  const [vx, vy] = velocityGet(NAV.vt, now);
+  G.active = false;
+  switch (G.drag) {
+    case null: if (G.grabbedSheet) releaseSheet(0); else commitTap(now); break;
+    case 'dead':
+      if (G.grabbedSheet) releaseSheet(0);
+      if (NAV.tKind === 'page' && NAV.tHeld) { NAV.tHeld = false; springTo(NAV.spring, 0, TOK_MOTION_SPRING_STANDARD); }
+      break;
+    case 'page': releaseSlide(NAV.tForward ? -vx : vx); break;
+    case 'back': releaseSlide(vx); break;
+    case 'sheet': releaseSheet(vy); break;
+    case 'list': if (NAV.tKind === 'sheet') releaseSheet(vy); else listRelease(-vy); break;
+  }
+  G.drag = null;
+}
+function navTouch(down, x, y, now) {
+  const G = NAV.G;
+  if (down && !NAV.wasDown) {
+    NAV.ignored = now - NAV.lastUpMs < TOK_TOUCH_REARM_MS;  // touch.rearm
+    if (!NAV.ignored) onDown(x, y, now);
+  } else if (down && NAV.wasDown) {
+    if (G && G.active && !NAV.ignored && (x !== G.x || y !== G.y)) onMove(x, y, now);
+  } else if (!down && NAV.wasDown) {
+    if (G && G.active && !NAV.ignored) onUp(now);
+    NAV.lastUpMs = now;
+  }
+  NAV.wasDown = down;
+}
+function navTick(now) {
+  const dt = NAV.lastTickMs ? (now - NAV.lastTickMs) / 1000 : 0.033;
+  NAV.lastTickMs = now;
+  let presented = false;
+  if (NAV.listCoasting && STATE.settingsScreen === 'list' && !NAV.tKind) {
+    if (listStep(dt)) { renderSettings(); presented = true; }
+  } else if (NAV.listCoasting) listStop();
+  if (!NAV.tKind) return presented;
+  if (NAV.tKind === 'fade') {
+    if (NAV.fadeStep > TOK_MOTION_FADE_FRAMES) { endTransition(); return true; }
+    presentComposite();
+    NAV.fadeStep++;
+    return true;
+  }
+  let moving = false;
+  if (!NAV.tHeld) moving = springStep(NAV.spring, dt);
+  if (moving || transitionDirty) { presentComposite(); presented = true; }
+  if (!NAV.tHeld && !NAV.spring.active) settleTransition();
+  return presented;
+}
+
+// ── SCREEN SLEEP (main.cpp twin) ──────────────────────────────
+let swallowUntilUp = false;
 function enterScreenSleep() {
   if (STATE.screenSleeping) return;
+  backlightFadeTo(0, TOK_MOTION_BACKLIGHT_SLEEP_MS);
   STATE.screenSleeping = true;
   STATE.sleepStartMs = performance.now();
-  applyEffectiveBrightnessFilter();
+  NAV.G = null; NAV.wasDown = false; NAV.pressedId = null;
   restartPollTimer();
   setPageStatus('SLEEP (tap to wake)');
 }
 function exitScreenSleep() {
   if (!STATE.screenSleeping) return;
   STATE.screenSleeping = false;
-  applyEffectiveBrightnessFilter();
   restartPollTimer();
-  render();
+  redrawScreen();
+  applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_WAKE_MS);
 }
-
-function render() {
-  if (STATE.screenSleeping) return;
-  const nowMs = performance.now();
-  if (SHIFT_STEP_MS > 0 && nowMs - STATE.lastShiftMs >= SHIFT_STEP_MS) {
-    STATE.lastShiftMs = nowMs;
-    STATE.shiftIdx = (STATE.shiftIdx + 1) % 8;
-  }
-  const [shiftX, shiftY] = SHIFT_ORBIT[STATE.shiftIdx];
-  ctx.fillStyle = COL_BG;
-  ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
-  ctx.save();
-  ctx.translate(shiftX, shiftY);
-  drawScreenContent();
-  ctx.restore();
-
-  if (slide) {
-    const el = nowMs - slide.t0;
-    if (el >= SLIDE_MS) {
-      slide = null;
-    } else {
-      // Keep the incoming frame, then lay both halves down at the eased offset.
-      const octx = offscreen.getContext('2d');
-      octx.drawImage(canvas, 0, 0);
-      const t = el / SLIDE_MS;
-      const off = Math.floor((1 - Math.pow(1 - t, 3)) * SCREEN_W);
-      ctx.fillStyle = COL_BG;
-      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
-      if (slide.forward) {
-        ctx.drawImage(slide.from, -off, 0);
-        ctx.drawImage(offscreen, SCREEN_W - off, 0);
-      } else {
-        ctx.drawImage(slide.from, off, 0);
-        ctx.drawImage(offscreen, off - SCREEN_W, 0);
-      }
-    }
-  }
-
-  if (shiftX !== 0 || shiftY !== 0) {
-    document.getElementById('page-status').textContent += ` · shift (${shiftX},${shiftY})`;
-  }
-  // Hourly flash: the panel's INVON on even seconds of :00:00-:00:05.
-  if (STATE.cfgHourlyFlash) {
-    const bkk = bangkokParts();
-    const min = parseInt(bkk.minute, 10), sec = parseInt(bkk.second, 10);
-    if (min === 0 && sec < 6 && sec % 2 === 0) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'difference';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
-      ctx.restore();
-      document.getElementById('page-status').textContent = 'HOURLY SIGNAL (INVERT FLASH)';
-    }
-  }
-}
-
-function setPageStatus(t) { document.getElementById('page-status').textContent = t; }
-
-function drawScreenContent() {
-  drawScreenBody();
-  drawSleepButton();
-}
-function drawScreenBody() {
-  if (STATE.settingsScreen === 'leaf') { drawSettingsLeaf(); setPageStatus('SETTINGS: ' + SETTINGS[STATE.settingsLeafIndex].label); return; }
-  if (STATE.settingsScreen === 'list') { drawSettingsList(); setPageStatus('SETTINGS (list)'); return; }
-  if (STATE.weatherPageOpen) { drawWeatherPage(); drawBatterySaveIcon(); setPageStatus('WEATHER (tap to close)'); return; }
-  if (STATE.devicePageOpen) {
-    gfx.fillScreen(COL_BG); drawDevicePage(); drawBatterySaveIcon();
-    setPageStatus('DEVICE STATS (tap to close)');
-    return;
-  }
-  if (!STATE.haveData) { drawGifPage(); drawBatterySaveIcon(); setPageStatus('OFFLINE (cat GIFs)'); return; }
-  if (STATE.currentPage === GIF_PAGE) {
-    drawGifPage(); drawBatterySaveIcon();
-    setPageStatus(`page ${GIF_PAGE + 1}/${PAGE_COUNT} (cat GIFs)`);
-    return;
-  }
-  if (STATE.currentPage === MIXED_PAGE) {
-    drawMixedPage(); drawBatterySaveIcon();
-    setPageStatus(`page ${MIXED_PAGE + 1}/${PAGE_COUNT} (limits + cats)`);
-    return;
-  }
-  gfx.fillScreen(COL_BG);
-  switch (STATE.currentPage) {
-    case 0: drawStatusPage(); break;
-    case 1: drawProjectsPage(); break;
-    case 2: drawLimitsPage(); break;
-    case 5: drawNotePage(); break;
-  }
-  drawFooter();
-  drawBatterySaveIcon();
-  setPageStatus(`page ${STATE.currentPage + 1}/${PAGE_COUNT}` + (STATE.currentPage === NOTE_PAGE ? ' (note)' : ''));
-}
-
 // ── DATA LOADING ──────────────────────────────────────────────
 const MOCK = {
   today: { tokens: 2573012, cost: 2.31 },
@@ -1694,10 +2574,6 @@ function bangkokParts() {
     weekday: parts.weekday, month: parts.month, day: parts.day, year: parts.year,
     hour: parts.hour === '24' ? '00' : parts.hour, minute: parts.minute, second: parts.second,
   };
-  if (document.getElementById('force-hourly-flash')?.checked) {
-    out.minute = '00';
-    out.second = '0' + (Math.floor(Date.now() / 1000) % 10);
-  }
   return out;
 }
 
@@ -1718,6 +2594,7 @@ async function fetchUsage() {
   const mock = document.getElementById('mock-data').checked;
   const ok = (detail) => {
     STATE.haveData = true;
+    STATE.pollOkSeq++;  // one pace sweep + one status-dot pulse (main.cpp's pollOkSeq)
     STATE.lastFetchSuccessMs = performance.now();
     STATE.wifiOk = true;
     STATE.connected = true;
@@ -1761,7 +2638,6 @@ async function fetchUsage() {
     }
   } finally {
     fetchInFlight = false;
-    render();
   }
 }
 
@@ -1784,143 +2660,99 @@ function restartPollTimer() {
   STATE.pollTimer = setInterval(fetchUsage, effectivePollMs());
 }
 
-// SET_LIST drag-to-scroll (settings.cpp's settingsListDragBegin/Move/End).
-let dragLastX = 0, dragLastY = 0, dragTotalMoveY = 0, dragActive = false;
-const DRAG_TAP_PX = 8;
+
+// ── SETTINGS PERSISTENCE ──────────────────────────────────────
+function loadInt(key, fn) {
+  const raw = lsGet(key);
+  if (raw === null) return;
+  const v = parseInt(raw, 10);
+  if (!Number.isNaN(v)) fn(v);
+}
+function loadSettings() {
+  loadInt(BRIGHTNESS_KEY, v => { STATE.cfgBrightness = v; });
+  loadInt(LAST_PAGE_KEY, v => { STATE.cfgLastPage = v; });
+  loadInt(BOOT_PAGE_KEY, v => {
+    STATE.cfgBootPage = v;
+    STATE.currentPage = (v === BOOT_PAGE_AUTO) ? STATE.cfgLastPage : v;
+  });
+  loadInt(CAT_SHUFFLE_KEY, v => { STATE.catShuffleSec = v; });
+  loadInt(NIGHT_MODE_KEY, v => { STATE.cfgNightModeOn = v !== 0; });
+  loadInt(ROTATION_KEY, v => { STATE.cfgScreenRotation = v; });
+  loadInt(SHOW_COUNTDOWN_KEY, v => { STATE.cfgShowCountdown = v !== 0; });
+  loadInt(SHOW_AQI_KEY, v => { STATE.cfgShowAqi = v !== 0; });
+  loadInt(HOURLY_FLASH_KEY, v => { STATE.cfgHourlyFlash = v !== 0; });
+  loadInt(SHOW_PROGRESS_KEY, v => { STATE.cfgShowProgress = v !== 0; });
+  loadInt(BATTERY_SAVE_KEY, v => { STATE.cfgBatterySaveMode = Math.max(0, Math.min(2, v)); });
+  loadInt(REDUCE_MOTION_KEY, v => { STATE.cfgReduceMotion = v !== 0; });
+  loadInt(HIGH_CONTRAST_KEY, v => { STATE.cfgHighContrast = v !== 0; });
+  applyContrast();
+}
+
+function setPageStatus(t) { document.getElementById('page-status').textContent = t; }
+function describeScreen() {
+  if (STATE.screenSleeping) return 'SLEEP (tap to wake)';
+  if (STATE.settingsScreen === 'leaf') return 'SETTINGS: ' + SETTINGS[STATE.settingsLeafIndex].label;
+  if (STATE.settingsScreen === 'list') return 'SETTINGS (list)';
+  if (STATE.weatherPageOpen) return 'WEATHER (tap to close)';
+  if (STATE.devicePageOpen) return 'DEVICE STATS (tap to close)';
+  if (!STATE.haveData) return 'OFFLINE (cat GIFs)';
+  const names = ['status', 'projects', 'limits', 'cats', 'status + cats', 'note'];
+  let s = `page ${STATE.currentPage + 1}/${PAGE_COUNT} (${names[STATE.currentPage]})`;
+  if (STATE.shiftX || STATE.shiftY) s += ` · shift (${STATE.shiftX},${STATE.shiftY})`;
+  if (motionTimeScale > 1) s += ` · slow motion x${motionTimeScale}`;
+  return s;
+}
+
+// ── POINTER INPUT ─────────────────────────────────────────────
+// Pointer events are queued and fed to navTouch() from the loop, the way
+// the firmware samples the touch controller once per pass.
+const pointerQueue = [];
+let pointerDown = false;
 function screenXY(event) {
   const r = canvas.getBoundingClientRect();
   return [Math.floor((event.clientX - r.left - 3) * SCREEN_W / (r.width - 6)),
           Math.floor((event.clientY - r.top - 3) * SCREEN_H / (r.height - 6))];
 }
-function settingsListDragEnd() {
-  if (dragTotalMoveY >= DRAG_TAP_PX) return;
-  const tx = dragLastX, ty = dragLastY;
-  if (tx >= SET_BACK_X0 && tx < SET_BACK_X1 && ty >= SET_BACK_Y0 && ty < SET_BACK_Y1) {
-    STATE.settingsScreen = 'off';
-    return;
-  }
-  for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
-    const y = SETTINGS_VIEWPORT_Y0 + idx * SET_ROW_STEP - STATE.settingsScrollOffset;
-    if (y + SET_ROW_H < SETTINGS_VIEWPORT_Y0 || y > SETTINGS_VIEWPORT_Y0 + SETTINGS_VIEWPORT_H) continue;
-    if (tx >= SET_ROW_X0 && tx < SET_ROW_X0 + SET_ROW_W && ty >= y && ty < y + SET_ROW_H) {
-      STATE.settingsLeafIndex = idx;
-      STATE.confirmArmedRow = -1;
-      STATE.settingsScreen = 'leaf';
-      break;
-    }
-  }
-}
-
-// Page change with the slide (main.cpp's goToPage): offline, the cats own
-// every page, so the change is invisible -- no slide.
-function goToPage(newPage, forward) {
-  const from = document.createElement('canvas');
-  from.width = SCREEN_W; from.height = SCREEN_H;
-  from.getContext('2d').drawImage(canvas, 0, 0);
-  STATE.currentPage = newPage;
-  STATE.cfgLastPage = newPage;
-  lsSet(LAST_PAGE_KEY, String(newPage));
-  if (STATE.haveData) slide = { from, t0: performance.now(), forward };
-}
-
-// Touch router -- main.cpp's loop() chain, in the same order.
-function handleTap(tx, ty) {
-  const now = performance.now();
-  if (now - STATE.lastTouchMs <= TOUCH_DEBOUNCE_MS) return;
-  STATE.lastTouchMs = now;
-  const catMode = STATE.currentPage === GIF_PAGE || STATE.currentPage === MIXED_PAGE || !STATE.haveData;
-
-  if (STATE.settingsScreen === 'leaf') {
-    const def = SETTINGS[STATE.settingsLeafIndex];
-    if (tx >= SET_BACK_X0 && tx < SET_BACK_X1 && ty >= SET_BACK_Y0 && ty < SET_BACK_Y1) {
-      STATE.confirmArmedRow = -1;
-      STATE.settingsScreen = 'list';
-      return;
-    }
-    for (let i = 0; i < def.count; i++) {
-      const { x, y, w } = leafButtonRect(def, i);
-      if (tx >= x && tx < x + w && ty >= y && ty < y + SET_BTN_H) {
-        if (def.destructive) {
-          const armed = STATE.confirmArmedRow === STATE.settingsLeafIndex && now - STATE.confirmArmedMs < CONFIRM_ARM_MS;
-          if (armed) { STATE.confirmArmedRow = -1; def.apply(def.values[i]); }
-          else { STATE.confirmArmedRow = STATE.settingsLeafIndex; STATE.confirmArmedMs = now; }
-        } else {
-          def.apply(def.values[i]);
-        }
-        break;
-      }
-    }
-    return;
-  }
-  if (STATE.weatherPageOpen) { STATE.weatherPageOpen = false; return; }
-  if (STATE.devicePageOpen) { STATE.devicePageOpen = false; return; }
-  if (!catMode && tx >= SETTINGS_HIT_X0 && tx < SETTINGS_HIT_X1 && ty >= SETTINGS_HIT_Y0 && ty < SETTINGS_HIT_Y1) {
-    STATE.settingsScreen = 'list';
-    STATE.settingsScrollOffset = 0;
-    return;
-  }
-  if (!catMode && STATE.currentPage === 0 && tx >= WEATHER_HIT_X0 && tx < WEATHER_HIT_X1 &&
-      ty >= WEATHER_HIT_Y0 && ty < WEATHER_HIT_Y1) {
-    STATE.weatherPageOpen = true;
-    return;
-  }
-  if (!catMode && tx >= DEVICE_HIT_X0 && tx < DEVICE_HIT_X1 && ty >= DEVICE_HIT_Y0 && ty < DEVICE_HIT_Y1) {
-    STATE.devicePageOpen = true;
-    return;
-  }
-  if (STATE.catShuffleSec < 0 && STATE.currentPage === GIF_PAGE &&
-      tx >= CAT_ADVANCE_X0 && tx < CAT_ADVANCE_X1) {
-    console.log('[sim] Cat Shuffle FIXED: middle-third tap advances the cat on the device (page unchanged).');
-    return;
-  }
-  if (STATE.catShuffleSec < 0 && STATE.currentPage === MIXED_PAGE &&
-      tx >= MIXED_CAT_ADVANCE_X0 && tx < MIXED_CAT_ADVANCE_X1 &&
-      ty >= MIXED_CAT_ADVANCE_Y0 && ty < MIXED_CAT_ADVANCE_Y1) {
-    console.log('[sim] Cat Shuffle FIXED: left-half-of-pane tap advances the cat on the device (page unchanged).');
-    return;
-  }
-  const forward = tx >= SWIPE_SPLIT_X;
-  goToPage(forward ? (STATE.currentPage + 1) % PAGE_COUNT : (STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, forward);
-}
-
 canvas.addEventListener('pointerdown', (event) => {
-  const [tx, ty] = screenXY(event);
-  if (STATE.screenSleeping) {
-    // The waking press is swallowed -- it never navigates.
-    if (performance.now() - STATE.sleepStartMs > SLEEP_WAKE_GUARD_MS) exitScreenSleep();
-    return;
-  }
-  if (tx >= SLEEP_HIT_X0 && tx < SLEEP_HIT_X1 && ty >= SLEEP_HIT_Y0 && ty < SLEEP_HIT_Y1) {
-    enterScreenSleep();
-    return;
-  }
-  if (STATE.settingsScreen === 'list') {
-    if (performance.now() - STATE.lastTouchMs <= TOUCH_DEBOUNCE_MS) return;
-    STATE.lastTouchMs = performance.now();
-    dragActive = true;
-    dragLastX = tx; dragLastY = ty; dragTotalMoveY = 0;
-    canvas.setPointerCapture(event.pointerId);
-    return;
-  }
-  handleTap(tx, ty);
-  render();
+  const [x, y] = screenXY(event);
+  pointerDown = true;
+  canvas.setPointerCapture(event.pointerId);
+  pointerQueue.push({ down: true, x, y, t: performance.now() });
 });
 canvas.addEventListener('pointermove', (event) => {
-  if (!dragActive) return;
-  const [tx, ty] = screenXY(event);
-  const dy = ty - dragLastY;
-  dragLastX = tx; dragLastY = ty;
-  if (dy === 0) return;
-  dragTotalMoveY += Math.abs(dy);
-  STATE.settingsScrollOffset = Math.max(0, Math.min(SETTINGS_SCROLL_MAX, STATE.settingsScrollOffset - dy));
+  if (!pointerDown) return;
+  const [x, y] = screenXY(event);
+  pointerQueue.push({ down: true, x, y, t: performance.now() });
 });
-canvas.addEventListener('pointerup', () => {
-  if (!dragActive) return;
-  dragActive = false;
-  settingsListDragEnd();
-  render();
-});
+function pointerUp(event) {
+  if (!pointerDown) return;
+  pointerDown = false;
+  const [x, y] = screenXY(event);
+  pointerQueue.push({ down: false, x, y, t: performance.now() });
+}
+canvas.addEventListener('pointerup', pointerUp);
+canvas.addEventListener('pointercancel', pointerUp);
+let touchWasDown = false;
+function processTouches() {
+  while (pointerQueue.length) {
+    const e = pointerQueue.shift();
+    if (STATE.screenSleeping) {
+      // The waking press is swallowed -- it never reaches the screen.
+      if (e.down && !touchWasDown && e.t - STATE.sleepStartMs > TOK_TOUCH_WAKE_GUARD_MS) {
+        swallowUntilUp = true;
+        exitScreenSleep();
+      }
+    } else if (swallowUntilUp) {
+      if (!e.down) swallowUntilUp = false;
+    } else {
+      navTouch(e.down, e.x, e.y, e.t);
+    }
+    touchWasDown = e.down;
+  }
+}
+
 // Keyboard: the same single-key commands the firmware takes over serial.
+function closeSheetNow() { if (navSheetOpen()) navCloseSheet(); navFinishTransition(); }
 canvas.addEventListener('keydown', (event) => {
   const k = event.key;
   if (k === 'z') {
@@ -1929,30 +2761,75 @@ canvas.addEventListener('keydown', (event) => {
     return;
   }
   if (STATE.screenSleeping) return;
-  if (k === 'n' || k === 'ArrowRight') goToPage((STATE.currentPage + 1) % PAGE_COUNT, true);
-  else if (k === 'p' || k === 'ArrowLeft') goToPage((STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, false);
-  else if (k === 'w') { STATE.weatherPageOpen = true; STATE.devicePageOpen = false; }
-  else if (k === 'd') { STATE.devicePageOpen = true; STATE.weatherPageOpen = false; }
-  else if (k === 's') { STATE.settingsScreen = 'list'; STATE.settingsScrollOffset = 0; }
-  else if (k === 'x' || k === 'Escape') { STATE.settingsScreen = 'off'; STATE.weatherPageOpen = STATE.devicePageOpen = false; }
+  if (k === 'n' || k === 'ArrowRight') { closeSheetNow(); navGoToPage((STATE.currentPage + 1) % PAGE_COUNT, true); }
+  else if (k === 'p' || k === 'ArrowLeft') { closeSheetNow(); navGoToPage((STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, false); }
+  else if (k === 'w') { closeSheetNow(); navOpenSheet(0); }
+  else if (k === 'd') { closeSheetNow(); navOpenSheet(1); }
+  else if (k === 's') { closeSheetNow(); navOpenSheet(2); }
+  else if (k === 'x' || k === 'Escape') navCloseSheet();
+  else if (k === 'm') motionTimeScale = motionTimeScale > 1 ? 1 : 10;
   else return;
   event.preventDefault();
-  render();
 });
 
 document.getElementById('poll-now').addEventListener('click', fetchUsage);
 document.getElementById('poll-interval').addEventListener('change', restartPollTimer);
 document.getElementById('sim-offline').addEventListener('change', fetchUsage);
 document.getElementById('mock-data').addEventListener('change', fetchUsage);
-document.getElementById('sim-sd-missing').addEventListener('change', render);
-document.getElementById('force-hourly-flash').addEventListener('change', render);
+document.getElementById('sim-sd-missing').addEventListener('change', () => { if (!navTransitionActive()) redrawScreen(); });
+document.getElementById('hourly-signal').addEventListener('click', backlightBreath);
 
-// ~30fps, the firmware's LOOP_PERIOD_MS: the shine sweep, progress line and
-// slide all move at the board's cadence. CPU% is this tab's draw duty cycle.
+// ── LOOP (main.cpp's loop(), ~30 passes/sec) ──────────────────
+let lastRenderMs = 0, lastSheetRenderMs = 0, lastBreathHour = -1;
 function tick() {
-  const start = performance.now();
-  render();
-  checkNightMode();
+  const start = performance.now(), now = start;
+  backlightTick(now);
+  if (!STATE.screenSleeping) {
+    if (SHIFT_STEP_MS > 0 && now - STATE.lastShiftMs >= SHIFT_STEP_MS) {
+      STATE.lastShiftMs = now;
+      STATE.shiftIdx = (STATE.shiftIdx + 1) % 8;
+      [STATE.shiftX, STATE.shiftY] = SHIFT_ORBIT[STATE.shiftIdx];
+      STATE.shiftDirty = true;
+    }
+    if (now - lastNightCheckMs >= 1000) {
+      lastNightCheckMs = now;
+      const bkk = bangkokParts();
+      if (STATE.cfgNightModeOn) {
+        const hour = parseInt(bkk.hour, 10);
+        const inWindow = hour >= 23 || hour < 7;
+        if (inWindow !== STATE.nightDimActive) {
+          STATE.nightDimActive = inWindow;
+          applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_NIGHT_MS);
+        }
+      }
+      const h = parseInt(bkk.hour, 10);
+      if (STATE.cfgHourlyFlash && parseInt(bkk.minute, 10) === 0 && parseInt(bkk.second, 10) < 5 && h !== lastBreathHour) {
+        lastBreathHour = h;
+        backlightBreath();
+      }
+    }
+    let needPresent = STATE.shiftDirty;
+    if (navSheetOpen()) {
+      if (STATE.devicePageOpen && !navTransitionActive() && now - lastSheetRenderMs >= 1000) {
+        lastSheetRenderMs = now;
+        render();
+        needPresent = false;
+      }
+      if (STATE.settingsScreen !== 'off' && toastText && now >= toastUntilMs) { toastText = ''; renderSettings(); }
+    } else if (now - lastRenderMs >= 1000) {
+      lastRenderMs = now;
+      render();
+      needPresent = false;
+    } else if (!navCatLayout() || STATE.currentPage === MIXED_PAGE) {
+      if (progressTick(now)) needPresent = true;
+      if (shineTick(now)) needPresent = true;
+      if (pulseTick(now)) needPresent = true;
+    }
+    if (needPresent) presentFrame();
+  }
+  processTouches();
+  if (!STATE.screenSleeping) navTick(performance.now());
+  setPageStatus(describeScreen());
   const busyMs = performance.now() - start;
   STATE.cpuPercentAvg = STATE.cpuPercentAvg * 0.9 + (busyMs / 33 * 100) * 0.1;
 }
@@ -1961,9 +2838,11 @@ if (!window.S3_FONTS) {
   document.body.insertAdjacentHTML('afterbegin',
     '<p style="color:var(--warn)">sim/fonts.js missing -- run python3 tools/make_vlw.py</p>');
 } else {
+  const slow = parseFloat(new URLSearchParams(location.search).get('slowmo'));
+  if (slow > 1) motionTimeScale = slow;
   loadWeatherCache();
   loadSettings();
-  applyEffectiveBrightnessFilter();
+  applyEffectiveBrightness(0);
   render();
   fetchUsage();
   restartPollTimer();

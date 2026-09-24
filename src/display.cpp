@@ -41,8 +41,6 @@ static volatile uint32_t teCount = 0;
 static uint32_t lastPresentUs = 0;
 static uint32_t presentCount = 0;
 static bool flipped = false;
-static bool invertWanted = false;
-static bool invertApplied = false;
 
 static void IRAM_ATTR onTeEdge(void*) {
   teCount++;
@@ -157,7 +155,6 @@ void displaySetSleep(bool sleep) {
   }
 }
 
-void displaySetInvert(bool on) { invertWanted = on; }
 void displaySetFlipped(bool f) { flipped = f; }
 bool displayFlipped() { return flipped; }
 uint32_t displayTeCount() { return teCount; }
@@ -165,38 +162,66 @@ uint32_t displayLastPresentUs() { return lastPresentUs; }
 uint32_t displayPresentCount() { return presentCount; }
 
 // One present's worth of source description, shared by every strip.
+enum PresentMode : uint8_t { PM_PLAIN, PM_SLIDE_H, PM_SHEET, PM_FADE };
 struct PresentSrc {
-  const uint16_t* a;   // the frame (or the outgoing frame, during a slide)
-  const uint16_t* b;   // incoming frame during a slide, else nullptr
-  int offset;          // slide progress, 0..SCREEN_W
+  PresentMode mode;
+  const uint16_t* a;   // the frame; the outgoing frame (slide/fade); the page behind (sheet)
+  const uint16_t* b;   // incoming frame (slide/fade) or the sheet, else nullptr
+  int offset;          // slide: 0..SCREEN_W; sheet: visible sheet height (may overshoot 320)
   bool forward;
+  int level;           // sheet: scrim step on `a` (0..2); fade: 1..3 = 25/50/75% of `b`
   int shiftX, shiftY;
   uint16_t bg;         // byte-swapped
-  int border;          // border overlay thickness, 0 = none
-  uint16_t borderCol;  // byte-swapped
 };
 
-static int borderThickness = 0;
-static uint16_t borderColor = 0xFFFF;
 static uint32_t lastTeWaitUs = 0;
 
-void displaySetBorder(int thickness, uint16_t color) {
-  borderThickness = thickness;
-  borderColor = color;
+static inline uint16_t swap16(uint16_t c) { return (uint16_t)((c >> 8) | (c << 8)); }
+
+// Materials without alpha (design.md 8.4): the frames hold big-endian RGB565,
+// so each op swaps to native order, halves/quarters every channel with one
+// shift and mask, and swaps back.
+static inline uint16_t scrimPx(uint16_t be, int level) {
+  if (level <= 0) return be;
+  uint16_t c = swap16(be);
+  if (level == 1) c = c - ((c >> 2) & 0x39E7);   // material.scrim.light, 75%
+  else c = (c >> 1) & 0x7BEF;                     // material.scrim, 50%
+  return swap16(c);
 }
 
-// Landscape pixel shown at screen (lx, ly), after pixel shift + slide.
+// Reduced-motion cross-fade (design.md 12.9): 25 / 50 / 75% of `b` over `a`,
+// built from the same shift-and-mask halves and quarters.
+static inline uint16_t fadePx(uint16_t abe, uint16_t bbe, int level) {
+  uint16_t a = swap16(abe), b = swap16(bbe), c;
+  if (level == 1)      c = (uint16_t)(a - ((a >> 2) & 0x39E7) + ((b >> 2) & 0x39E7));
+  else if (level == 2) c = (uint16_t)(((a >> 1) & 0x7BEF) + ((b >> 1) & 0x7BEF));
+  else                 c = (uint16_t)(((a >> 2) & 0x39E7) + b - ((b >> 2) & 0x39E7));
+  return swap16(c);
+}
+
+// Landscape pixel shown at screen (lx, ly), after pixel shift + composite.
 static inline uint16_t srcPixel(const PresentSrc& p, int lx, int ly) {
-  if (p.border && (lx < p.border || lx >= SCREEN_W - p.border || ly < p.border || ly >= SCREEN_H - p.border))
-    return p.borderCol;
   int sx = lx - p.shiftX, sy = ly - p.shiftY;
   if (sx < 0 || sx >= SCREEN_W || sy < 0 || sy >= SCREEN_H) return p.bg;
-  if (!p.b) return p.a[sy * SCREEN_W + sx];
-  if (p.forward) {
-    int split = SCREEN_W - p.offset;  // outgoing page shifted left by offset
-    return sx < split ? p.a[sy * SCREEN_W + sx + p.offset] : p.b[sy * SCREEN_W + sx - split];
+  int i = sy * SCREEN_W + sx;
+  switch (p.mode) {
+    case PM_SLIDE_H:
+      if (p.forward) {
+        int split = SCREEN_W - p.offset;  // outgoing page shifted left by offset
+        return sx < split ? p.a[i + p.offset] : p.b[i - split];
+      }
+      return sx < p.offset ? p.b[i + SCREEN_W - p.offset] : p.a[i - p.offset];
+    case PM_SHEET: {
+      int top = SCREEN_H - p.offset;       // the sheet's top edge on screen
+      if (sy < top) return scrimPx(p.a[i], p.level);
+      int row = sy - top;
+      return row < SCREEN_H ? p.b[row * SCREEN_W + sx] : p.bg;
+    }
+    case PM_FADE:
+      return fadePx(p.a[i], p.b[i], p.level);
+    default:
+      return p.a[i];
   }
-  return sx < p.offset ? p.b[sy * SCREEN_W + sx + SCREEN_W - p.offset] : p.a[sy * SCREEN_W + sx - p.offset];
 }
 
 // Fill one portrait strip (panel rows py0..py0+STRIP_ROWS-1) from the
@@ -205,13 +230,14 @@ static inline uint16_t srcPixel(const PresentSrc& p, int lx, int ly) {
 // reads would miss the cache on nearly every pixel.
 //   normal  (90deg):  panel (px,py) <- landscape (lx=py,      ly=319-px)
 //   flipped (270deg): panel (px,py) <- landscape (lx=479-py,  ly=px)
-// The plain present (no slide, no border, no shift) takes a tight fast path.
+// The plain present (one frame, with or without the pixel shift) takes a tight
+// fast path; composites (slide, sheet, fade) go pixel by pixel through srcPixel.
 static void fillStrip(uint16_t* dst, const PresentSrc& p, int py0) {
-  // Fast path: a single frame, no border -- the normal present, with or
+  // Fast path: a single frame -- the normal present, with or
   // without the pixel-shift orbit. The shift only offsets the source and
   // exposes a bg margin; which strip rows (i) land inside the frame is the
   // same for every ly, so it's worked out once per strip, not per pixel.
-  if (!p.b && !p.border) {
+  if (p.mode == PM_PLAIN) {
     // Source x for strip row i: normal lx = py0+i, flipped lx = 479-py0-i;
     // sx = lx - shiftX. Keep i where 0 <= sx < SCREEN_W.
     int iLo = 0, iHi = STRIP_ROWS;  // valid i range [iLo, iHi)
@@ -235,12 +261,52 @@ static void fillStrip(uint16_t* dst, const PresentSrc& p, int py0) {
     }
     return;
   }
+  // Composites: one specialised inner loop per mode (no per-pixel call or
+  // switch) -- the source row is chosen once per ly, and sx steps by one.
+  const int step = flipped ? -1 : 1;
+  const int sx0 = (flipped ? (SCREEN_W - 1 - py0) : py0) - p.shiftX;
   for (int ly = 0; ly < SCREEN_H; ly++) {
     int px = flipped ? ly : (PANEL_W - 1 - ly);
     uint16_t* d = dst + px;
-    for (int i = 0; i < STRIP_ROWS; i++) {
-      int lx = flipped ? (SCREEN_W - 1 - (py0 + i)) : (py0 + i);
-      d[i * PANEL_W] = srcPixel(p, lx, ly);
+    int sy = ly - p.shiftY;
+    if (sy < 0 || sy >= SCREEN_H) {
+      for (int i = 0; i < STRIP_ROWS; i++) d[i * PANEL_W] = p.bg;
+      continue;
+    }
+    const uint16_t* ra = p.a + sy * SCREEN_W;
+    int sx = sx0;
+    switch (p.mode) {
+      case PM_SLIDE_H: {
+        const uint16_t* rb = p.b + sy * SCREEN_W;
+        const int off = p.offset, split = SCREEN_W - off;
+        for (int i = 0; i < STRIP_ROWS; i++, sx += step) {
+          uint16_t v;
+          if (sx < 0 || sx >= SCREEN_W) v = p.bg;
+          else if (p.forward) v = sx < split ? ra[sx + off] : rb[sx - split];
+          else v = sx < off ? rb[sx + split] : ra[sx - off];
+          d[i * PANEL_W] = v;
+        }
+        break;
+      }
+      case PM_SHEET: {
+        const int top = SCREEN_H - p.offset;
+        const uint16_t* row = nullptr;
+        int level = 0;
+        if (sy < top) { row = ra; level = p.level; }
+        else if (sy - top < SCREEN_H) row = p.b + (sy - top) * SCREEN_W;
+        for (int i = 0; i < STRIP_ROWS; i++, sx += step)
+          d[i * PANEL_W] = (!row || sx < 0 || sx >= SCREEN_W) ? p.bg : scrimPx(row[sx], level);
+        break;
+      }
+      case PM_FADE: {
+        const uint16_t* rb = p.b + sy * SCREEN_W;
+        for (int i = 0; i < STRIP_ROWS; i++, sx += step)
+          d[i * PANEL_W] = (sx < 0 || sx >= SCREEN_W) ? p.bg : fadePx(ra[sx], rb[sx], p.level);
+        break;
+      }
+      default:
+        for (int i = 0; i < STRIP_ROWS; i++) d[i * PANEL_W] = srcPixel(p, flipped ? (SCREEN_W - 1 - (py0 + i)) : (py0 + i), ly);
+        break;
     }
   }
 }
@@ -252,11 +318,6 @@ static void presentSrc(const PresentSrc& p) {
   // Build the first strip before waiting on TE, so the transfer can start the
   // moment the edge arrives.
   fillStrip(strips[0], p, 0);
-
-  if (invertWanted != invertApplied) {
-    esp_lcd_panel_invert_color(panelHandle, invertWanted);
-    invertApplied = invertWanted;
-  }
 
   uint32_t tw = micros();
   xSemaphoreTake(teSem, 0);                          // drop a stale edge
@@ -275,10 +336,8 @@ static void presentSrc(const PresentSrc& p) {
   presentCount++;
 }
 
-static inline uint16_t swap16(uint16_t c) { return (uint16_t)((c >> 8) | (c << 8)); }
-
 void displayPresent(const uint16_t* frame, int shiftX, int shiftY, uint16_t bg) {
-  PresentSrc p = {frame, nullptr, 0, true, shiftX, shiftY, swap16(bg), borderThickness, swap16(borderColor)};
+  PresentSrc p = {PM_PLAIN, frame, nullptr, 0, true, 0, shiftX, shiftY, swap16(bg)};
   presentSrc(p);
 }
 
@@ -286,7 +345,20 @@ void displayPresentSlide(const uint16_t* from, const uint16_t* to, int offset, b
                          int shiftX, int shiftY, uint16_t bg) {
   if (offset < 0) offset = 0;
   if (offset > SCREEN_W) offset = SCREEN_W;
-  PresentSrc p = {from, to, offset, forward, shiftX, shiftY, swap16(bg), 0, 0};
+  PresentSrc p = {PM_SLIDE_H, from, to, offset, forward, 0, shiftX, shiftY, swap16(bg)};
+  presentSrc(p);
+}
+
+void displayPresentSheet(const uint16_t* behind, const uint16_t* sheet, int visibleH, int scrimLevel,
+                         int shiftX, int shiftY, uint16_t bg) {
+  if (visibleH < 0) visibleH = 0;
+  PresentSrc p = {PM_SHEET, behind, sheet, visibleH, true, scrimLevel, shiftX, shiftY, swap16(bg)};
+  presentSrc(p);
+}
+
+void displayPresentFade(const uint16_t* from, const uint16_t* to, int level,
+                        int shiftX, int shiftY, uint16_t bg) {
+  PresentSrc p = {PM_FADE, from, to, 0, true, constrain(level, 1, 3), shiftX, shiftY, swap16(bg)};
   presentSrc(p);
 }
 

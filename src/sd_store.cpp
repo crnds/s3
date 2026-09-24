@@ -86,7 +86,14 @@ void loadRuntimeConfig() {
     cfgBatterySaveMode = constrain(p.getInt(CONFIG_KEY_NAMES[CFGKEY_BATTERY_SAVE]),
                                    BATTERY_SAVE_OFF, BATTERY_SAVE_AUTO);
   }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_REDUCE_MOTION])) {
+    cfgReduceMotion = p.getInt(CONFIG_KEY_NAMES[CFGKEY_REDUCE_MOTION]) != 0;
+  }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_HIGH_CONTRAST])) {
+    cfgHighContrast = p.getInt(CONFIG_KEY_NAMES[CFGKEY_HIGH_CONTRAST]) != 0;
+  }
   p.end();
+  applyContrast();
 
   // Apply after all related keys are loaded so Battery Save can floor the
   // poll interval against the user's poll_interval_sec preference. AUTO
@@ -199,7 +206,7 @@ bool drawBmpFromSD(const char* path, int dx, int dy) {
 // card, show it briefly before the WiFi spinner. Absent file -> no splash, no
 // delay, straight into the normal boot.
 void showBootSplash() {
-  g->fillScreen(COL_BG);
+  g->fillScreen(TOK_COLOR_BG_CANVAS);
   if (drawBmpFromSD("/splash.bmp", 0, 0)) {
     presentFrame();
     delay(1500);

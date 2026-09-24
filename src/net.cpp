@@ -15,17 +15,18 @@ void ensureMdns() {
 }
 
 // 8 dots arranged in a circle, one lit at a time to give a rotating-spinner
-// effect while connectWifi() blocks waiting for an AP.
+// effect while connectWifi() blocks waiting for an AP. The only spinner in the
+// system (design.md 13.4): text.secondary on fill.track, firmware-only.
 static const int SPINNER_DOTS = 8;
 
 static void drawWifiSpinner(int frameNum) {
   const int cx = SCREEN_W / 2, cy = SCREEN_H / 2, r = 36, dotR = 6;
-  g->fillScreen(COL_BG);
+  g->fillScreen(TOK_COLOR_BG_CANVAS);
   for (int i = 0; i < SPINNER_DOTS; i++) {
     float angle = i * 2 * PI / SPINNER_DOTS;
     int x = cx + (int)(r * cosf(angle));
     int y = cy + (int)(r * sinf(angle));
-    g->fillCircle(x, y, dotR, i == frameNum % SPINNER_DOTS ? COL_ACCENT : COL_BORDER);
+    aaFillCircle(x, y, dotR, i == frameNum % SPINNER_DOTS ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_FILL_TRACK);
   }
   presentFrame();
 }

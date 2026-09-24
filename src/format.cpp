@@ -32,14 +32,15 @@ String fmtCountdown(long sec) {
   long h = m / 60;
   m %= 60;
   char buf[16];
-  if (h > 0) snprintf(buf, sizeof(buf), "%ldh:%02ldm", h, m);
+  if (h > 0) snprintf(buf, sizeof(buf), "%ldh %02ldm", h, m);
   else snprintf(buf, sizeof(buf), "%ldm", m);
   return String(buf);
 }
 
 // Day-aware countdown for windows that can span multiple days (the weekly
-// reset). >=1 day: "1d:12h" (days + hours only). <1 day: "23h:59m", same
-// shape as fmtCountdown. Twin of simulator.html's fmtCountdownDHM.
+// reset). >=1 day: "1d 12h" (days + hours only). <1 day: "23h 59m", same
+// shape as fmtCountdown. No colon: it would read as a clock time (design.md
+// 5.3 rule 9). Twin of simulator-s3.html's fmtCountdownDHM.
 String fmtCountdownDHM(long sec) {
   if (sec < 0) return "";
   long totalMin = (sec + 30) / 60;  // round to nearest minute
@@ -47,11 +48,11 @@ String fmtCountdownDHM(long sec) {
   char buf[16];
   if (days > 0) {
     long hours = (totalMin % 1440) / 60;
-    snprintf(buf, sizeof(buf), "%ldd:%ldh", days, hours);
+    snprintf(buf, sizeof(buf), "%ldd %ldh", days, hours);
   } else {
     long hours = totalMin / 60;
     long mins = totalMin % 60;
-    snprintf(buf, sizeof(buf), "%ldh:%02ldm", hours, mins);
+    snprintf(buf, sizeof(buf), "%ldh %02ldm", hours, mins);
   }
   return String(buf);
 }

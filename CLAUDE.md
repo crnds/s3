@@ -52,8 +52,9 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 - **Colours:** firmware RGB565 in `state.h`, simulator RGB888 with the
   `// 0x....` comment beside each. Change both together.
 - **Deliberate non-twins:** cat GIF playback (sim shows the placeholder layout
-  only), the AP setup screen, boot splash/spinner, and the present-time
-  effects (TE sync, border flash) — firmware-only.
+  with the real overlays), the AP setup screen, boot splash/spinner, and TE
+  sync — firmware-only. Slides, sheets, scrims, fades and the backlight
+  animator ARE twinned (the sim quantises scrims/fades through RGB565 too).
 - After any UI change: screenshot the sim headless **and** the board
   (`tools/grab_screen.py`) and compare (see Commands).
 - **Note tokenizer is a six-copy parity surface**: `src/pages.cpp`,
@@ -82,10 +83,12 @@ frame, so it can't show a one-frame glitch (flash, tear): those need eyes on
 the panel.
 
 Serial debug keys (main.cpp `serialCommand`): `n`/`p` next/prev page,
-`w`/`d`/`s` Weather/Device/Settings, `x` close overlays, `z` toggle screen
-sleep, `g` dump the frame
+`w`/`d`/`s` Weather/Device/Settings, `x` close sheets, `z` toggle screen
+sleep, `m` slow motion (every motion token x10, design.md 17), `g` dump the frame
 (`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`). The simulator
-canvas takes the same keys (plus arrows/Esc) when focused.
+canvas takes the same keys (plus arrows/Esc) when focused, and
+`?slowmo=10` starts it in slow motion. A grab is the `frame` buffer, not the
+composite on the panel, so grab after transitions settle.
 
 Headless sim screenshot (Playwright is installed at `~/node_modules`):
 ```sh
@@ -131,14 +134,39 @@ are gitignored.
   dirty-band partial pushes, right-edge mask and 60MHz tearing hack are gone.
 - **Present-time effects, not frame edits:** pixel-shift orbit (source offset
   + bg margin, in the rotate copy — a shift step is a re-present, never a
-  redraw), hourly flash (panel `INVON`), touch flash (border overlay), page
-  slide (two-frame composite, `displayPresentSlide`). Rotation NORMAL/FLIPPED
-  = software 90°/270° in the rotate copy and in `touch_axs.cpp`'s inverse map.
+  redraw), page slide (`displayPresentSlide`), sheet rise/drop with the
+  RGB565 shift-and-mask scrim (`displayPresentSheet`) and the Reduce Motion
+  cross-fade (`displayPresentFade`) -- each a two-frame composite with its own
+  inner loop in `fillStrip`. Rotation NORMAL/FLIPPED = software 90°/270° in
+  the rotate copy and in `touch_axs.cpp`'s inverse map. There is no screen
+  inversion or border flash any more (design.md 12.7/12.8): the hourly signal
+  is a backlight breath (`motion.cpp`'s backlight animator, which also fades
+  sleep, wake, Night Mode edges and brightness changes).
+- **Navigation (`nav.cpp`, twin: the simulator's NAV block).** The touch
+  router, gesture recogniser and every transition, stepped once per `loop()`
+  pass -- nothing blocks, so a touch during motion is always read. Commit on
+  touch-up with a 10px slop and a 120ms rearm from the last up; pressed states
+  on the down. Carousel: the page halves (the 8px lean is the pressed state),
+  plus horizontal swipe. Sheets (Weather, Device Stats, Settings) rise from the
+  bottom over a stepped scrim and dismiss by close glyph, tap-anywhere
+  (read-only sheets) or drag down; Settings pushes details from the right and
+  swipe-right pops; the list scrolls 1:1 with momentum and rubber-banding.
+  Springs, velocity handoff and rubber-band are `motion.cpp`. Only one
+  transition runs at a time; while one is up, `presentFrame()` just marks the
+  frame dirty and `navTick()` composites it. Buffers: `prevFrame` (outgoing
+  screen / dropping sheet) and `behindFrame` (the page under an open sheet),
+  300KB each in PSRAM. A `[motion]` serial line per transition reports frames
+  and the slowest present (~23ms slide, ~30ms sheet, ~12 frames).
 - **Presents are batched per loop pass.** `loop()` (~33ms period) collects
-  "changed" from `gifTick()`, `shineTick()`, `progressTick()` (all draw
-  straight into `frame`) and presents once. `render()` (1Hz on normal pages)
-  composes and presents itself. `presentHold` suppresses presents while a
-  page slide composes the incoming page off-screen (`goToPage` in main.cpp).
+  "changed" from `gifTick()`, `shineTick()` (one pace sweep per successful
+  poll), `pulseTick()` (one status-dot pulse per poll) and `progressTick()`
+  (hairline, capped at 4Hz) -- all draw straight into `frame` -- and presents
+  once. `render()` (1Hz on normal pages) composes and presents itself.
+  `presentHold` suppresses presents while nav composes an incoming screen
+  off-screen. Drawing cost is dominated by PSRAM bandwidth (full clear ~8ms)
+  and anti-aliased text (~1ms per string); the status page is ~40ms at 1Hz.
+  Smooth shapes use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp:
+  LovyanGFX's algorithm blended straight into the buffer).
 - **Two cores, two locks — unchanged from the CYD** (read `~/cyd/CLAUDE.md`):
   all blocking I/O on `networkTask` (core 0); `loop()` on core 1 only touches
   and renders; `stateMutex` held by `render()` while drawing; `sdMutex` →
@@ -177,11 +205,11 @@ are gitignored.
 - **Offline threshold / WiFi self-reboot are wall-clock** (60s / 15 min),
   never poll-cycle counts — see `~/cyd/CLAUDE.md` for the flap this fixed.
 - **Screen sleep (`enterScreenSleep`/`exitScreenSleep`, main.cpp):** the
-  solid grey pill (`drawSleepButton`, `SLEEP_BTN_*`/`SLEEP_HIT_*` in state.h) is
-  drawn last on every screen, and its hit box is checked before every other
-  touch target. Anything else in the top-right sits to its left: the Battery
-  Save icon, the Weather AQI badge, the Settings title. Sleeping sets the
-  backlight to 0, sends panel DISPOFF + SLPIN (`displaySetSleep`), drops the
+  sleep icon button (a crescent in corner slot a, `drawSystemCorner`,
+  `SLEEP_HIT_*` in state.h) is drawn last on every screen, and its hit box is
+  checked before every other touch target. Corner slot b (the Battery Save
+  glyph) sits to its left; content ink stays 8px clear of both. Sleeping
+  fades the backlight to 0, sends panel DISPOFF + SLPIN (`displaySetSleep`), drops the
   CPU to 80MHz, turns on WiFi modem sleep, and floors polls to
   `BATTERY_SAVE_POLL_SEC`. `loop()` then only reads touch every 50ms. The
   next press anywhere wakes the screen (after a 600ms guard) and is
@@ -194,12 +222,18 @@ are gitignored.
   pools) instead of the CYD's single DRAM constant; CPU% is the render
   loop's duty cycle with TE-wait time subtracted.
 
-## Layout grid
+## Layout grid and tokens
 
-3px outer margins, 2px card gaps. Left column x 3..238, right x 241..476,
-content y 3..289, footer 292..319, progress line y=319, page-nav split x=240.
-Hit boxes and every other shared constant live in `state.h`'s LAYOUT block
-and are copied at the top of `simulator-s3.html`.
+`design.md` section 7 is the source of truth: 8px margins and gutters, content
+x 8..471 / y 8..279, a fixed 172px left column (x 8..179) and a 284px right
+column (x 188..471), status strip y 288..318, progress hairline y 319; page
+navigation splits at the screen half (x 240), independent of the grid.
+Colours, type roles, spacing, radii, touch and motion values are design
+tokens in `src/tokens.h` (`TOK_*`, the upper snake of design.md's dotted
+names), mirrored line for line in the simulator's TOKENS block (RGB888 with
+the `// 0x....` beside). Screens use tokens only -- no raw colour, font id or
+magic spacing. Shared hit boxes and card boxes live in `state.h`'s LAYOUT
+block and are copied at the top of `simulator-s3.html`.
 
 ## Cat library
 

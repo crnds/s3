@@ -6,7 +6,7 @@ JC3248W535EN (ESP32-S3, 480×320) firmware UI and its browser twin,
 
 | | |
 |---|---|
-| **Status** | v1.1 (apple-design pass: springs, gestures, materials, tracking, process). The system is defined; the firmware has **not** been migrated yet (see §15 Migration). |
+| **Status** | v1.2: migrated. Phases 1–6 of §15.4 are in the firmware and the simulator (tokens in `src/tokens.h`, navigation and motion in `src/nav.cpp` / `src/motion.cpp`). §15.5 lists where the implementation had to differ from the spec; §18.4 lists the board-only checks still open. |
 | **Applies to** | `src/pages.cpp`, `src/settings.cpp`, `src/gif_player.cpp` (overlays and placeholders), `src/ap_setup.cpp`, `src/sd_store.cpp` (splash), and their twins in `simulator-s3.html`. |
 | **Does not apply to** | `server.html` and `note.html`. They are browser pages and follow `~/CLAUDE.md`'s static-web conventions. The one exception is `note.html`'s board preview, which must use the note-pane tokens (§11.19). |
 | **Precedence** | `CLAUDE.md` governs *mechanics*: parity, fonts pipeline, locks, the present pipeline. This file governs *design*: which colour, size, spacing, component and behaviour to use. If a rule here can't be implemented without breaking a `CLAUDE.md` invariant, the invariant wins and this file gets fixed. |
@@ -707,12 +707,12 @@ Rules:
   practice, controls inside cards use `radius.sm`.
 - Radius depends on the component, not the size.
 
-**AA primitives.** Use `fillSmoothRoundRect` / `fillSmoothCircle` (present
-in the pinned LovyanGFX 1.2.30, `LGFXBase.hpp:301`) for anything with
-radius ≥ 4. Plain `fillRoundRect` corners are aliased and look stair-stepped at
-this density. **The simulator's `gfx` layer doesn't implement the smooth variants
-yet.** Add them (canvas `roundRect` with AA) *before* the first firmware use, and
-confirm they match with a pixel-compare screenshot (§18.4).
+**AA primitives.** Use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp)
+for anything with radius ≥ 4. They run LovyanGFX 1.2.30's `fillSmoothRoundRect`
+algorithm but blend edge pixels straight into the frame buffer; the simulator's
+`gfx.fillSmoothRoundRect` / `gfx.aaRing` port the same loops (confirmed by a
+board-vs-simulator pixel compare). Plain `fillRoundRect` corners are aliased and
+look stair-stepped at this density.
 
 ### 8.2 Stroke
 
@@ -1082,6 +1082,11 @@ excluded on purpose are listed in §11.23.
 - **Spacing:** the bar gap is `space.sm` or larger. Horizontal (project) bars are
   `meter.md` height on `fill.track`, with the label above in body and the value
   right-aligned in caption.
+- **Dense single-line variant** (the Projects page, where four ranked rows and the
+  trend card must share 272 px): the name (body) sits in the left column, the meter
+  runs from the right column's edge (x 188) vertically centred on the name's cap
+  height, and the value (caption) is right-aligned on the name's baseline. Rows step
+  by line box + `space.stack` (31).
 - **Rules:** no gridlines or axis lines. The baseline is implied by aligned bar feet.
 
 ### 11.7 List row
@@ -1227,7 +1232,8 @@ excluded on purpose are listed in §11.23.
 - **Anatomy:** a pill with a number: height 24, horizontal padding 6, `radius.sm`, headline.
 - **Colour:** the fill comes from the external AQI scale. The text is gray.0, except white on
   Hazardous (both chosen for contrast; `aqiColors()` today).
-- **Placement:** baseline-aligned after the date. Keep 8 px clear of the corner slots.
+- **Placement:** on its own row under the date in the clock readout (§7.4), or right
+  of the text in the Weather hero. Keep 8 px clear of the corner slots.
 
 ### 11.17 Toast
 
@@ -1251,7 +1257,8 @@ excluded on purpose are listed in §11.23.
   - the reset radius, 1.6 px, `data.pace`
   - the second hand, 2.4 px, `accent` (the current-item marker)
   - a hub, r 3
-- **Size:** r 56 on the grid (§7.4). The hand ratios scale with r.
+- **Size:** r 76 on the grid (§7.4). The hand ratios scale with r. The face is an
+  anti-aliased ring (`aaRing`), not two filled discs: only the band's pixels are drawn.
 - **Motion:** it ticks at 1 Hz (the one ambient motion on the status page, §12.7).
 
 ### 11.19 Note pane (product-specific)
@@ -1828,6 +1835,27 @@ shot compared pixel for pixel (`CLAUDE.md` → Commands).
 6. **Clean-up.** Remove the `COL_*` aliases, and update `CLAUDE.md`'s "Layout grid" section
    to point here.
 
+### 15.5 Where the implementation differs from the spec
+
+- **Projects rows** use the dense single-line variant (§11.6). With label-above rows,
+  four projects and a readable trend card don't both fit in 272 px.
+- **Boot page grid** puts its second row (3 cells) on the 3-column width, so
+  "Status + cats" (110 px of headline) fits its cell.
+- **Reduce Motion** also turns off the drags that would move a surface (page swipe,
+  drag to dismiss, swipe back). Each has a tap equivalent, and a cross-fade can't
+  track a finger. List scrolling stays.
+- **Mid-slide carousel retarget** uses the §12.3 minimum: a touch-down finishes the
+  slide in flight on that present, then starts the new gesture. Sheets *are* grabbed
+  mid-flight and carry on from their on-screen position.
+- **Optical sizing** is not done. `opsz` needs Inter 4's `InterVariable.ttf`, which
+  isn't installed. Tracking per §5.2 is done (`make_vlw.py`'s `track_px`).
+- **The offline screen** shows the reset plate too (§13.4). The old rule hid it offline.
+- **Toggle rows** have no detail screen (§11.7), so copy that lived on the old detail
+  screens (Night Mode's "23:00–07:00, dims to 25%") is no longer shown anywhere.
+- **Drawing cost:** the status page takes ~40 ms to compose (PSRAM fills and AA text,
+  as before the migration). Composites take ~23 ms (page) and ~30 ms (sheet) plus the
+  TE wait, so springs step at ~30 fps and a transition is ~12 frames.
+
 **Deprecated patterns** (don't reuse them in new work):
 - outline-only cards
 - an accent-coloured title
@@ -1931,9 +1959,9 @@ Night Mode's 25%; only absolute brightness falls (§1).
 |---|---|---|
 | `touch.rearm` = 120 ms | The AXS15231B's bounce and spurious-up behaviour hasn't been characterised | Log touch down/up timing (`[touch]` serial lines, `main.cpp:500`) while tapping fast; set rearm just above the longest bounce you see |
 | `touch.edge.min` = 40 | Centroid accuracy near the bezel hasn't been measured | Tap the corners and the bottom edge; compare the logged `x`/`y` with the intended targets |
-| Smooth primitives | They exist in LovyanGFX 1.2.30 but aren't mirrored in the simulator | Implement them in the simulator's `gfx`, then pixel-compare a test card on both |
+| Smooth primitives | **Done.** Ported to the simulator; the board-vs-simulator pixel compare differs only where live data changed between grabs | -- |
 | Night-dim legibility | gray.1 against gray.0 at 25% backlight | Eyeball on the panel at night brightness; if cards vanish, the gutters still group them (§1), so no change is needed unless text suffers |
-| Vertical sheet cost | `displayPresentSlideV` doesn't exist yet | Measure `displayLastPresentUs()` during a sheet and check it matches the horizontal slide |
-| 60 Hz motion | A present takes about 16 ms against a TE period of about 16.5 ms | Log present time during a spring. If every present fits one TE period, step springs every TE edge (§12.6) |
+| Vertical sheet cost | **Measured** (the `[motion]` serial line): ~30 ms per sheet composite vs ~23 ms per page slide; the difference is the scrim's swap, shift and mask | -- |
+| 60 Hz motion | **No.** Composites take 23–30 ms, which misses a single TE period, so springs stay at ~30 fps | Revisit only if the composite loops get faster |
 | Spring feel | The response values were tuned in simulation, not by hand | Review in slow motion (§17), then at full speed on the board. Adjust only the response, keeping ζ = 1.0 |
 | Tracking and `opsz` regeneration | New advances change every measured width | Re-run `make_vlw.py`, then compare simulator and board screenshots on every page, checking the truncation paths (weather condition, note pane) |

@@ -31,8 +31,8 @@ UsageState STATE;
 int currentPage = 0;
 int cfgBootPage = 0;  // which page currentPage starts on; overridable via flash "boot_page"
 int cfgLastPage = 0;  // last page shown before the most recent restart; flash "last_page"
-bool weatherPageOpen = false;  // Weather overlay (tap status-page weather card)
-bool devicePageOpen = false;   // Device Stats overlay (tap footer's CPU/ROM/RAM stats line)
+bool weatherPageOpen = false;  // Weather sheet (tap the status page's weather card)
+bool devicePageOpen = false;   // Device Stats sheet (tap the status strip's health glyphs)
 SettingsScreen settingsScreen = SET_OFF;
 int settingsScrollOffset = 0;  // vertical scroll position (px) of the SET_LIST list
 int settingsLeafIndex = -1;    // index into SETTINGS[] currently open in SET_LEAF
@@ -82,6 +82,8 @@ bool cfgShowCountdown = true;  // default on; flash "show_countdown"
 bool cfgShowAqi = true;        // default on; flash "show_aqi"
 bool cfgHourlyFlash = true;    // default on; flash "hourly_flash"
 bool cfgShowProgress = true;   // default on; flash "show_progress"
+bool cfgReduceMotion = false;  // default off; flash "reduce_motion"
+bool cfgHighContrast = false;  // default off; flash "high_contrast"
 bool nightDimActive = false;
 // Generic Settings-page persistence queue, drained by networkTask (core 0)
 // so the flash write never happens on the render core.
@@ -175,6 +177,7 @@ void networkTask(void* param) {
       if (connected) {
         STATE.haveData = true;
         lastFetchSuccessMs = now;
+        pollOkSeq++;  // one pace sweep + one status-dot pulse on the render side
       } else if (now - lastFetchSuccessMs >= OFFLINE_AFTER_MS) {
         STATE.haveData = false;
       } else if (!STATE.haveData && STATE.sdOk) {
@@ -204,71 +207,32 @@ void networkTask(void* param) {
   }
 }
 
-// ── CAT MODE / PAGE CHANGES ────────────────────────────────
-// Enter/exit the GIF decoder on catMode edges. Called from the top of loop()
-// and from goToPage() (which needs the decoder before the slide's first frame).
-static bool prevCatMode = false;
-static void syncCatMode(bool catMode) {
-  if (catMode == prevCatMode) return;
-  if (catMode) gifPlayerEnterCatMode();
-  else gifPlayerExitCatMode();
-  prevCatMode = catMode;
-}
-
-// Swipe to a page with the slide transition: snapshot the outgoing frame,
-// draw the incoming page off-screen (cat pages decode their first frame), then
-// animate. While offline the cats own every page, so a page change is
-// invisible -- no slide, and the cats keep playing.
-static void goToPage(int newPage, bool forward) {
-  bool offline = !STATE.haveData;
-  currentPage = newPage;
-  // Always tracked (regardless of cfgBootPage's mode) so switching Boot Page
-  // to AUTO later always has a fresh page ready to resume.
-  cfgLastPage = currentPage;
-  queueConfigSave(CFGKEY_LAST_PAGE, currentPage);
-  if (offline) return;
-
-  bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE);
-  pageTransitionBegin();
-  syncCatMode(catMode);
-  if (currentPage == MIXED_PAGE) {
-    lockState();
-    g->fillScreen(COL_BG);
-    drawMixedPageStatic();
-    unlockState();
-    gifPlayerResetForPageChange();
-    gifPlayerPrimeFrame(false);
-  } else if (currentPage == GIF_PAGE) {
-    gifPlayerResetForPageChange();
-    gifPlayerPrimeFrame(false);
-  } else {
-    render();  // presents are held; this only composes
-  }
-  pageTransitionRun(forward);
-}
-
-// ── SERIAL DEBUG HOOKS ─────────────────────────────────────
-// Single-key commands over the USB serial port, so pages can be driven and
-// screenshotted without touching the board (tools/grab_screen.py):
-//   n / p   next / previous page        w / d / s   Weather / Device / Settings
-//   x       close any overlay           g           grab: raw frame dump
 // ── SCREEN SLEEP ───────────────────────────────────────────
-// Tap the top-right pill (drawSleepButton) -> backlight 0, panel DISPOFF +
-// SLPIN, CPU down to 80MHz (lowest WiFi-safe clock; APB stays 80MHz so LEDC,
-// SPI and I2C are unaffected), WiFi modem sleep, polls floored to the Battery
-// Save cadence. loop() then only watches touch; the next press anywhere wakes
-// and is swallowed. Nothing is presented while asleep, so the frame (and an
-// open GIF's canvas) is exactly as it was on wake.
-static const uint32_t SLEEP_WAKE_GUARD_MS = 600;  // ignore the tap that put it to sleep
+// Tap the sleep button (corner slot a) -> the backlight fades to 0
+// (motion.backlight.sleep), then panel DISPOFF + SLPIN, CPU down to 80MHz
+// (lowest WiFi-safe clock; APB stays 80MHz so LEDC, SPI and I2C are
+// unaffected), WiFi modem sleep, polls floored to the Battery Save cadence.
+// loop() then only watches touch; the next press anywhere wakes and is
+// swallowed. Nothing is presented while asleep, so the frame (and an open
+// GIF's canvas) is exactly as it was on wake.
 static const uint32_t SLEEP_LOOP_MS = 50;
 static uint32_t sleepStartMs = 0;
 static uint32_t cpuMhzBeforeSleep = 240;
+static bool swallowUntilUp = false;  // the waking press never reaches the screen
 
-static void enterScreenSleep() {
+void enterScreenSleep() {
   if (screenSleeping) return;
+  // The fade is short and nothing on screen needs input during it.
+  backlightFadeTo(0, TOK_MOTION_BACKLIGHT_SLEEP_MS);
+  uint32_t t0 = millis();
+  while (millis() - t0 < (uint32_t)(TOK_MOTION_BACKLIGHT_SLEEP_MS * motionTimeScale) + 20) {
+    backlightTick(millis());
+    delay(10);
+  }
   screenSleeping = true;
   sleepStartMs = millis();
-  displaySetBrightness(0);
+  navResetGesture();
+  applyEffectiveBrightness();
   displaySetSleep(true);
   cpuMhzBeforeSleep = getCpuFrequencyMhz();
   setCpuFrequencyMhz(80);
@@ -278,37 +242,51 @@ static void enterScreenSleep() {
                 (unsigned long)(POLL_INTERVAL_MS / 1000));
 }
 
-static void exitScreenSleep() {
+void exitScreenSleep() {
   if (!screenSleeping) return;
   setCpuFrequencyMhz(cpuMhzBeforeSleep);
   WiFi.setSleep(false);
   screenSleeping = false;
   applyEffectivePoll();
   displaySetSleep(false);
-  bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE) || !STATE.haveData;
+  bool catMode = navCatLayout();
   if (settingsScreen != SET_OFF) renderSettings();
   else if (catMode && !weatherPageOpen && !devicePageOpen) presentFrame();
   else render();
-  applyEffectiveBrightness();
+  // DISPON first, then the backlight fades up (motion.backlight.wake): the
+  // frame is intact, so the screen is effectively there at once.
+  applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_WAKE_MS);
   Serial.printf("[sleep] exit after %lus\n", (unsigned long)((millis() - sleepStartMs) / 1000));
+}
+
+// ── SERIAL DEBUG HOOKS ─────────────────────────────────────
+// Single-key commands over the USB serial port, so pages can be driven and
+// screenshotted without touching the board (tools/grab_screen.py):
+//   n / p   next / previous page        w / d / s   Weather / Device / Settings
+//   x       close any sheet             g           grab: raw frame dump
+//   z       toggle screen sleep         m           slow motion (x10) on/off
+static void closeSheetNow() {
+  if (navSheetOpen()) navCloseSheet();
+  navFinishTransition();
 }
 
 static void serialCommand(char c) {
   switch (c) {
     case 'n': case 'p':
-      settingsScreen = SET_OFF; weatherPageOpen = devicePageOpen = false;
-      goToPage(c == 'n' ? (currentPage + 1) % PAGE_COUNT : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, c == 'n');
+      closeSheetNow();
+      navGoToPage(c == 'n' ? (currentPage + 1) % PAGE_COUNT : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, c == 'n');
       break;
-    case 'w': weatherPageOpen = true; devicePageOpen = false; render(); break;
-    case 'd': devicePageOpen = true; weatherPageOpen = false; render(); break;
-    case 's': settingsScreen = SET_LIST; settingsScrollOffset = 0; renderSettings(); break;
-    case 'x':
-      settingsScreen = SET_OFF; weatherPageOpen = devicePageOpen = false;
-      render();
-      break;
+    case 'w': closeSheetNow(); navOpenSheet(0); break;
+    case 'd': closeSheetNow(); navOpenSheet(1); break;
+    case 's': closeSheetNow(); navOpenSheet(2); break;
+    case 'x': navCloseSheet(); break;
     case 'z':
       if (screenSleeping) exitScreenSleep();
       else enterScreenSleep();
+      break;
+    case 'm':
+      motionTimeScale = motionTimeScale > 1.0f ? 1.0f : 10.0f;
+      Serial.printf("[motion] time scale x%.0f\n", motionTimeScale);
       break;
     case 'g': {
       // Header line, raw 480x320 big-endian RGB565 (the sprite's own bytes),
@@ -340,7 +318,7 @@ void setup() {
   randomSeed(esp_random());           // so the cat picked on the cat pages differs each boot
 
   if (!displayBegin()) Serial.println("[display] panel init FAILED");
-  displaySetBrightness(200);  // provisional; re-applied from flash once loadRuntimeConfig() runs
+  backlightFadeTo(200, 0);  // provisional; re-applied from flash once loadRuntimeConfig() runs
   touchBegin();
   fontsBegin();
 
@@ -351,7 +329,7 @@ void setup() {
     delay(2000);
     ESP.restart();
   }
-  frame.fillScreen(COL_BG);
+  frame.fillScreen(TOK_COLOR_BG_CANVAS);
   presentFrame();
 
   // TF card on SD_MMC, 1-bit (the board wires CLK/CMD/D0 only). Attempted
@@ -402,9 +380,9 @@ void setup() {
   xTaskCreatePinnedToCore(networkTask, "net", 8192, nullptr, 1, nullptr, 0);
 }
 
-// Target render-loop period: ~30 passes/sec, which is what the between-render
-// animations (shine sweep, progress line) and touch sampling run at. The GIF
-// player paces itself inside that from each frame's own delay.
+// Target render-loop period: ~30 passes/sec, which is what the springs, the
+// between-render top-ups and touch sampling run at. The GIF player paces
+// itself inside that from each frame's own delay.
 static const uint32_t LOOP_PERIOD_MS = 33;
 
 void loop() {
@@ -413,16 +391,17 @@ void loop() {
   uint32_t now = millis();
 
   while (Serial.available()) serialCommand((char)Serial.read());
+  backlightTick(now);
 
   if (screenSleeping) {
     // Asleep: no drawing, no presents, no GIF decode -- just watch for a
-    // press. The waking press is swallowed (touchWasDown stays true until it
-    // lifts), so it never navigates.
+    // press. The waking press is swallowed (it never reaches the screen).
     int32_t sx = 0, sy = 0;
     bool down = touchRead(sx, sy);
-    if (down && !touchWasDown && now - sleepStartMs > SLEEP_WAKE_GUARD_MS) {
+    if (down && !touchWasDown && now - sleepStartMs > TOK_TOUCH_WAKE_GUARD_MS) {
       Serial.printf("[touch] wake x=%ld y=%ld\n", (long)sx, (long)sy);
       lastTouchMs = now;
+      swallowUntilUp = true;
       exitScreenSleep();
     }
     touchWasDown = down;
@@ -432,13 +411,13 @@ void loop() {
 
   // Cats own the screen on the cat pages, AND whenever offline.
   bool offline = !STATE.haveData;
-  bool catMode = (currentPage == GIF_PAGE) || (currentPage == MIXED_PAGE) || offline;
-  syncCatMode(catMode);
+  bool catMode = navCatLayout();
+  navSyncCatMode(catMode);
 
   pixelShiftTick(now);
 
   // Night mode: own 1s timer, regardless of page/catMode/settings state; only
-  // touches brightness on a transition edge.
+  // touches brightness on a transition edge, as a 2s fade.
   if (cfgNightModeOn) {
     static uint32_t lastNightCheckMs = 0;
     if (now - lastNightCheckMs >= 1000) {
@@ -448,23 +427,42 @@ void loop() {
         bool inWindow = (ti.tm_hour >= 23 || ti.tm_hour < 7);
         if (inWindow != nightDimActive) {
           nightDimActive = inWindow;
-          applyEffectiveBrightness();
+          applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_NIGHT_MS);
         }
       }
     }
   }
 
-  // The hourly flash inverts at 1Hz for 6s; re-present on each flip so the
-  // static screens (settings, overlays) flash too.
-  static bool lastInvertPhase = false;
-  bool isEvenSecond = false;
-  bool invertPhase = checkHourlyFlash(isEvenSecond) && isEvenSecond;
-  bool needPresent = shiftDirty || invertPhase != lastInvertPhase;
-  lastInvertPhase = invertPhase;
+  // Hourly signal: one backlight breath at hh:00 (motion.backlight.breath) --
+  // costs no presents, and never flashes or inverts the screen.
+  if (cfgHourlyFlash) {
+    static int lastBreathHour = -1;
+    static uint32_t lastHourCheckMs = 0;
+    if (now - lastHourCheckMs >= 500) {
+      lastHourCheckMs = now;
+      struct tm ti;
+      if (getLocalTime(&ti, 0) && ti.tm_min == 0 && ti.tm_sec < 5 && ti.tm_hour != lastBreathHour) {
+        lastBreathHour = ti.tm_hour;
+        backlightBreath();
+      }
+    }
+  }
 
-  if (settingsScreen != SET_OFF || weatherPageOpen || devicePageOpen) {
-    // Static screens: drawn on entry/change only; a pixel-shift step or the
-    // hourly flash just re-presents the same frame.
+  bool needPresent = shiftDirty;
+
+  if (navSheetOpen()) {
+    // Sheets are drawn on entry / change. Device Stats is live (1 Hz); a
+    // Settings toast is cleared when it expires.
+    static uint32_t lastSheetRenderMs = 0;
+    if (devicePageOpen && !navTransitionActive() && now - lastSheetRenderMs >= 1000) {
+      lastSheetRenderMs = now;
+      render();
+      needPresent = false;
+    }
+    if (settingsScreen != SET_OFF && toastText[0] && (int32_t)(now - toastUntilMs) >= 0) {
+      toastText[0] = 0;
+      renderSettings();
+    }
   } else if (catMode) {
     if (gifTick(offline)) needPresent = true;
     if (currentPage == MIXED_PAGE && !offline) {
@@ -474,14 +472,17 @@ void loop() {
         lockState();
         drawMixedPageStatic();
         unlockState();
-        needPresent = true;
+        gifPlayerRedrawOverlays(offline);
+        needPresent = false;
       }
       if (shineTick(now)) needPresent = true;
       if (progressTick(now)) needPresent = true;
+      if (pulseTick(now)) needPresent = true;
     }
   } else {
-    // Repaint once a second for the pulsing status dot, the local countdowns,
-    // and the clock's ticking second hand.
+    // Repaint once a second for the local countdowns and the clock's second
+    // hand (motion.ambient.maxHz); the sweep, pulse and hairline top up
+    // between renders.
     static uint32_t lastRenderMs = 0;
     if (now - lastRenderMs >= 1000) {
       lastRenderMs = now;
@@ -490,73 +491,20 @@ void loop() {
     } else {
       if (progressTick(now)) needPresent = true;
       if (shineTick(now)) needPresent = true;
+      if (pulseTick(now)) needPresent = true;
     }
   }
   if (needPresent) presentFrame();
 
   int32_t tx = 0, ty = 0;
   bool touchDown = touchRead(tx, ty);
-  if (touchDown != touchWasDown) {
-    Serial.printf("[touch] down=%d x=%ld y=%ld\n", touchDown, (long)tx, (long)ty);
-  }
-  if (touchDown && !touchWasDown && now - lastTouchMs > TOUCH_DEBOUNCE_MS) {
-    lastTouchMs = now;
-
-    if (tx >= SLEEP_HIT_X0 && tx < SLEEP_HIT_X1 && ty >= SLEEP_HIT_Y0 && ty < SLEEP_HIT_Y1) {
-      // Sleep pill: checked first -- it sits over every screen, settings and
-      // overlays included.
-      enterScreenSleep();
-    } else if (settingsScreen == SET_LEAF) {
-      handleSettingsTouch(tx, ty, now, catMode);
-    } else if (settingsScreen == SET_LIST) {
-      settingsListDragBegin(tx, ty);  // resolved as a tap or a scroll on release, below
-    } else if (weatherPageOpen) {
-      weatherPageOpen = false;  // any tap dismisses the Weather overlay
-      render();
-    } else if (devicePageOpen) {
-      devicePageOpen = false;   // any tap dismisses the Device Stats overlay
-      render();
-    } else if (!catMode && tx >= SETTINGS_HIT_X0 && tx < SETTINGS_HIT_X1 &&
-               ty >= SETTINGS_HIT_Y0 && ty < SETTINGS_HIT_Y1) {
-      settingsScreen = SET_LIST;
-      settingsScrollOffset = 0;
-      settingsListDragBegin(tx, ty);  // seed drag state fresh -- this is a real new gesture
-      renderSettings();
-    } else if (!catMode && currentPage == 0 &&
-               tx >= WEATHER_HIT_X0 && tx < WEATHER_HIT_X1 &&
-               ty >= WEATHER_HIT_Y0 && ty < WEATHER_HIT_Y1) {
-      weatherPageOpen = true;
-      render();
-    } else if (!catMode && tx >= DEVICE_HIT_X0 && tx < DEVICE_HIT_X1 &&
-               ty >= DEVICE_HIT_Y0 && ty < DEVICE_HIT_Y1) {
-      devicePageOpen = true;
-      render();
-    } else if (catShuffleFixed && currentPage == GIF_PAGE &&
-               tx >= CAT_ADVANCE_X0 && tx < CAT_ADVANCE_X1) {
-      // Cat Shuffle FIXED, full-screen cat page: only the MIDDLE third
-      // changes the cat (CAT_ADVANCE_X0/X1 in state.h). The outer thirds
-      // still navigate.
-      gifPlayerResetForPageChange();
-      flashTouchCenter();
-    } else if (catShuffleFixed && currentPage == MIXED_PAGE &&
-               tx >= MIXED_CAT_ADVANCE_X0 && tx < MIXED_CAT_ADVANCE_X1 &&
-               ty >= MIXED_CAT_ADVANCE_Y0 && ty < MIXED_CAT_ADVANCE_Y1) {
-      // Cat Shuffle FIXED, mixed page: the LEFT HALF of the cat pane changes
-      // the cat (MIXED_CAT_ADVANCE_* in state.h); the pane's right half still
-      // does the normal forward swipe.
-      gifPlayerResetForPageChange();
-      flashTouchCenter();
-    } else {
-      bool forward = (tx >= SWIPE_SPLIT_X);
-      goToPage(forward ? (currentPage + 1) % PAGE_COUNT
-                       : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, forward);
-    }
-  } else if (touchDown && touchWasDown && settingsScreen == SET_LIST) {
-    settingsListDragMove(tx, ty);  // live-scroll while the finger stays down, no debounce gate
-  } else if (!touchDown && touchWasDown && settingsScreen == SET_LIST) {
-    settingsListDragEnd(catMode);  // tap (open a leaf / exit) vs scroll, decided from total movement
+  if (swallowUntilUp) {
+    if (!touchDown) swallowUntilUp = false;
+  } else {
+    navTouch(touchDown, tx, ty, now);
   }
   touchWasDown = touchDown;
+  navTick(millis());
 
   // Duty-cycle CPU estimate: busy time this pass (minus idle TE waits) vs the
   // loop period, smoothed with an EMA.

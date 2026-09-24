@@ -32,19 +32,26 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INTER = os.path.expanduser("~/Library/Fonts/Inter-VariableFont_slnt,wght.ttf")
 MONO = os.path.expanduser("~/Library/Fonts/GoogleSansCode-VariableFont_MONO,wght.ttf")
 
-# (id, ttf, pixel size, weight). The id is the C enum suffix (FONT_<id>) and
-# the simulator's FONTS key. Keep this list, fonts.h's FontId enum and the
-# simulator's usage in step -- the generated header carries the enum itself.
+# (id, ttf, pixel size, weight, tracking px). The id is the C enum suffix
+# (FONT_<id>) and the simulator's FONTS key. Keep this list, fonts.h's FontId
+# enum and the simulator's usage in step -- the generated header carries the
+# enum itself. The role each font plays is design.md's type scale (section 5.2).
+#
+# Tracking is size-specific (design.md 5.3 rule 3): Inter's dynamic-metrics
+# formula rounded to whole pixels gives -1 at 26 and 40 and 0 at 13 and 17;
+# the uppercase label (SMB) gets +1 on top. It is added to every glyph's
+# advance, so both parity rules still hold (width = sum of advances). The
+# monospace fonts stay at 0 -- the note pane's column grid depends on it.
 FONTS = [
-    ("SM",    INTER, 13, 500),   # small labels / footer / captions (CYD size 1)
-    ("SMB",   INTER, 13, 650),   # small uppercase card labels
-    ("MD",    INTER, 17, 500),   # body text (CYD size 2)
-    ("MDB",   INTER, 17, 650),   # emphasised body
-    ("LG",    INTER, 26, 650),   # big percentages / headings (CYD size 3)
-    ("XL",    INTER, 40, 650),   # digital clock, weather hero temp (CYD size 5)
-    ("MONO1", MONO,  11, 450),   # note pane, size 1
-    ("MONO2", MONO,  16, 450),   # note pane, size 2
-    ("MONO3", MONO,  22, 450),   # note pane, size 3
+    ("SM",    INTER, 13, 500,  0),   # type.caption
+    ("SMB",   INTER, 13, 650,  1),   # type.label (UPPERCASE section labels)
+    ("MD",    INTER, 17, 500,  0),   # type.body
+    ("MDB",   INTER, 17, 650,  0),   # type.headline
+    ("LG",    INTER, 26, 650, -1),   # type.title
+    ("XL",    INTER, 40, 650, -1),   # type.display
+    ("MONO1", MONO,  11, 450,  0),   # type.mono.s (note pane size 1)
+    ("MONO2", MONO,  16, 450,  0),   # type.mono.m
+    ("MONO3", MONO,  22, 450,  0),   # type.mono.l
 ]
 
 FIRST, LAST = 0x20, 0x7E
@@ -66,13 +73,13 @@ def load(path, size, weight):
     return f
 
 
-def render_font(fid, path, size, weight):
+def render_font(fid, path, size, weight, track):
     f = load(path, size, weight)
     ascent, descent = f.getmetrics()
     glyphs = []
     for code in range(FIRST, LAST + 1):
         ch = chr(code)
-        adv = int(round(f.getlength(ch, features=["tnum"])))
+        adv = int(round(f.getlength(ch, features=["tnum"]))) + track
         if code == 0x20:
             glyphs.append(dict(code=code, w=0, h=0, adv=adv, dy=0, dx=0, px=b""))
             continue

@@ -33,6 +33,8 @@
 #include "display.h"
 #include "touch_axs.h"
 #include "fonts.h"
+#include "tokens.h"
+#include "motion.h"
 
 // ── DISPLAY ────────────────────────────────────────────────
 // Every page draws into `frame`, a 480x320 16bpp LGFX_Sprite in PSRAM (via
@@ -45,27 +47,26 @@
 extern LGFX_Sprite frame;
 extern lgfx::LovyanGFX* g;
 
-// Push `frame` to the panel (pixel shift, hourly-flash inversion, and the
-// touch-flash border applied on the way). No-op while presentHold is set --
-// the page-slide transition renders the incoming page off-screen first.
+// Push `frame` to the panel (pixel shift applied on the way). No-op while
+// presentHold is set (a screen is being composed off-screen). While a
+// transition is running (nav.cpp: page slide, sheet, push, cross-fade) it
+// only marks the frame dirty -- navTick() composites and presents it once
+// per loop pass at the spring's current offset.
 void presentFrame();
 extern bool presentHold;
 // Running total of time presents spent idle waiting for the panel's TE edge
 // (main.cpp subtracts it from the CPU duty-cycle estimate).
 extern volatile uint32_t teWaitAccumUs;
-// Page-change slide: call pageTransitionBegin() BEFORE drawing the new page
-// (snapshots the outgoing frame and holds presents), then draw the new page
-// into `frame` the normal way, then pageTransitionRun() animates old -> new.
-void pageTransitionBegin();
-void pageTransitionRun(bool forward);
-void flashTouchCenter();
 bool pixelShiftTick(uint32_t now);
-bool checkHourlyFlash(bool& isEvenSecond);
-// Between-render animation top-ups (shine sweep, poll-progress line). Both
-// draw straight into `frame`; they return true when they changed pixels, and
-// loop() then presents once for the pass.
+// Between-render top-ups (the per-poll pace sweep, the status-dot pulse and
+// the poll-progress hairline). They draw straight into `frame`, return true
+// when they changed pixels, and loop() then presents once for the pass.
 bool shineTick(uint32_t nowMs);
 bool progressTick(uint32_t nowMs);
+bool pulseTick(uint32_t nowMs);
+// Bumped by networkTask on every successful poll; the render side starts one
+// pace sweep and one status-dot pulse per new value (design.md 12.7).
+extern volatile uint32_t pollOkSeq;
 
 // Non-const: overridable from flash (see sd_store.cpp's
 // loadRuntimeConfig). Originally set once at boot before the two tasks
@@ -82,7 +83,6 @@ extern volatile uint32_t POLL_INTERVAL_MS;
 // ── SHARED CONSTANTS ───────────────────────────────────────
 // Internal linkage per TU (C++ global `const` default) — safe to define
 // identically in every file that includes this header; no ODR issue.
-const uint32_t TOUCH_DEBOUNCE_MS = 350;
 const int PAGE_COUNT = 6;
 // cfgBootPage sentinel: resume whichever page was on screen before the last
 // restart (cfgLastPage), rather than a fixed page. See the Boot Page setting.
@@ -94,12 +94,11 @@ const int MIXED_PAGE = 4;  // 5th page: status + cats split
 // an ordinary render() page (a `case` in its switch) — nothing here needs the
 // per-frame decode loop or the partial-push path those two require.
 const int NOTE_PAGE = 5;
-// Note buffer. The pane can draw at most 24 cols x 19 rows = 456 glyphs at
-// text size 1, plus up to 19 newlines -> 475 bytes; 512 rounds that up and
-// leaves room for the NUL. Anything larger would be RAM spent on characters
-// that can never reach the screen at any of the three sizes. The server caps
-// its own copy at 480 chars (NOTE_MAX_CHARS), so the snprintf that fills this
-// is a belt-and-braces path that shouldn't fire against a well-behaved server.
+// Note buffer. The server caps its copy at 480 chars (NOTE_MAX_CHARS); 512
+// leaves room for the NUL. The S3 pane (37 cols x 14 rows at size 1) could
+// show slightly more than that, but the server cap, not the pane, is the
+// limit -- the snprintf that fills this is a belt-and-braces path that
+// shouldn't fire against a well-behaved server.
 // Named NOTE_BUF_MAX, not NOTE_MAX: esp32-hal-ledc.h already has a note_t
 // enumerator called NOTE_MAX -- the musical kind -- and the two collide.
 const int NOTE_BUF_MAX = 512;
@@ -108,85 +107,49 @@ const int NOTE_BUF_MAX = 512;
 const long GMT_OFFSET_SEC = 7 * 3600;
 const int DST_OFFSET_SEC = 0;
 
-const uint16_t COL_BG = 0x0841;      // near-black
-const uint16_t COL_SURFACE = 0x0841; // card fill = bg (no surface tint)
-const uint16_t COL_BORDER = 0x39C7;
-const uint16_t COL_TEXT = 0xFFFF;
-const uint16_t COL_TEXT2 = 0x9CD3;
-const uint16_t COL_ACCENT = 0xFB08;  // orange
-const uint16_t COL_GOOD = 0x2668;    // green
-const uint16_t COL_SHINE_LO = 0x5ECE;  // COL_GOOD lerped ~25% to white (shine band edge)
-const uint16_t COL_SHINE_MID = 0x9734; // ~50% to white (shine band mid)
-const uint16_t COL_SHINE_HI = 0xD7BA;  // ~80% to white (shine band center)
-const uint16_t COL_WARN = 0xF8C6;    // rose
-const uint16_t COL_TRACK = 0x5ACB;   // neutral grey bar track
-const uint16_t COL_TRACK_BLACK = 0x0000; // pure-black bar track (reset-countdown bars)
-const uint16_t COL_BLUE = 0x3C1E;    // device-stats bar chart accent
-const uint16_t COL_YELLOW = 0xFFE0;  // yellow for sun/lightning icons
-// AQI badge colors (status page, see aqiColors() in pages.cpp) not otherwise
-// used elsewhere -- Good/Moderate/Unhealthy reuse COL_GOOD/COL_YELLOW/COL_WARN.
-const uint16_t COL_AQI_ORANGE = 0xFB82; // rgb(249,115,22) — Unhealthy for Sensitive Groups
-const uint16_t COL_PURPLE = 0xAABE;     // rgb(168,85,247) — Very Unhealthy
-const uint16_t COL_MAROON = 0x78E3;     // rgb(127,29,29) — Hazardous
 // ── LAYOUT (480x320 landscape) ──────────────────────────────
-// The CYD's 320x240 grid scaled ~1.5x across / ~1.33x down, then tuned per
-// page. Shared by pages.cpp, gif_player.cpp, settings.cpp and the touch
-// router in main.cpp; simulator-s3.html carries the same numbers.
-//   - 3px outer margins, 2px gaps between cards (the CYD's 2px/2px rhythm)
-//   - left column x 3..238, right column x 241..476, content y 3..289
-//   - footer band y 292..319, 1px poll-progress line on y=319
-const int LEFT_X = 3, LEFT_W = 236;
-const int RIGHT_X = 241, RIGHT_W = 236;
-const int CONTENT_Y1 = 290;   // exclusive bottom of the page content area
-const int FOOTER_Y0 = 292;
-// Tap split for page navigation: left half = previous page, right = next.
-const int SWIPE_SPLIT_X = SCREEN_W / 2;
+// design.md section 7 is the source of truth; the numbers here are the
+// shared hit boxes and card boxes the touch router (nav.cpp), pages.cpp,
+// settings.cpp and gif_player.cpp all need. simulator-s3.html carries the
+// same numbers. Colours, type, spacing and component sizes are tokens
+// (tokens.h) -- no COL_* literals any more.
+//   - 8px screen margin and card gutter; content x 8..471, y 8..279
+//   - left column x 8..179 (fixed reservation), right column x 188..471
+//   - status strip y 288..318, progress hairline y 319
+// Page navigation splits at the screen half, independent of the grid.
+const int SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
 
-// Weather card hit-box on the status page (page 0): the whole card drawn at
-// (RIGHT_X, 221, RIGHT_W, 69) in drawStatusPage. Tap opens the Weather overlay.
-const int WEATHER_HIT_X0 = RIGHT_X, WEATHER_HIT_X1 = RIGHT_X + RIGHT_W;
-const int WEATHER_HIT_Y0 = 221, WEATHER_HIT_Y1 = CONTENT_Y1;
+// Status page cards (design.md 7.4).
+const int LIMIT_CARD_H = 112, BTC_CARD_H = 32;
+const int LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;                              // 8
+const int LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;       // 128
+const int BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;           // 248
+const int CLOCK_CARD_H = 192, WEATHER_CARD_H = 72;
+const int CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;                           // 8
+const int WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;  // 208
 
-// Footer CPU/ROM/RAM stats hit-box (drawFooter()'s "CPU x%  ROM x%  RAM x%"
-// line). Tap opens the Device Stats overlay -- Device Stats is not one of the
-// swiped PAGE_COUNT pages.
-const int DEVICE_HIT_X0 = 56, DEVICE_HIT_X1 = 330;
-const int DEVICE_HIT_Y0 = FOOTER_Y0, DEVICE_HIT_Y1 = SCREEN_H;
+// Weather card (status page) = its own hit box: the whole card is the
+// target, with a disclosure chevron as its affordance. Tap opens the Weather
+// sheet.
+const int WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
+const int WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
 
-// Footer settings gear icon (drawSettingsIcon() in pages.cpp), bottom-right
-// corner. Tap opens the Settings list (SET_LIST).
-const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
-const int SETTINGS_HIT_Y0 = FOOTER_Y0, SETTINGS_HIT_Y1 = SCREEN_H;
+// Status strip targets (design.md 11.12): 56x40 each, reaching up into the
+// 8px gap above the strip (touch.edge.min for a bottom-edge target).
+const int STRIP_HIT_Y0 = TOK_LAYOUT_CONTENT_Y1;                           // 280
+const int HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;                          // -> Device Stats
+const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;              // -> Settings
+const int STRIP_CY = 303;                                                 // glyph centre line
 
-// Cat pages only, and only while Cat Shuffle is FIXED: tapping advances to
-// the next random cat instead of navigating. Two separate bands, because the
-// cat only fills the whole screen on one of the two pages:
-//   - GIF_PAGE (full-screen cat): the middle third of the screen. The outer
-//     thirds deliberately fall through to the normal left/right page swipe,
-//     which still splits at SWIPE_SPLIT_X (240) -- 160 and 320 sit either
-//     side of it, so tapping outside this band navigates exactly as it does
-//     on every other page. The CYD's first version of this claimed the whole
-//     right half, which swallowed every forward tap and made later pages
-//     unreachable from the cat pages (and from everywhere while offline,
-//     since catMode is true on any page then). Don't widen this band back
-//     over the split.
-const int CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;
+// Media control (design.md 11.20): a shuffle icon button, only while Cat
+// Shuffle is Fixed, bottom-right of the media area, 8px in from its edges.
+// It replaces the old invisible "next cat" zones.
+const int SHUFFLE_DISC_R = 16;
+const int SHUFFLE_HIT = 48;
 
-// Screen-sleep pill (drawSleepButton() in pages.cpp), top-right corner of
-// every screen -- pages, overlays, cats, settings. Anything else that wants
-// that corner sits to its left (Battery Save icon below, the Weather AQI
-// badge, the Settings list title). The hit box is deliberately bigger than
-// the pill; tapping it is checked before every other touch target.
-const int SLEEP_BTN_X0 = 432, SLEEP_BTN_Y0 = 8, SLEEP_BTN_W = 40, SLEEP_BTN_H = 9;  // centred on the battery icon's row
-const int SLEEP_HIT_X0 = 416, SLEEP_HIT_X1 = SCREEN_W;
-const int SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = 36;
-
-// Battery Save top-right overlay, just left of the sleep pill:
-// drawBatterySaveIcon()'s backing box (pages.cpp), x X0..X1 inclusive. Page
-// content that must never be covered by it or the pill (the note pane's first
-// text row) starts below both.
-const int BATTERY_ICON_X0 = 400, BATTERY_ICON_X1 = 428;
-const int BATTERY_ICON_Y0 = 3, BATTERY_ICON_Y1 = 21;
+// Sleep button (corner slot a) -- checked before every other target.
+const int SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W;
+const int SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
 
 // Weather forecast slots delivered by /api/usage (Mac-proxied Open-Meteo)
 // and cached on SD as /weather.json. Fixed-size arrays — no String/heap
@@ -274,17 +237,16 @@ extern int cfgBootPage;
 // Page to AUTO always has a fresh value ready. Only actually used at boot
 // when cfgBootPage == BOOT_PAGE_AUTO.
 extern int cfgLastPage;
-// Weather detail overlay (opened by tapping the weather card on page 0).
-// Not a swipe-cycle page — same pattern as settingsScreen: any tap exits.
+// Weather sheet (tap the status page's weather card). Not a carousel page:
+// a read-only sheet -- close glyph, tap anywhere or drag down dismisses.
 extern bool weatherPageOpen;
-// Device Stats overlay (opened by tapping the footer's CPU/ROM/RAM stats
-// line -- DEVICE_HIT_*). Same not-a-swipe-page pattern as weatherPageOpen.
+// Device Stats sheet (tap the status strip's health glyphs). Same pattern.
 extern bool devicePageOpen;
 enum SettingsScreen { SET_OFF, SET_LIST, SET_LEAF };
 extern SettingsScreen settingsScreen;
-extern int settingsScrollOffset;  // vertical scroll position (px) of the SET_LIST list
+extern int settingsScrollOffset;  // vertical scroll position (px) of the SET_LIST list (may overshoot while rubber-banding)
 extern int settingsLeafIndex;
-const uint32_t CONFIRM_ARM_MS = 4000;
+const uint32_t CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
 extern uint32_t confirmArmedMs;
 extern int confirmArmedRow;
 // Written by networkTask() (core 0), read by drawFooter()/loop()'s progress
@@ -384,21 +346,25 @@ inline bool batterySaveActive() {
   if (cfgBatterySaveMode == BATTERY_SAVE_AUTO) return serverBatterySave;
   return false;
 }
-// Green reset-countdown bars (under 5h/week) + analog-clock timer wedge.
-// Green reset hand on the clock is always drawn when a reset is known.
+// "Pace bars" setting (flash key show_countdown, kept for compatibility): the
+// green pace meters under the 5h/week usage meters + the clock's pace wedge.
+// The green reset hand on the clock is always drawn when a reset is known.
 extern bool cfgShowCountdown;
 // Status-page AQI badge next to the date (see aqiColors()/drawStatusPage in
 // pages.cpp). Default on; toggled from the Settings area like cfgShowCountdown.
 extern bool cfgShowAqi;
-// On-the-hour signal: 6s of 1Hz display inversion at :00 (see
-// checkHourlyFlash(), which returns false outright when this is off, so every
-// consumer -- presentFrame's invertDisplay, the poll-progress line and the
-// shine sweep's skip-while-inverted guards -- goes quiet together).
+// "Hourly signal" (flash key hourly_flash): a backlight breath on the hour
+// (motion.backlight.breath) -- it replaced the old 6s screen inversion.
 extern bool cfgHourlyFlash;
-// The 1px poll-countdown line along the bottom edge (drawFooter's tail plus
-// loop()'s between-render top-up). Off = no line at all.
+// "Poll progress": the 1px poll-countdown hairline along y 319. Off = none.
 extern bool cfgShowProgress;
 extern int cfgScreenRotation;
+// Accessibility (design.md 12.9). Reduce Motion swaps every spring slide and
+// sheet for a 3-frame cross-fade and drops the lean, scrim steps, sweep and
+// pulse. Increase Contrast brightens text.secondary / fill.track and outlines
+// cards (applyContrast() in settings.cpp).
+extern bool cfgReduceMotion;
+extern bool cfgHighContrast;
 
 // Generic Settings-page persistence queue: a leaf's apply() (loop(), core 1)
 // mutates its live global directly, then queues the flash key/value here;
@@ -422,7 +388,7 @@ enum ConfigKeyId {
   CFGKEY_BRIGHTNESS = 0, CFGKEY_POLL_INTERVAL, CFGKEY_PIXEL_SHIFT, CFGKEY_BOOT_PAGE,
   CFGKEY_CAT_SHUFFLE, CFGKEY_NIGHT_MODE, CFGKEY_ROTATION, CFGKEY_SHOW_COUNTDOWN,
   CFGKEY_BATTERY_SAVE, CFGKEY_SHOW_AQI, CFGKEY_HOURLY_FLASH, CFGKEY_SHOW_PROGRESS,
-  CFGKEY_LAST_PAGE,
+  CFGKEY_LAST_PAGE, CFGKEY_REDUCE_MOTION, CFGKEY_HIGH_CONTRAST,
   CFGKEY_COUNT
 };
 extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
@@ -431,8 +397,8 @@ extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
 String fmtTokens(int64_t t);
 String fmtCost(float c);
 String fmtBtc(double p);
-String fmtCountdown(long sec);
-String fmtCountdownDHM(long sec);
+String fmtCountdown(long sec);     // "4h 03m" / "42m"
+String fmtCountdownDHM(long sec);  // "6d 16h" / "4h 03m"
 String fmtKB(uint32_t bytes);
 String fmtGB(uint64_t bytes);
 int flashPercent(uint32_t &usedOut, uint32_t &totalOut);
@@ -492,22 +458,41 @@ const uint32_t SD_PERSIST_MIN_MS = 60000UL;
 void forgetWifiFromFlash();
 
 // ── PAGES / RENDER (pages.cpp) ─────────────────────────────
+// render() composes the current screen (a page, or the Weather / Device
+// Stats sheet) into `frame` and presents it. Settings has its own
+// renderSettings().
 void render();
 void drawMixedPageStatic();
-// Mixed page's cat pane (right column): the GIF player cover-fits the cat
-// into it. Defined here so pages.cpp's placeholder and gif_player.cpp agree.
-const int MIXED_GIF_X0 = 240, MIXED_GIF_W = 240;
-const int MIXED_GIF_Y0 = 3, MIXED_GIF_H = CONTENT_Y1 - 3;
-//   - MIXED_PAGE (cat pane on the right half only): the left half of the
-//     pane, bounded to the pane's own height so it doesn't reach down into
-//     the footer below it. MIXED_GIF_X0 already sits at SWIPE_SPLIT_X, so the
-//     pane's right half is untouched and keeps doing the normal forward
-//     swipe -- only the pane's left half changes from "next page" to "next
-//     cat".
-const int MIXED_CAT_ADVANCE_X0 = MIXED_GIF_X0, MIXED_CAT_ADVANCE_X1 = MIXED_GIF_X0 + MIXED_GIF_W / 2;
-const int MIXED_CAT_ADVANCE_Y0 = 0, MIXED_CAT_ADVANCE_Y1 = CONTENT_Y1;
-void drawBatterySaveIcon();
-void drawSleepButton();
+// Mixed page's cat pane = the right column (design.md 7.4): the GIF player
+// cover-fits the cat into it. Defined here so pages.cpp's placeholder and
+// gif_player.cpp agree.
+const int MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
+const int MIXED_GIF_Y0 = TOK_LAYOUT_CONTENT_Y0, MIXED_GIF_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+// System corner glyphs, drawn LAST on every screen (design.md 11.21).
+// overMedia puts each occupied slot on a color.plate backing.
+void drawSystemCorner(bool overMedia);
+// Shared icon/component primitives settings.cpp and gif_player.cpp reuse.
+void drawCloseGlyph(int cx, int cy, uint16_t c);
+void drawBackGlyph(int cx, int cy, uint16_t c);
+void drawChevron(int cx, int cy, uint16_t c);
+void drawShuffleButton(int cx, int cy, bool pressed);
+void drawIconButtonPressed(int cx, int cy);
+void drawModalHeader(bool back, const char* title, bool pressed);
+void drawCardSurface(int x, int y, int w, int h, uint16_t fill);
+// Anti-aliased fills (design.md 8.1): LovyanGFX's fillSmoothRoundRect /
+// fillSmoothCircle algorithm, blended straight into the frame buffer.
+void aaFillRoundRect(int x, int y, int w, int h, int r, uint16_t c);
+void aaFillCircle(int x, int y, int r, uint16_t c);
+void aaRing(int cx, int cy, int r, int t, uint16_t c);  // AA ring, outer radius r, thickness t
+// The full-screen cat page's reset readout, on a color.plate (design.md 11.20).
+void drawResetPlate();
+// Empty / error state (design.md 13.4), centred in a box: a title, space.sm,
+// a caption description. isError puts the title in status.error.
+void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, bool isError,
+                    FontId titleFont = TOK_TYPE_HEADLINE, uint16_t titleColor = TOK_COLOR_TEXT_PRIMARY);
+// The shuffle button's centre for the current media layout (full screen or
+// the mixed pane).
+void shuffleCentre(bool mixed, int& cx, int& cy);
 
 // ── GIF PLAYER (gif_player.cpp) ─────────────────────────────
 void scanCats();
@@ -522,26 +507,69 @@ void gifPlayerResetForPageChange(); // force a fresh random GIF on the next tick
 // Decode + draw the first frame right now (into `frame`, then presentFrame()
 // -- held during a page slide), instead of waiting for the next gifTick().
 void gifPlayerPrimeFrame(bool offline);
+// Re-blit the whole open GIF canvas (+ the page's static parts and
+// overlays) into `frame` -- after a sheet or a cancelled lean overwrote it.
+void gifPlayerRepaint(bool offline);
+// Redraw just the overlays (reset plate, shuffle button, corner) and present
+// -- a pressed state changed; each overlay keeps its footprint, so nothing
+// under it needs restoring.
+void gifPlayerRedrawOverlays(bool offline);
 
 // ── SETTINGS (settings.cpp) ────────────────────────────────
-void renderSettings();
+// The Settings sheet: SET_LIST (scrolling list of rows) and SET_LEAF (a
+// detail screen with an option grid or an arm button). nav.cpp owns the
+// gestures and transitions; these are the drawing, hit-testing and commit
+// halves.
+void renderSettings();          // compose + present
+void drawSettingsScreen();      // compose only (transitions snapshot around it)
 void queueConfigSave(uint8_t keyId, int32_t value);
 // Recompute live backlight (night mode) / poll cadence (battery save). Call
 // after any of those inputs change (and once after loadRuntimeConfig).
-void applyEffectiveBrightness();
+// fadeMs picks the backlight motion token (0 = cut).
+void applyEffectiveBrightness(uint32_t fadeMs = 0);
 void applyEffectivePoll();
-// Handles a tap while settingsScreen == SET_LEAF; returns true if it consumed
-// the tap. Keeps the SettingDef/button-layout internals out of
-// main.cpp entirely.
-bool handleSettingsTouch(int32_t tx, int32_t ty, uint32_t now, bool catMode);
-// SET_LIST is drag-to-scroll rather than tap-driven, so it needs the full
-// down/move/up gesture instead of one tap callback: Begin records the touch
-// start, Move live-updates settingsScrollOffset while the finger is down, End
-// decides whether the gesture was a tap (opens a leaf / exits) or a scroll
-// (total movement over DRAG_TAP_PX in settings.cpp) and does nothing further.
-void settingsListDragBegin(int32_t tx, int32_t ty);
-void settingsListDragMove(int32_t tx, int32_t ty);
-void settingsListDragEnd(bool catMode);
+void applyContrast();
+int settingsListHit(int32_t x, int32_t y);        // row index, or -1
+// Tap on a list row (commit on up): toggles flip in place and return false;
+// navigation/action rows set settingsLeafIndex and return true (push it).
+bool settingsListActivate(int idx);
+int settingsLeafHit(int32_t x, int32_t y);        // option cell / arm button, or -1
+void settingsLeafActivate(int idx, uint32_t now);
+int settingsScrollMax();
+// Toast (design.md 11.17): confirms an action with no other visible result.
+extern char toastText[40];
+extern uint32_t toastUntilMs;
+
+// ── NAVIGATION (nav.cpp) ───────────────────────────────────
+// The touch router, gesture recogniser and every transition (page slide,
+// lean, swipe, sheet rise/drop with scrim, Settings push/pop, reduced-motion
+// cross-fade). design.md sections 9 and 12.
+enum PressId {
+  PRESS_NONE = 0, PRESS_SLEEP, PRESS_CLOSE, PRESS_WEATHER, PRESS_HEALTH, PRESS_GEAR,
+  PRESS_SHUFFLE, PRESS_ROW, PRESS_CELL
+};
+extern PressId pressedId;
+extern int pressedIndex;          // row / cell index for PRESS_ROW / PRESS_CELL
+void navTouch(bool down, int32_t x, int32_t y, uint32_t now);
+// Steps the running spring / momentum and presents. Returns true if it
+// presented this pass (loop() then skips its own present).
+bool navTick(uint32_t now);
+bool navTransitionActive();       // a composite (slide / sheet / fade) is on screen
+bool navSheetOpen();              // Weather, Device Stats or Settings is up
+void navGoToPage(int page, bool forward);   // serial keys; animated unless offline
+void navOpenSheet(int which);     // 0 weather, 1 device, 2 settings
+void navCloseSheet();
+void navFinishTransition();       // snap any running transition to its end
+bool navCatLayout();              // the cat player owns the current page
+void navSyncCatMode(bool catMode);  // allocate / free the GIF decoder on catMode edges
+void navResetGesture();           // drop any gesture in progress (screen sleep)
+// Screen sleep (main.cpp): backlight fade to 0, panel DISPOFF + SLPIN, CPU
+// 80MHz, WiFi modem sleep; the next press anywhere wakes (and is swallowed).
+void enterScreenSleep();
+void exitScreenSleep();
+// Debug time scale (serial 'm', simulator ?slowmo=10): multiplies every
+// motion token's time (design.md 17).
+extern float motionTimeScale;
 
 // ── AP SETUP (ap_setup.cpp) ────────────────────────────────
 void runApSetup();  // blocks until configured, then ESP.restart()s — never returns

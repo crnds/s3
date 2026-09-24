@@ -34,19 +34,30 @@ static String htmlEscape(const String& in) {
   return out;
 }
 
+// Full-screen instruction layout (design.md 13.4): numbered steps in body,
+// the values to type (SSID, IP) in type.title primary, the waiting status in
+// caption secondary, space.xxl between steps. Firmware-only (no twin).
 static void drawApSetupScreen(const char* apName, IPAddress ip, int stations) {
-  g->fillScreen(COL_BG);
-  drawText(FONT_LG, 15, 20, "WIFI SETUP", COL_ACCENT);
+  g->fillScreen(TOK_COLOR_BG_CANVAS);
+  const int x = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_LG;
+  int y = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_LG;
+  drawText(TOK_TYPE_HEADLINE, x, y, "Wi-Fi setup", TOK_COLOR_TEXT_PRIMARY);
+  y += fontLineH(TOK_TYPE_HEADLINE) + TOK_SPACE_XL;
 
-  drawText(FONT_MD, 15, 84, "1. Join WiFi:", COL_TEXT);
-  drawText(FONT_LG, 15, 110, apName, COL_ACCENT);
+  drawText(TOK_TYPE_BODY, x, y, "1. Join this Wi-Fi network", TOK_COLOR_TEXT_PRIMARY);
+  y += fontLineH(TOK_TYPE_BODY) + TOK_SPACE_XS;
+  drawText(TOK_TYPE_TITLE, x, y, apName, TOK_COLOR_TEXT_PRIMARY);
+  y += fontLineH(TOK_TYPE_TITLE) + TOK_SPACE_XXL;
 
-  drawText(FONT_MD, 15, 164, "2. Open in browser:", COL_TEXT);
-  drawText(FONT_LG, 15, 190, ip.toString(), COL_ACCENT);
+  drawText(TOK_TYPE_BODY, x, y, "2. Open this address in a browser", TOK_COLOR_TEXT_PRIMARY);
+  y += fontLineH(TOK_TYPE_BODY) + TOK_SPACE_XS;
+  drawText(TOK_TYPE_TITLE, x, y, ip.toString(), TOK_COLOR_TEXT_PRIMARY);
+  y += fontLineH(TOK_TYPE_TITLE) + TOK_SPACE_XXL;
 
-  drawText(FONT_SM, 15, 268,
-           stations > 0 ? "Phone connected -- fill in the form" : "Waiting for a phone to join...",
-           COL_TEXT2);
+  drawText(TOK_TYPE_CAPTION, x, y,
+           stations > 0 ? "Phone connected, fill in the form" : "Waiting for a phone to join...",
+           TOK_COLOR_TEXT_SECONDARY);
+  drawSystemCorner(false);
   presentFrame();
 }
 

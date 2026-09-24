@@ -7,7 +7,10 @@
 // What changed from the CYD player: every GIF frame is composited in RAW mode
 // into gifCanvas, a GIF-sized RGB565 canvas in PSRAM, and only then copied
 // into `frame` -- 1:1 on the full-screen cat page, or cover-fit (uniform
-// scale, cropped to fill, never stretched) into the mixed page's 240px pane.
+// scale, cropped to fill, never stretched) into the mixed page's right-column
+// pane (x 188..471). Overlays (reset plate, shuffle button, corner glyphs)
+// always sit on solid plates: nothing is drawn over media without one
+// (design.md 11.20).
 // Compositing on a canvas that belongs to the GIF (rather than straight onto
 // the page) is what keeps transparency/disposal correct under the resize and
 // under the overlays drawn on top. The CYD's dirty-band partial pushes are
@@ -57,8 +60,6 @@ static int destX = 0, destY = 0;
 // page's height first.
 static float mixedScale = 1.0f;
 static float mixedSrcOffX = 0.0f, mixedSrcOffY = 0.0f;
-
-static void drawSessionResetOverlay();
 
 static inline void markDirty(int x0, int x1, int y) {
   if (x0 < dirtyX0) dirtyX0 = x0;
@@ -214,49 +215,44 @@ void scanCats() {
   Serial.printf("[cats] %d GIF(s) in %s\n", catCount, CATS_DIR);
 }
 
-// "26% reset: 02:09" pinned to the bottom-left corner of the full-screen cat
-// page (GIF_PAGE only, never while offline), on a solid black box so it stays
-// legible over any frame. gifTick() runs unlocked, so STATE is copied first.
-static void drawSessionResetOverlay() {
-  lockState();
-  int percent = STATE.sessionPercent;
-  String resets = STATE.sessionResets;
-  unlockState();
-  if (percent < 0 || !resets.length()) return;
-
-  String a = String(percent) + "% ", b = "reset: ";
-  const int padX = 8, padY = 6;
-  int textW_ = textW(FONT_MD, a) + textW(FONT_MD, b) + textW(FONT_MD, resets);
-  int boxW = textW_ + padX * 2, boxH = fontLineH(FONT_MD) + padY * 2;
-  int boxY = SCREEN_H - boxH;
-  g->fillRect(0, boxY, boxW, boxH, 0x0000);
-  int x = drawText(FONT_MD, padX, boxY + padY, a, COL_TEXT);
-  x = drawText(FONT_MD, x, boxY + padY, b, COL_TEXT2);
-  drawText(FONT_MD, x, boxY + padY, resets, COL_TEXT);
+// Everything drawn over the cat after each frame: the reset plate (the
+// full-screen layout -- the cat page, and the offline screen, where it and
+// the corner glyphs carry the status), the shuffle media control (Cat Shuffle
+// Fixed only), then the system corner on plates.
+static void drawMediaOverlays(bool offline) {
+  bool mixed = (currentPage == MIXED_PAGE && !offline);
+  if (!mixed) drawResetPlate();
+  if (catShuffleFixed && catCount > 0) {
+    int cx, cy;
+    shuffleCentre(mixed, cx, cy);
+    drawShuffleButton(cx, cy, pressedId == PRESS_SHUFFLE);
+  }
+  drawSystemCorner(true);
 }
 
-// A centred message when there are no cats to show (no SD, or empty /cats/).
-// Drawn once per page visit (gifPlaceholderDrawn). Returns true when it drew.
+// Empty / error state when there are no cats to show (no SD, or an empty
+// /cats/), design.md 13.4. Drawn once per page visit (gifPlaceholderDrawn).
+// Returns true when it drew.
 static bool drawGifPlaceholder(bool offline) {
   if (gifPlaceholderDrawn) return false;
   gifPlaceholderDrawn = true;
   bool mixedMode = (currentPage == MIXED_PAGE && !offline);
+  const bool noSd = !STATE.sdOk;
   if (mixedMode) {
-    g->fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, COL_BG);
-    const int cx = MIXED_GIF_X0 + MIXED_GIF_W / 2;
-    drawTextC(FONT_LG, cx, 118, "CATS", COL_ACCENT);
-    drawTextC(FONT_SM, cx, 158, "no GIFs", COL_TEXT2);
+    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_BG_CANVAS);
+    drawCardSurface(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_SURFACE_CARD);
+    drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H,
+                   noSd ? "No SD card" : "No cats yet",
+                   noSd ? "Insert a card with /cats/ GIFs" : "Add GIFs to /cats/ on the card", noSd);
   } else {
-    g->fillScreen(COL_BG);
-    drawTextC(FONT_XL, SCREEN_W / 2, 118, "CATS", COL_ACCENT);
-    drawTextC(FONT_SM, SCREEN_W / 2, 176,
-              STATE.sdOk ? "no GIFs found in /cats/ on the SD card"
-                         : "insert an SD card with /cats/ GIFs",
-              COL_TEXT2);
+    g->fillScreen(TOK_COLOR_BG_CANVAS);
+    if (noSd)
+      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, "No SD card", "Insert an SD card with /cats/ GIFs", true);
+    else
+      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, "No cats yet", "Add GIFs to /cats/ on the SD card", false,
+                     TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
   }
-  if (currentPage == GIF_PAGE && !offline) drawSessionResetOverlay();
-  drawBatterySaveIcon();
-  drawSleepButton();
+  drawMediaOverlays(offline);
   return true;
 }
 
@@ -285,11 +281,11 @@ static bool openCatAtIndex(int index, bool resetOpenedTime) {
     mixedSrcOffY = (canvasH - visH) / 2.0f;
     destX = MIXED_GIF_X0;
     destY = MIXED_GIF_Y0;
-    g->fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, 0x0000);  // clear only the pane
+    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_PLATE);  // clear only the pane
   } else {
     destX = (SCREEN_W - canvasW) / 2;
     destY = (SCREEN_H - canvasH) / 2;
-    g->fillScreen(0x0000);  // smaller (legacy 320x240) GIFs letterbox on black
+    g->fillScreen(TOK_COLOR_PLATE);  // smaller (legacy 320x240) GIFs letterbox on black
   }
   gifOpen = true;
   if (resetOpenedTime) gifOpenedAtMs = millis();
@@ -361,9 +357,7 @@ bool gifTick(bool offline) {
   blitDirty();
   gifFrames++;
 
-  if (currentPage == GIF_PAGE && !offline) drawSessionResetOverlay();
-  drawBatterySaveIcon();
-  drawSleepButton();
+  drawMediaOverlays(offline);
 
   // Rotate to a new random cat at the GIF's natural end, or early when the
   // Cat Shuffle interval says this one has played long enough. FIXED
@@ -417,7 +411,7 @@ void gifPlayerExitCatMode() {
 }
 
 // Force the next gifTick() to open a fresh (random) GIF -- page changes onto
-// GIF_PAGE/MIXED_PAGE, and the FIXED-shuffle middle tap.
+// GIF_PAGE/MIXED_PAGE, and the shuffle media control.
 void gifPlayerResetForPageChange() {
   closeGif();
   gifPlaceholderDrawn = false;
@@ -430,4 +424,32 @@ void gifPlayerResetForPageChange() {
 void gifPlayerPrimeFrame(bool offline) {
   gifNextFrameMs = millis();  // "due now" (0 would read as far future after ~24.8 days' uptime)
   gifTick(offline);
+}
+
+// Re-blit the whole open canvas into `frame` (plus the mixed page's static
+// half and the overlays) -- a sheet or a cancelled page lean overwrote it.
+// With no GIF open (between cats, or none on the card) it falls back to a
+// fresh open, which clears and decodes in one tick.
+void gifPlayerRepaint(bool offline) {
+  bool mixed = (currentPage == MIXED_PAGE && !offline);
+  if (mixed) {
+    lockState();
+    drawMixedPageStatic();
+    unlockState();
+  }
+  if (!gif || !gifOpen || gifMixedMode != mixed || !gifCanvas) {
+    gifPlayerResetForPageChange();
+    gifPlayerPrimeFrame(offline);
+    return;
+  }
+  if (!mixed) g->fillScreen(TOK_COLOR_PLATE);
+  dirtyX0 = 0; dirtyY0 = 0; dirtyX1 = canvasW - 1; dirtyY1 = canvasH - 1;
+  blitDirty();
+  drawMediaOverlays(offline);
+  presentFrame();
+}
+
+void gifPlayerRedrawOverlays(bool offline) {
+  drawMediaOverlays(offline);
+  presentFrame();
 }

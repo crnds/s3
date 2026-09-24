@@ -1,16 +1,14 @@
-// Frame presentation (pixel shift, page slide, hourly flash) + every
-// full-screen page's draw function, re-laid out for the S3's 480x320 panel
-// with anti-aliased fonts (fonts.h). This is the near-line-for-line twin of
-// simulator-s3.html's page-drawing functions -- see CLAUDE.md's
-// firmware/simulator parity rule before touching layout, colours, or text
-// here without updating the simulator too.
+// Frame presentation (pixel shift) + every page's and sheet's draw function,
+// built only from design.md's tokens (tokens.h) and components (section 11).
+// This is the near-line-for-line twin of simulator-s3.html's page-drawing
+// functions -- see CLAUDE.md's firmware/simulator parity rule before touching
+// layout, colours, or text here without updating the simulator too.
 //
-// Ported from ~/cyd's pages.cpp: same pages, same information, same colour
-// semantics and rules (pace flag, AQI colours, note tokenizer); coordinates
-// and type are new.
+// Ported from ~/cyd's pages.cpp: same pages, same information, same rules
+// (pace flag, AQI colours, note tokenizer); the look is design.md's.
 #include "state.h"
 
-// Shared by status-page digital date and weather overlay daily rows.
+// Shared by the status-page date and the weather sheet's daily rows.
 static const char* const WDAY_ABBR[7] = {
   "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
 };
@@ -21,57 +19,17 @@ static const char* const MON_ABBR[12] = {
 // ── PRESENTATION ───────────────────────────────────────────
 bool presentHold = false;
 volatile uint32_t teWaitAccumUs = 0;
+volatile uint32_t pollOkSeq = 0;
+// Set when a present was asked for while a transition owns the panel; nav.cpp
+// composites it on its next tick.
+bool transitionDirty = false;
 
 void presentFrame() {
   if (presentHold) return;
-  bool isEvenSecond = false;
-  displaySetInvert(checkHourlyFlash(isEvenSecond) && isEvenSecond);
-  displayPresent((const uint16_t*)frame.getBuffer(), shiftX, shiftY, COL_BG);
+  if (navTransitionActive()) { transitionDirty = true; return; }
+  displayPresent((const uint16_t*)frame.getBuffer(), shiftX, shiftY, TOK_COLOR_BG_CANVAS);
   teWaitAccumUs += displayLastTeWaitUs();
   shiftDirty = false;
-}
-
-// Outgoing frame for the page slide. PSRAM, allocated on first use.
-static uint16_t* prevFrame = nullptr;
-static const uint32_t SLIDE_MS = 180;
-
-void pageTransitionBegin() {
-  if (!prevFrame)
-    prevFrame = (uint16_t*)heap_caps_malloc(SCREEN_W * SCREEN_H * 2, MALLOC_CAP_SPIRAM);
-  if (prevFrame) memcpy(prevFrame, frame.getBuffer(), SCREEN_W * SCREEN_H * 2);
-  presentHold = true;
-}
-
-// Ease-out cubic slide from prevFrame to `frame`. Each step is one full
-// present (~17-33ms, TE-locked), so the slide is ~6-10 frames; progress is
-// driven by wall time, not frame count, so it takes SLIDE_MS regardless.
-void pageTransitionRun(bool forward) {
-  presentHold = false;
-  if (!prevFrame) { presentFrame(); return; }
-  bool isEvenSecond = false;
-  displaySetInvert(checkHourlyFlash(isEvenSecond) && isEvenSecond);
-  uint32_t t0 = millis();
-  for (;;) {
-    uint32_t el = millis() - t0;
-    if (el >= SLIDE_MS) break;
-    float t = (float)el / SLIDE_MS;
-    float e = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
-    displayPresentSlide(prevFrame, (const uint16_t*)frame.getBuffer(), (int)(e * SCREEN_W),
-                        forward, shiftX, shiftY, COL_BG);
-    teWaitAccumUs += displayLastTeWaitUs();
-  }
-  presentFrame();
-}
-
-// Tap feedback for the cat pages' middle "next cat" band (CAT_ADVANCE_X0/X1):
-// a thin white perimeter for one ~60ms flash. It's a present-time overlay
-// (display.cpp's border), so the frame itself is never dirtied.
-void flashTouchCenter() {
-  displaySetBorder(5, 0xFFFF);
-  presentFrame();
-  delay(60);
-  displaySetBorder(0, 0);
-  presentFrame();
 }
 
 // Advance the pixel-shift orbit (core 1 only, like everything display-side).
@@ -87,48 +45,253 @@ bool pixelShiftTick(uint32_t now) {
   return true;
 }
 
-bool checkHourlyFlash(bool& isEvenSecond) {
-  if (!cfgHourlyFlash) return false;  // Settings > HOURLY FLASH off: no signal at all
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 0)) {
-    if (timeinfo.tm_min == 0 && timeinfo.tm_sec < 6) {
-      isEvenSecond = (timeinfo.tm_sec % 2 == 0);
-      return true;
+// ── ANTI-ALIASED FILLS ─────────────────────────────────────
+// LovyanGFX's fillSmoothRoundRect algorithm (LGFXBase.inl: solid spans + 1px
+// alpha edge pixels, 1/32 thresholds) with one change: edge pixels blend
+// straight into the sprite's big-endian RGB565 buffer instead of going
+// through the library's per-pixel readRect/writeImage effect path, which cost
+// ~30 ms on the status page. The pixels are the same algorithm's; the
+// simulator's gfx.fillSmoothRoundRect is the twin. Respects the clip rect.
+static inline void blendPx(int x, int y, uint16_t c, uint8_t a) {
+  int32_t cx, cy, cw, ch;
+  g->getClipRect(&cx, &cy, &cw, &ch);
+  if (x < cx || y < cy || x >= cx + cw || y >= cy + ch) return;
+  uint16_t* p = (uint16_t*)frame.getBuffer() + y * SCREEN_W + x;
+  uint16_t d = (uint16_t)((*p >> 8) | (*p << 8));
+  uint32_t dr = (d >> 11) & 31, dg = (d >> 5) & 63, db = d & 31;
+  uint32_t sr = (c >> 11) & 31, sg = (c >> 5) & 63, sb = c & 31;
+  dr = (dr << 3) | (dr >> 2); dg = (dg << 2) | (dg >> 4); db = (db << 3) | (db >> 2);
+  sr = (sr << 3) | (sr >> 2); sg = (sg << 2) | (sg >> 4); sb = (sb << 3) | (sb >> 2);
+  uint32_t inv = 256 - a, k = 1 + a;
+  uint32_t r = (sr * k + dr * inv) >> 8, gg = (sg * k + dg * inv) >> 8, b = (sb * k + db * inv) >> 8;
+  uint16_t o = (uint16_t)(((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3));
+  *p = (uint16_t)((o >> 8) | (o << 8));
+}
+
+void aaFillRoundRect(int x, int y, int w, int h, int r, uint16_t c) {
+  if (w <= 0 || h <= 0) return;
+  if (r > w / 2) r = w / 2;
+  if (r > h / 2) r = h / 2;
+  y += r;
+  h -= 2 * r;
+  if (h > 0) g->fillRect(x, y, w, h, c);
+  h--;
+  x += r;
+  w -= 2 * r + 1;
+  const int r1 = r * r;
+  r++;
+  const int r2 = r * r;
+  const float LO = 1.0f / 32.0f, HI = 1.0f - LO;
+  int xs = 0, cx = 0;
+  for (int cy = r - 1; cy > 0; cy--) {
+    int dy2 = (r - cy) * (r - cy);
+    for (cx = xs; cx < r; cx++) {
+      int hyp2 = (r - cx) * (r - cx) + dy2;
+      if (hyp2 <= r1) break;
+      if (hyp2 >= r2) continue;
+      float alphaf = (float)r - sqrtf((float)hyp2);
+      if (alphaf > HI) break;
+      xs = cx;
+      if (alphaf < LO) continue;
+      uint8_t a = (uint8_t)(alphaf * 255);
+      blendPx(x + cx - r, y + cy - r, c, a);
+      blendPx(x - cx + r + w, y + cy - r, c, a);
+      blendPx(x - cx + r + w, y - cy + r + h, c, a);
+      blendPx(x + cx - r, y - cy + r + h, c, a);
+    }
+    int len = 2 * (r - cx) + 1 + w;
+    if (len > 0) {
+      g->fillRect(x + cx - r, y + cy - r, len, 1, c);
+      g->fillRect(x + cx - r, y - cy + r + h, len, 1, c);
     }
   }
-  return false;
 }
 
-// ── FOOTER ─────────────────────────────────────────────────
-static const int FOOTER_TEXT_Y = 297;   // SM line box 297..313, baseline 310
-static const int FOOTER_CY = 305;       // icon centre line
+void aaFillCircle(int x, int y, int r, uint16_t c) { aaFillRoundRect(x - r, y - r, r * 2 + 1, r * 2 + 1, r, c); }
+
+// Anti-aliased ring of thickness t whose outer edge is radius r: only the
+// band's pixels are touched (coverage = outer disc minus inner disc), so a
+// big clock face costs ~1 ms instead of two full disc fills.
+void aaRing(int cx, int cy, int r, int t, uint16_t c) {
+  const float ro = r + 0.5f, ri = r - t + 0.5f;
+  for (int dy = -r - 1; dy <= r + 1; dy++) {
+    float xo2 = (ro + 1) * (ro + 1) - dy * dy;
+    if (xo2 < 0) continue;
+    int xo = (int)ceilf(sqrtf(xo2));
+    float xi2 = (ri - 1) * (ri - 1) - dy * dy;
+    int xi = xi2 > 0 ? (int)floorf(sqrtf(xi2)) : 0;
+    for (int dx = xi; dx <= xo; dx++) {
+      float d = sqrtf((float)(dx * dx + dy * dy));
+      float cov = constrain(ro - d, 0.0f, 1.0f) - constrain(ri - d, 0.0f, 1.0f);
+      if (cov < 1.0f / 32.0f) continue;
+      uint8_t a = cov >= 1.0f ? 255 : (uint8_t)(cov * 255);
+      blendPx(cx + dx, cy + dy, c, a);
+      if (dx) blendPx(cx - dx, cy + dy, c, a);
+    }
+  }
+}
+
+// ── PRIMITIVES ─────────────────────────────────────────────
+// Card (design.md 11.1): a surface step, radius.md, no border -- except the
+// 1px gray.4 outline Increase Contrast adds.
+void drawCardSurface(int x, int y, int w, int h, uint16_t fill) {
+  aaFillRoundRect(x, y, w, h, TOK_RADIUS_MD, fill);
+  if (TOK_CARD_OUTLINE) g->drawRoundRect(x, y, w, h, TOK_RADIUS_MD, TOK_COLOR_CARD_OUTLINE);
+}
+static void drawCard(int x, int y, int w, int h) { drawCardSurface(x, y, w, h, TOK_COLOR_SURFACE_CARD); }
+
+// Section label (design.md 11.2): type.label, UPPERCASE, text.secondary.
+static void drawSectionLabel(int x, int y, const char* label) {
+  drawText(TOK_TYPE_LABEL, x, y, label, TOK_COLOR_TEXT_SECONDARY);
+}
+
+// Meter (design.md 11.4): fill.track + a data-series fill, radius.full; a
+// non-zero value is at least a full-height stub; unknown = the track alone.
+// Returns the fill width, or -1 when unknown.
+static int drawMeter(int x, int y, int w, int h, int percent, uint16_t color) {
+  aaFillRoundRect(x, y, w, h, h / 2, TOK_COLOR_FILL_TRACK);
+  if (percent < 0) return -1;
+  int fillW = (int)((float)min(percent, 100) / 100 * w + 0.5f);
+  if (fillW < h) fillW = h;
+  aaFillRoundRect(x, y, fillW, h, h / 2, color);
+  return fillW;
+}
+
+// Text truncated on MEASURED width (design.md 5.3 rule 6): cut at a word
+// boundary if one is within 4 characters of the cut, else hard.
+static String fitText(FontId f, const char* s, int maxW) {
+  if (textW(f, s) <= maxW) return String(s);
+  String out(s);
+  while (out.length() > 0 && textW(f, out) > maxW) out.remove(out.length() - 1);
+  int sp = out.lastIndexOf(' ');
+  if (sp > 0 && (int)out.length() - sp <= 4) out.remove(sp);
+  return out;
+}
+
+// ── SYSTEM GLYPHS (design.md 10.3) ─────────────────────────
+// Every one is built from drawWideLine / fillSmoothCircle / fillSmoothRoundRect
+// at stroke.glyph (2px), centred on (cx, cy).
+void drawCloseGlyph(int cx, int cy, uint16_t c) {
+  g->drawWideLine(cx - 6, cy - 6, cx + 6, cy + 6, TOK_STROKE_GLYPH_R, c);
+  g->drawWideLine(cx + 6, cy - 6, cx - 6, cy + 6, TOK_STROKE_GLYPH_R, c);
+}
+void drawBackGlyph(int cx, int cy, uint16_t c) {  // 8 wide x 14 tall, pointing left
+  g->drawWideLine(cx + 4, cy - 7, cx - 4, cy, TOK_STROKE_GLYPH_R, c);
+  g->drawWideLine(cx - 4, cy, cx + 4, cy + 7, TOK_STROKE_GLYPH_R, c);
+}
+void drawChevron(int cx, int cy, uint16_t c) {    // disclosure, 5 x 10, pointing right
+  g->drawWideLine(cx - 2, cy - 5, cx + 3, cy, TOK_STROKE_GLYPH_R, c);
+  g->drawWideLine(cx + 3, cy, cx - 2, cy + 5, TOK_STROKE_GLYPH_R, c);
+}
+static void drawGearGlyph(int cx, int cy, uint16_t c, uint16_t bg) {
+  aaFillCircle(cx, cy, 6, c);   // ring r 5, 2px
+  aaFillCircle(cx, cy, 4, bg);
+  for (int i = 0; i < 8; i++) {
+    float a = i * PI / 4;
+    g->drawWideLine(cx + lroundf(cosf(a) * 7), cy + lroundf(sinf(a) * 7),
+                    cx + lroundf(cosf(a) * 9), cy + lroundf(sinf(a) * 9), TOK_STROKE_GLYPH_R, c);
+  }
+}
+// Icon button pressed state (design.md 11.10): a 40px fill.pressed disc.
+void drawIconButtonPressed(int cx, int cy) {
+  aaFillCircle(cx, cy, TOK_PRESSED_DISC_R, TOK_COLOR_FILL_PRESSED);
+}
+
+// Shuffle media control (design.md 11.20): two crossing arrows on a 32px
+// plate disc; pressed = the disc steps to fill.pressed (same footprint, so
+// nothing over the GIF needs restoring on release).
+void drawShuffleButton(int cx, int cy, bool pressed) {
+  aaFillCircle(cx, cy, SHUFFLE_DISC_R, pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_PLATE);
+  const uint16_t c = TOK_COLOR_TEXT_PRIMARY;
+  const float r = TOK_STROKE_GLYPH_R;
+  g->drawWideLine(cx - 7, cy - 4, cx - 3, cy - 4, r, c);   // upper-left run in
+  g->drawWideLine(cx - 3, cy - 4, cx + 3, cy + 4, r, c);   // cross down
+  g->drawWideLine(cx + 3, cy + 4, cx + 7, cy + 4, r, c);   // out, lower right
+  g->drawWideLine(cx - 7, cy + 4, cx - 3, cy + 4, r, c);   // lower-left run in
+  g->drawWideLine(cx - 3, cy + 4, cx + 3, cy - 4, r, c);   // cross up
+  g->drawWideLine(cx + 3, cy - 4, cx + 7, cy - 4, r, c);   // out, upper right
+  g->fillTriangle(cx + 8, cy - 4, cx + 5, cy - 7, cx + 5, cy - 1, c);  // arrowheads
+  g->fillTriangle(cx + 8, cy + 4, cx + 5, cy + 1, cx + 5, cy + 7, c);
+}
+
+void shuffleCentre(bool mixed, int& cx, int& cy) {
+  // 8px in from the media box's bottom-right: the full screen, or the pane.
+  int x1 = mixed ? MIXED_GIF_X0 + MIXED_GIF_W : SCREEN_W;
+  int y1 = mixed ? MIXED_GIF_Y0 + MIXED_GIF_H : SCREEN_H;
+  cx = x1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1;
+  cy = y1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1;
+}
+
+// ── SYSTEM CORNER (design.md 7.3) ──────────────────────────
+// Slot a: the sleep icon button (a crescent on a raised 24px disc; pressed =
+// the disc steps to fill.pressed). Slot b: the Battery Save glyph, only while
+// active. Drawn last on every screen; over media each occupied slot sits on a
+// plate with a 4px inset around its glyph box.
+void drawSystemCorner(bool overMedia) {
+  const int ay = TOK_CORNER_SLOT_Y, sz = TOK_CORNER_SLOT_SIZE;
+  if (batterySaveActive()) {
+    const int bx = TOK_CORNER_SLOT_B_X;
+    if (overMedia) g->fillRect(bx - 4, ay - 4, sz + 8, sz + 8, TOK_COLOR_PLATE);
+    const uint16_t c = TOK_COLOR_STATUS_WARNING;
+    // Body 16x10 (radius 2) + a 2x4 nub, 2px outline, filled at 50%.
+    const int x = bx + 3, y = ay + 7;
+    g->drawRoundRect(x, y, 16, 10, 2, c);
+    g->drawRoundRect(x + 1, y + 1, 14, 8, 1, c);
+    g->fillRect(x + 3, y + 3, 5, 4, c);
+    g->fillRect(x + 16, y + 3, 2, 4, c);
+  }
+  const int ax = TOK_CORNER_SLOT_A_X;
+  if (overMedia) g->fillRect(ax - 4, ay - 4, sz + 8, sz + 8, TOK_COLOR_PLATE);
+  const int cx = ax + sz / 2, cy = ay + sz / 2;
+  const bool pressed = (pressedId == PRESS_SLEEP);
+  const uint16_t disc = pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_RAISED;
+  aaFillCircle(cx, cy, 11, disc);
+  aaFillCircle(cx, cy, 7, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
+  aaFillCircle(cx + 3, cy - 3, 6, disc);  // the bite that makes the crescent
+}
+
+// ── MODAL HEADER (design.md 11.14) ─────────────────────────
+// Close (root) or back (deeper) in the close slot, the title in headline at
+// x 60. No divider -- the scroll-edge shade does that job.
+void drawModalHeader(bool back, const char* title, bool pressed) {
+  const int cx = TOK_CLOSE_SLOT_X + 12, cy = TOK_CLOSE_SLOT_Y + 12;
+  if (pressed) drawIconButtonPressed(cx, cy);
+  uint16_t c = pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY;
+  if (back) drawBackGlyph(cx, cy, c);
+  else drawCloseGlyph(cx, cy, c);
+  if (title) drawText(TOK_TYPE_HEADLINE, TOK_HEADER_TITLE_X, TOK_HEADER_TITLE_Y, title, TOK_COLOR_TEXT_PRIMARY);
+}
+
+// ── STATUS STRIP (design.md 11.12) ─────────────────────────
 static const int PROGRESS_Y = SCREEN_H - 1;
+static const int DOT_CX = 12, WIFI_X0 = 24;
+static const int DOTS_W = PAGE_COUNT * 6 + (PAGE_COUNT - 1) * 6;
+static const int GEAR_CX = 452;
 
-// Small 3-bar signal icon next to the pulse dot: green when the most recent
-// poll found WiFi up (wifiOk), rose when it didn't. Separate from the pulse
-// dot so a WiFi outage and a server outage (WiFi fine, Mac unreachable) read
-// as two distinct signals.
-static void drawWifiIcon() {
-  uint16_t c = wifiOk ? COL_GOOD : COL_WARN;
-  g->fillRect(30, 307, 3, 4, c);
-  g->fillRect(35, 303, 3, 8, c);
-  g->fillRect(40, 299, 3, 12, c);
+// Status dot: server OK = success, filled; unreachable = warning ring;
+// unknown / booting = tertiary ring. `r` is the pulse radius (4, or 5 for a
+// pulse frame).
+static void drawStatusDot(int r) {
+  const uint16_t bg = (pressedId == PRESS_HEALTH) ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS;
+  if (connected) {
+    aaFillCircle(DOT_CX, STRIP_CY, r, TOK_COLOR_STATUS_SUCCESS);
+  } else {
+    aaFillCircle(DOT_CX, STRIP_CY, r, wifiOk ? TOK_COLOR_STATUS_WARNING : TOK_COLOR_TEXT_TERTIARY);
+    aaFillCircle(DOT_CX, STRIP_CY, r - 2, bg);
+  }
 }
 
-// Footer settings gear, bottom-right corner (SETTINGS_HIT_*): hub disc with a
-// punched-out centre + 8 short spokes, grey so it reads as UI chrome.
-static void drawSettingsIcon() {
-  const int cx = 452, cy = FOOTER_CY;
-  g->fillCircle(cx, cy, 5, COL_TEXT2);
-  g->fillCircle(cx, cy, 2, COL_BG);
-  g->drawWideLine(cx, cy - 9, cx, cy - 6, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx, cy + 6, cx, cy + 9, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx - 9, cy, cx - 6, cy, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx + 6, cy, cx + 9, cy, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx - 6, cy - 6, cx - 4, cy - 4, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx + 4, cy + 4, cx + 6, cy + 6, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx - 6, cy + 6, cx - 4, cy + 4, 1.5f, COL_TEXT2);
-  g->drawWideLine(cx + 4, cy - 4, cx + 6, cy - 6, 1.5f, COL_TEXT2);
+// Wi-Fi: 3 bars, 3px wide with 2px gaps, heights 4/8/12, bottom-aligned.
+// Down = the bars become 1px outlines (the shape changes, not just colour).
+static void drawWifiGlyph() {
+  const uint16_t c = wifiOk ? TOK_COLOR_STATUS_SUCCESS : TOK_COLOR_STATUS_ERROR;
+  const int bottom = STRIP_CY + 6;
+  for (int i = 0; i < 3; i++) {
+    int h = 4 * (i + 1);
+    int x = WIFI_X0 + 2 + i * 5;
+    if (wifiOk) g->fillRect(x, bottom - h, 3, h, c);
+    else g->drawRect(x, bottom - h, 3, h, c);
+  }
 }
 
 static int progressLineW() {
@@ -136,96 +299,76 @@ static int progressLineW() {
   if (elapsed > POLL_INTERVAL_MS) elapsed = POLL_INTERVAL_MS;
   return (int)((float)elapsed / POLL_INTERVAL_MS * SCREEN_W);
 }
-static int progressDrawnW = 0;  // how much of the line is currently in `frame`
+static int progressDrawnW = 0;  // how much of the hairline is currently in `frame`
+static uint32_t progressLastMs = 0;
 
-void drawFooter() {
-  // Status dot: server reachability only, gated on wifiOk (WiFi down is the
-  // wifi icon's job). Blinks green once a second while polls reach the
-  // server; static amber when WiFi is fine but the Mac isn't answering.
-  bool onPhase = (millis() / 1000) % 2;
-  if (wifiOk) {
-    if (!connected) g->fillCircle(18, FOOTER_CY, 4, COL_ACCENT);
-    else if (onPhase) g->fillCircle(18, FOOTER_CY, 5, COL_GOOD);
-  }
-  drawWifiIcon();
-  drawSettingsIcon();
+static void drawStatusStrip() {
+  // Health cluster (-> Device Stats): pressed = a fill.pressed pill behind both glyphs.
+  if (pressedId == PRESS_HEALTH)
+    aaFillRoundRect(DOT_CX - 8, STRIP_CY - 12, 48, 24, 12, TOK_COLOR_FILL_PRESSED);
+  drawStatusDot(4);
+  drawWifiGlyph();
 
-  String pageStr = String(currentPage + 1) + " / " + String(PAGE_COUNT);
-  drawTextR(FONT_SM, SETTINGS_HIT_X0 - 8, FOOTER_TEXT_Y, pageStr, COL_TEXT2);
+  // Page indicator: 6 dots, 6px across with 6px gaps, centred at x 240.
+  int x = TOK_LAYOUT_HALF_SPLIT_X - DOTS_W / 2;
+  for (int i = 0; i < PAGE_COUNT; i++, x += 12)
+    aaFillRoundRect(x, STRIP_CY - 3, 6, 6, 3,
+                           i == currentPage ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_FILL_TRACK);
 
-  uint32_t flashUsed, flashTotal, ramUsed, ramTotal;
-  int romPct = flashPercent(flashUsed, flashTotal);
-  int ramPct = staticRamPercent(ramUsed, ramTotal);
-  int cpuInt = (int)(cpuPercentAvg + 0.5f);
+  // Settings gear.
+  bool gp = (pressedId == PRESS_GEAR);
+  if (gp) drawIconButtonPressed(GEAR_CX, STRIP_CY);
+  drawGearGlyph(GEAR_CX, STRIP_CY, gp ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY,
+                gp ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS);
 
-  int x = 52;
-  x = drawText(FONT_SM, x, FOOTER_TEXT_Y, "CPU ", COL_TEXT2);
-  x = drawText(FONT_SM, x, FOOTER_TEXT_Y, String(cpuInt) + "%", COL_TEXT);
-  x = drawText(FONT_SM, x, FOOTER_TEXT_Y, "   ROM ", COL_TEXT2);
-  x = drawText(FONT_SM, x, FOOTER_TEXT_Y, String(romPct) + "%", COL_TEXT);
-  x = drawText(FONT_SM, x, FOOTER_TEXT_Y, "   RAM ", COL_TEXT2);
-  drawText(FONT_SM, x, FOOTER_TEXT_Y, String(ramPct) + "%", COL_TEXT);
-
-  // 1px line along the bottom edge, filling left-to-right as the next poll
-  // approaches (full width = fetch imminent). progressTick() extends it
-  // between renders so it glides instead of stepping at 1Hz.
+  // Progress hairline (design.md 11.13): hidden offline and when switched off.
   progressDrawnW = 0;
-  if (!cfgShowProgress) return;
+  progressLastMs = millis();
+  if (!cfgShowProgress || !connected) return;
   int w = progressLineW();
-  if (w > 0) g->fillRect(0, PROGRESS_Y, w, 1, COL_TEXT2);
+  if (w > 0) g->fillRect(0, PROGRESS_Y, w, 1, TOK_COLOR_TEXT_SECONDARY);
   progressDrawnW = w;
 }
 
-// Between-render top-up of the progress line, straight into `frame`. Only on
-// pages that own a footer (loop() gates it). Returns true if pixels changed.
+// Between-render top-up of the hairline, capped at motion.progress.maxHz
+// (4 Hz): at a 20s poll it would otherwise present ~24 times a second for a
+// single line. Only on pages with a strip (loop() gates it).
 bool progressTick(uint32_t nowMs) {
   if (!cfgShowProgress || !connected) return false;
+  if (nowMs - progressLastMs < TOK_MOTION_PROGRESS_MIN_MS) return false;
+  progressLastMs = nowMs;
   int w = progressLineW();
   if (w < progressDrawnW) {  // new poll cycle: clear and restart
-    g->fillRect(0, PROGRESS_Y, SCREEN_W, 1, COL_BG);
+    g->fillRect(0, PROGRESS_Y, SCREEN_W, 1, TOK_COLOR_BG_CANVAS);
     progressDrawnW = 0;
   }
   if (w <= progressDrawnW) return false;
-  g->fillRect(progressDrawnW, PROGRESS_Y, w - progressDrawnW, 1, COL_TEXT2);
+  g->fillRect(progressDrawnW, PROGRESS_Y, w - progressDrawnW, 1, TOK_COLOR_TEXT_SECONDARY);
   progressDrawnW = w;
   return true;
 }
 
-// Small top-right overlay (left of the sleep pill) shown on every page
-// whenever Battery Save is *active* (Settings ON, or AUTO + Mac
-// power.battery_save). No-ops when inactive. A solid backing box keeps it
-// legible over cat frames.
-void drawBatterySaveIcon() {
-  if (!batterySaveActive()) return;
-  const int boxW = BATTERY_ICON_X1 - BATTERY_ICON_X0 + 1, boxH = BATTERY_ICON_Y1 - BATTERY_ICON_Y0 + 1;
-  g->fillRect(BATTERY_ICON_X0, BATTERY_ICON_Y0, boxW, boxH, COL_BG);
-  const int bodyX = BATTERY_ICON_X0 + 4, bodyY = 7, bodyW = 19, bodyH = 11;
-  const int nubW = 3, nubH = 5;
-  g->fillRoundRect(bodyX, bodyY, bodyW, bodyH, 2, COL_YELLOW);
-  g->fillRect(bodyX + bodyW, bodyY + (bodyH - nubH) / 2, nubW, nubH, COL_YELLOW);
+// Status-dot pulse (motion.pulse): r 4 -> 5 -> 4 over 3 frames on each
+// successful poll -- "data arrived", instead of the old 1 Hz blink.
+static const int8_t PULSE_R[TOK_MOTION_PULSE_FRAMES] = {5, 5, 4};
+static int pulseFrame = -1;
+static uint32_t pulseSeenSeq = 0;
+
+bool pulseTick(uint32_t nowMs) {
+  (void)nowMs;
+  if (pollOkSeq != pulseSeenSeq) {
+    pulseSeenSeq = pollOkSeq;
+    if (!cfgReduceMotion) pulseFrame = 0;
+  }
+  if (pulseFrame < 0) return false;
+  const uint16_t bg = (pressedId == PRESS_HEALTH) ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS;
+  g->fillRect(DOT_CX - 6, STRIP_CY - 6, 13, 13, bg);
+  drawStatusDot(PULSE_R[pulseFrame]);
+  if (++pulseFrame >= TOK_MOTION_PULSE_FRAMES) pulseFrame = -1;
+  return true;
 }
 
-// Screen-sleep pill, top-right corner of every screen (always drawn, last,
-// over whatever the page put there): a plain solid grey pill, no stroke or
-// icon. Tap -> enterScreenSleep() (main.cpp).
-void drawSleepButton() {
-  g->fillRoundRect(SLEEP_BTN_X0, SLEEP_BTN_Y0, SLEEP_BTN_W, SLEEP_BTN_H, SLEEP_BTN_H / 2, COL_TRACK);
-}
-
-// ── DRAWING HELPERS ────────────────────────────────────────
-// Percent track+fill. minFillPx is the smallest non-zero fill. Returns fill
-// width or -1 when percent is unknown.
-static int drawPercentBar(int x, int y, int w, int h, int percent,
-                          uint16_t color, uint16_t trackColor = COL_TRACK,
-                          int minFillPx = 3) {
-  g->fillRect(x, y, w, h, trackColor);
-  if (percent < 0) return -1;
-  int fillW = (int)((float)min(percent, 100) / 100 * w + 0.5f);
-  if (fillW < minFillPx) fillW = minFillPx;
-  g->fillRect(x, y, fillW, h, color);
-  return fillW;
-}
-
+// ── DATA HELPERS ───────────────────────────────────────────
 // Live countdown: tick the last server-provided remaining-seconds down by
 // wall time since lastFetchOkMs.
 static long liveResetsInSec(long baseSec) {
@@ -234,128 +377,159 @@ static long liveResetsInSec(long baseSec) {
   return rem < 0 ? 0 : rem;
 }
 
-// One row of the /usage-style limits page: label left, right-aligned value,
-// thin bar under. percent < 0 leaves the track empty (unknown).
-static void drawLimitsRow(int y, const String& label, const String& right, int percent) {
-  drawText(FONT_MD, 15, y, label, COL_TEXT);
-  drawTextR(FONT_MD, 465, y, right, COL_TEXT2);
-  drawPercentBar(15, y + 27, 450, 10, percent, COL_ACCENT);
+// ── LIMITS PAGE (page 2) ───────────────────────────────────
+// One card: the /usage panel -- context window, 5-hour, weekly (all models),
+// weekly per-model (hidden when the server sends null), usage credits. Each
+// row: label (body) left, detail (body, secondary) + the percent (headline)
+// right, a meter.md under it. Rows close up when one is absent.
+static const int LIM_X = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD;   // 20
+static const int LIM_R = TOK_LAYOUT_CONTENT_X1 - TOK_SPACE_CARD_PAD;   // 460 (exclusive)
+static const int ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD;    // 35
+static const int ROW_STEP = ROW_H + TOK_SPACE_STACK;                   // 43
+
+static void drawDataRow(int x, int r, int y, const String& label, const String& detail,
+                        int percent, uint16_t meterColor) {
+  drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
+  String pct = percent >= 0 ? String(percent) + "%" : String("--");
+  drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  int vx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
+  if (detail.length()) drawTextR(TOK_TYPE_BODY, vx, y, detail, TOK_COLOR_TEXT_SECONDARY);
+  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, meterColor);
 }
 
-// "Resets Jul 16, 04:59  58%" -- or bare "58%", or "--" when unknown.
-static String limitRowText(int percent, const char* resets) {
-  if (percent < 0) return "--";
-  String s;
-  if (resets[0] != '\0') s = String("Resets ") + resets + "  ";
-  s += String(percent) + "%";
-  return s;
+static String resetsDetail(const char* resets) {
+  return resets[0] != '\0' ? String("Resets ") + resets : String("");
 }
 
-// Limits page (index 2): Claude Code /usage panel -- context window, 5-hour
-// limit, weekly (all models), weekly per-model (hidden when the server sends
-// null), usage credits. Rows shift up when a row is absent.
 static void drawLimitsPage() {
-  drawText(FONT_SMB, 15, 8, "USAGE LIMITS", COL_TEXT);
+  drawCard(TOK_LAYOUT_CONTENT_X0, TOK_LAYOUT_CONTENT_Y0, TOK_LAYOUT_CONTENT_W,
+           TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0);
+  const int top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
+  drawSectionLabel(LIM_X, top, "USAGE LIMITS");
 
-  int y = 34;
-  const int STEP = 51;
-  String ctx = STATE.ctxTokens >= 0
-      ? fmtTokens(STATE.ctxTokens) + "  " + String(STATE.ctxPercent) + "%"
-      : String("--");
-  drawLimitsRow(y, "Context window", ctx, STATE.ctxPercent); y += STEP;
-
-  drawLimitsRow(y, "5-hour limit",
-                limitRowText(STATE.sessionPercent, STATE.sessionResets),
-                STATE.sessionPercent); y += STEP;
-
-  drawLimitsRow(y, "Weekly (all models)",
-                limitRowText(STATE.weekPercent, STATE.weekResets),
-                STATE.weekPercent); y += STEP;
-
+  int y = top + 17 + TOK_SPACE_SM;
+  drawDataRow(LIM_X, LIM_R, y, "Context window",
+              STATE.ctxTokens >= 0 ? fmtTokens(STATE.ctxTokens) : String(""),
+              STATE.ctxTokens >= 0 ? STATE.ctxPercent : -1, TOK_COLOR_DATA_USAGE);
+  y += ROW_STEP;
+  drawDataRow(LIM_X, LIM_R, y, "5-hour limit", resetsDetail(STATE.sessionResets),
+              STATE.sessionPercent, TOK_COLOR_DATA_USAGE);
+  y += ROW_STEP;
+  drawDataRow(LIM_X, LIM_R, y, "Weekly (all models)", resetsDetail(STATE.weekResets),
+              STATE.weekPercent, TOK_COLOR_DATA_USAGE);
+  y += ROW_STEP;
   if (STATE.weekModelPercent >= 0) {
     String name = STATE.weekModelName[0] != '\0' ? String(STATE.weekModelName) : String("model");
-    drawLimitsRow(y, "Weekly (" + name + ")",
-                  limitRowText(STATE.weekModelPercent, STATE.weekModelResets),
-                  STATE.weekModelPercent); y += STEP;
+    drawDataRow(LIM_X, LIM_R, y, "Weekly (" + name + ")", resetsDetail(STATE.weekModelResets),
+                STATE.weekModelPercent, TOK_COLOR_DATA_USAGE);
+    y += ROW_STEP;
   }
-
   if (STATE.creditsUsed >= 0) {
-    drawLimitsRow(y, "Usage credits",
-                  fmtCost(STATE.creditsUsed) + " of " + fmtCost(STATE.creditsLimit),
-                  STATE.creditsPercent);
+    drawDataRow(LIM_X, LIM_R, y, "Usage credits",
+                fmtCost(STATE.creditsUsed) + " of " + fmtCost(STATE.creditsLimit),
+                STATE.creditsPercent, TOK_COLOR_DATA_USAGE);
   }
 }
 
-// Page 1: top 4 projects (7d) in the upper half, the 7-day token trend chart
-// in the lower half, split by a 1px divider.
+// ── PROJECTS PAGE (page 1) ─────────────────────────────────
+// Two cards (one idea each): top projects, then the 7-day trend. Project rows
+// are single-line (design.md 11.6's dense variant): name (body) in the left
+// column, a meter.md from the right column's edge, value (caption) right.
+static const int PROJ_CARD_H = 165, TREND_CARD_H = 99;
+static const int TREND_CARD_Y = TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H + TOK_SPACE_GUTTER;  // 181
+static const int PROJ_ROW_STEP = 23 + TOK_SPACE_STACK;                                  // 31
+static const int PROJ_VALUE_W = 56;
+
+// Empty state (design.md 13.4), centred in a box: title (headline) +
+// description (caption). isError swaps the title to status.error.
+void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, bool isError,
+                    FontId titleFont, uint16_t titleColor) {
+  int th = fontLineH(titleFont);
+  int total = th + TOK_SPACE_SM + 17;
+  int y = y0 + (h - total) / 2;
+  drawTextC(titleFont, cx, y, title, isError ? TOK_COLOR_STATUS_ERROR : titleColor);
+  drawTextC(TOK_TYPE_CAPTION, cx, y + th + TOK_SPACE_SM, desc, TOK_COLOR_TEXT_SECONDARY);
+}
+
 static void drawProjectsPage() {
-  // ── upper half: top projects (7d) ──
-  drawText(FONT_SMB, 15, 8, "TOP PROJECTS (7D)", COL_TEXT);
+  const int x0 = TOK_LAYOUT_CONTENT_X0, w = TOK_LAYOUT_CONTENT_W;
+  drawCard(x0, TOK_LAYOUT_CONTENT_Y0, w, PROJ_CARD_H);
+  const int px = x0 + TOK_SPACE_CARD_PAD, pr = x0 + w - TOK_SPACE_CARD_PAD;
+  const int top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
+  drawSectionLabel(px, top, "TOP PROJECTS 7D");
 
   if (STATE.projectCount == 0) {
-    drawText(FONT_SM, 15, 34, "No data yet", COL_TEXT2);
+    int ly = top + 17;
+    drawEmptyState(x0 + w / 2, ly, TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H - ly, "No project data yet",
+                   "Projects appear after the first poll", false);
   } else {
     int shown = STATE.projectCount < 4 ? STATE.projectCount : 4;
     int64_t maxTokens = 1;
-    for (int i = 0; i < shown; i++) {
+    for (int i = 0; i < shown; i++)
       if (STATE.projectTokens[i] > maxTokens) maxTokens = STATE.projectTokens[i];
-    }
-
-    int y = 32;
-    const int barMaxW = 360;
-    for (int i = 0; i < shown; i++) {
-      drawText(FONT_SM, 15, y, STATE.projectNames[i], COL_TEXT);
-
-      int barW = (int)((float)STATE.projectTokens[i] / maxTokens * barMaxW);
-      g->fillRect(15, y + 19, barMaxW, 10, COL_SURFACE);
-      g->fillRoundRect(15, y + 19, max(barW, 5), 10, 2, COL_ACCENT);
-
-      drawText(FONT_SM, 15 + barMaxW + 12, y + 15, fmtTokens(STATE.projectTokens[i]), COL_TEXT2);
-      y += 35;
+    const int meterX = TOK_LAYOUT_COL_RIGHT_X;
+    const int meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - meterX;
+    const int nameW = meterX - TOK_SPACE_SM - px;
+    int y = top + 17 + TOK_SPACE_SM;
+    for (int i = 0; i < shown; i++, y += PROJ_ROW_STEP) {
+      drawText(TOK_TYPE_BODY, px, y, fitText(TOK_TYPE_BODY, STATE.projectNames[i], nameW), TOK_COLOR_TEXT_PRIMARY);
+      int pct = (int)((float)STATE.projectTokens[i] / maxTokens * 100 + 0.5f);
+      drawMeter(meterX, y + 12 - TOK_METER_MD / 2, meterW, TOK_METER_MD, pct, TOK_COLOR_DATA_USAGE);
+      // Caption value on the name's baseline.
+      drawTextR(TOK_TYPE_NUMERAL_SM, pr, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION),
+                fmtTokens(STATE.projectTokens[i]), TOK_COLOR_TEXT_SECONDARY);
     }
   }
 
-  // ── lower half: 7-day trend ──
-  g->fillRect(15, 176, 462, 1, COL_BORDER);
-  drawText(FONT_SMB, 15, 184, "7-DAY TREND", COL_TEXT);
-
-  int64_t maxTrend = 1;
+  // ── 7-day trend (compact card): label column left, bars from x 188 ──
+  drawCard(x0, TREND_CARD_Y, w, TREND_CARD_H);
+  const int ty = TREND_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  drawSectionLabel(px, ty, "7-DAY TREND");
+  int64_t total = 0, maxTrend = 1;
   for (int i = 0; i < 7; i++) {
+    total += STATE.trend[i];
     if (STATE.trend[i] > maxTrend) maxTrend = STATE.trend[i];
   }
+  drawText(TOK_TYPE_BODY, px, ty + 17 + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, px, ty + 17 + TOK_SPACE_SM + 23, "tokens this week", TOK_COLOR_TEXT_SECONDARY);
 
-  const char* dayLabels[7] = {"-6", "-5", "-4", "-3", "-2", "-1", "today"};
-  const int chartX = 36, chartY = 208, chartH = 62, barW = 51, gap = 12;
+  static const char* const DAY_LABELS[7] = {"-6", "-5", "-4", "-3", "-2", "-1", "Today"};
+  const int barW = 32, gap = TOK_SPACE_SM;
+  const int axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - 17;  // 255
+  const int feet = axisY - TOK_SPACE_XS;                                               // bars end above y 251
+  const int chartH = feet - ty;
   for (int i = 0; i < 7; i++) {
-    int barH = (int)((float)STATE.trend[i] / maxTrend * chartH);
-    int bx = chartX + i * (barW + gap);
-    int by = chartY + chartH - barH;
-    g->fillRoundRect(bx, by, barW, max(barH, 3), 4, COL_ACCENT);
-    drawTextC(FONT_SM, bx + barW / 2, chartY + chartH + 3, dayLabels[i], COL_TEXT2);
+    int bx = TOK_LAYOUT_COL_RIGHT_X + i * (barW + gap);
+    int bh = (int)((float)STATE.trend[i] / maxTrend * chartH);
+    if (bh < 4) bh = 4;
+    aaFillRoundRect(bx, feet - bh, barW, bh, TOK_RADIUS_SM, TOK_COLOR_DATA_USAGE);
+    drawTextC(TOK_TYPE_CAPTION, bx + barW / 2, axisY, DAY_LABELS[i],
+              i == 6 ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_TERTIARY);
   }
 }
 
-// Simple vector weather icon (no bitmap glyphs), mapped from Open-Meteo's WMO
-// weather_code, CENTRED on (cx, cy) and scaled by k (1.0 = the CYD's ~18px
-// icon). Every offset below is the CYD's, times k.
+// ── WEATHER GLYPHS (content family, design.md 10) ──────────
+// Filled vector shapes mapped from Open-Meteo's WMO weather_code, CENTRED on
+// (cx, cy) and scaled by k from the CYD's ~18px geometry.
 static void drawWeatherIcon(int cx, int cy, int code, float k) {
   auto S = [k](float v) { return (int)lroundf(v * k); };
   float lw = 1.0f * k;
   if (code < 0) {
-    drawTextC(FONT_SM, cx, cy - fontLineH(FONT_SM) / 2, "--", COL_TEXT2);
+    drawTextC(TOK_TYPE_CAPTION, cx, cy - fontLineH(TOK_TYPE_CAPTION) / 2, "--", TOK_COLOR_TEXT_TERTIARY);
     return;
   }
+  const uint16_t sun = TOK_COLOR_CONTENT_SUN;
   if (code == 0 || code == 1) {
     // clear: sun disc + 8 short rounded rays with a gap between disc and rays.
-    g->fillCircle(cx, cy, S(4), COL_YELLOW);
-    g->drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, COL_YELLOW);
-    g->drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, COL_YELLOW);
-    g->drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, COL_YELLOW);
-    g->drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, COL_YELLOW);
-    g->drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, COL_YELLOW);
-    g->drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, COL_YELLOW);
-    g->drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, COL_YELLOW);
-    g->drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, COL_YELLOW);
+    aaFillCircle(cx, cy, S(4), sun);
+    g->drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, sun);
+    g->drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, sun);
+    g->drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, sun);
+    g->drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, sun);
+    g->drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, sun);
+    g->drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, sun);
+    g->drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, sun);
+    g->drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, sun);
     return;
   }
   // Rain/snow/lightning are drawn standalone (no cloud underneath) so the
@@ -363,70 +537,83 @@ static void drawWeatherIcon(int cx, int cy, int code, float k) {
   if (code >= 95) {
     // thunderstorm: zigzag bolt as 4 triangles. Vertices:
     // A(-1,+8) B(-1,+2) C(-5,+2) D(+1,-8) E(+1,-2) F(+5,-2).
-    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), COL_YELLOW);
-    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), COL_YELLOW);
-    g->fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), COL_YELLOW);
-    g->fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), COL_YELLOW);
+    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), sun);
+    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), sun);
+    g->fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), sun);
+    g->fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), sun);
     return;
   }
   if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
     // snow: six-armed snowflake = three rounded lines crossing at 60deg
-    g->drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, COL_TEXT);
-    g->drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, COL_TEXT);
-    g->drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, COL_TEXT);
+    const uint16_t c = TOK_COLOR_CONTENT_SNOW;
+    g->drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, c);
+    g->drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, c);
+    g->drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, c);
     return;
   }
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
     // rain: three staggered teardrops, two small on top, one large below.
-    g->fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), COL_BLUE);
-    g->fillCircle(cx - S(6), cy - S(3), S(2), COL_BLUE);
-    g->fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), COL_BLUE);
-    g->fillCircle(cx + S(5), cy - S(1), S(2), COL_BLUE);
-    g->fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), COL_BLUE);
-    g->fillCircle(cx - S(1), cy + S(6), S(3), COL_BLUE);
+    const uint16_t c = TOK_COLOR_CONTENT_RAIN;
+    g->fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), c);
+    aaFillCircle(cx - S(6), cy - S(3), S(2), c);
+    g->fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), c);
+    aaFillCircle(cx + S(5), cy - S(1), S(2), c);
+    g->fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), c);
+    aaFillCircle(cx - S(1), cy + S(6), S(3), c);
     return;
   }
   // Everything else shares a plain cloud (2/3/45/48 = cloudy/fog, or any
   // unmapped code): two overlapping puffs on a fully-rounded pill base.
-  g->fillCircle(cx - S(4), cy - S(2), S(4), COL_TEXT2);
-  g->fillCircle(cx + S(3), cy - S(3), S(5), COL_TEXT2);
-  g->fillRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), COL_TEXT2);
+  const uint16_t c = TOK_COLOR_CONTENT_CLOUD;
+  aaFillCircle(cx - S(4), cy - S(2), S(4), c);
+  aaFillCircle(cx + S(3), cy - S(3), S(5), c);
+  aaFillRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), c);
 }
 
-// Thin inset progress bar (min fill = bar height so a stub is full-height).
-// Returns fill width (-1 when unknown) for shine-sweep overlays.
-static int drawMiniBar(int x, int y, int w, int percent, uint16_t color,
-                       uint16_t trackColor = COL_TRACK, int h = 8) {
-  return drawPercentBar(x, y, w, h, percent, color, trackColor, h);
+// Degree ring (design.md 10.3): r 4 / r 3, text.secondary, top-aligned to
+// the cap height of the number it follows. Returns the x past it.
+static int drawDegreeRing(int x, int capTop, uint16_t bg) {
+  aaFillCircle(x + 4, capTop + 4, 4, TOK_COLOR_TEXT_SECONDARY);
+  aaFillCircle(x + 4, capTop + 4, 2, bg);
+  return x + 9;
 }
 
-// ── SHINE SWEEP ────────────────────────────────────────────
-// Looping light band swept across the green reset-countdown bars' fill in
-// drawLimitsCard (status page + MIXED_PAGE + NOTE_PAGE). The band crosses the
-// full track at constant speed but is only painted over the filled interior.
-// Twin of simulator-s3.html's drawShineStrip.
-static const uint32_t SHINE_PERIOD_MS = 2600;
+// Compact temperature: the value, then "C" in caption + secondary on the
+// same baseline (design.md 5.3 rule 4). Centred on cx.
+static void drawTempC(FontId f, int cx, int y, int t, bool have) {
+  if (!have) { drawTextC(f, cx, y, "--", TOK_COLOR_TEXT_TERTIARY); return; }
+  String v = String(t);
+  int w = textW(f, v) + textW(TOK_TYPE_CAPTION, "C");
+  int x = drawText(f, cx - w / 2, y, v, TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, x, y + fontAscent(f) - fontAscent(TOK_TYPE_CAPTION), "C", TOK_COLOR_TEXT_SECONDARY);
+}
+
+// ── PACE SWEEP (motion.sweep) ──────────────────────────────
+// One light band per successful poll across the green pace fills of the
+// shared left column (status, mixed, note pages), then still: it means
+// "fresh data". Constant speed, 600 ms. Twin of simulator-s3.html's.
 static const int SHINE_BAND_R = 10;
-static const int SHINE_BAR_X = 16, SHINE_BAR_W = 208, SHINE_BAR_H = 6;
-static const int SHINE_BAR_Y[2] = {70, 195};  // 5h, weekly (drawLimitsCard)
-// Fill widths cached by drawLimitsCard (under stateMutex) so shineTick can
-// repaint between renders without touching STATE.
-static volatile int shineFillPx[2] = {-1, -1};
-// Only columns whose colour changed since the last paint of the same bar are
-// rewritten -- the band moves a few px per pass.
+static const int SHINE_BAR_X = TOK_LAYOUT_COL_LEFT_X + TOK_SPACE_CARD_PAD_COMPACT_H;   // 20
+static const int SHINE_BAR_W = TOK_LAYOUT_COL_LEFT_W - 2 * TOK_SPACE_CARD_PAD_COMPACT_H;  // 148
+static const int SHINE_BAR_H = TOK_METER_SM;
+static int shineBarY[2] = {-1, -1};           // set by drawLimitCard (pace meter tops)
+static volatile int shineFillPx[2] = {-1, -1};  // fill widths cached under stateMutex
+static uint32_t sweepStartMs = 0;
+static bool sweepActive = false;
+static uint32_t sweepSeenSeq = 0;
 static int shinePrevCenter[2] = {INT_MIN, INT_MIN};
 
 static inline uint16_t shineColor(int i, int center) {
   int d = abs(i - center);
-  return d <= 2 ? COL_SHINE_HI : d <= 6 ? COL_SHINE_MID : d <= SHINE_BAND_R ? COL_SHINE_LO : COL_GOOD;
+  return d <= 2 ? TOK_GREEN_SHINE_HI : d <= 6 ? TOK_GREEN_SHINE_MID
+       : d <= SHINE_BAND_R ? TOK_GREEN_SHINE_LO : TOK_COLOR_DATA_PACE;
 }
 
-// Paint the band over one bar's filled interior (columns 2..fillW-3, so the
-// ends stay untouched). Returns true if any column changed.
-static bool drawShineStrip(int x, int y, int fillW, uint32_t nowMs, int barIdx, bool force) {
-  if (fillW < 14) return false;
-  float phase = (float)(nowMs % SHINE_PERIOD_MS) / SHINE_PERIOD_MS;
-  int center = -SHINE_BAND_R + (int)(phase * (SHINE_BAR_W + 2 * SHINE_BAND_R));
+// Paint the band over one pace meter's filled interior (columns 2..fillW-3,
+// so the round ends stay untouched). Returns true if any column changed.
+static bool drawShineStrip(int barIdx, int center, bool force) {
+  int fillW = shineFillPx[barIdx], y = shineBarY[barIdx];
+  if (fillW < 14 || y < 0) return false;
   int prev = force ? INT_MIN : shinePrevCenter[barIdx];
   if (prev == center) return false;
   shinePrevCenter[barIdx] = center;
@@ -434,38 +621,48 @@ static bool drawShineStrip(int x, int y, int fillW, uint32_t nowMs, int barIdx, 
   for (int i = 2; i <= fillW - 3; i++) {
     uint16_t c = shineColor(i, center);
     if (prev != INT_MIN && c == shineColor(i, prev)) continue;
-    g->fillRect(x + i, y, 1, SHINE_BAR_H, c);
+    g->fillRect(SHINE_BAR_X + i, y, 1, SHINE_BAR_H, c);
     changed = true;
   }
   return changed;
 }
 
-// Between-render top-up of the shine band, straight into `frame`: no lock
-// (only the volatile cached fill widths). Returns true if pixels changed.
+static bool leftColumnPage() {
+  return currentPage == 0 || currentPage == MIXED_PAGE || currentPage == NOTE_PAGE;
+}
+
+static int sweepCenter(uint32_t nowMs) {
+  float t = (float)(nowMs - sweepStartMs) / (TOK_MOTION_SWEEP_MS * motionTimeScale);
+  if (t > 1.0f) t = 1.0f;
+  return -SHINE_BAND_R + (int)(t * (SHINE_BAR_W + 2 * SHINE_BAND_R));
+}
+
 bool shineTick(uint32_t nowMs) {
-  // NOTE_PAGE and MIXED_PAGE show the same left column as the status page.
-  if (currentPage != 0 && currentPage != MIXED_PAGE && currentPage != NOTE_PAGE) return false;
-  bool changed = false;
-  for (int i = 0; i < 2; i++) {
-    if (drawShineStrip(SHINE_BAR_X, SHINE_BAR_Y[i], shineFillPx[i], nowMs, i, false)) changed = true;
+  if (pollOkSeq != sweepSeenSeq) {
+    sweepSeenSeq = pollOkSeq;
+    if (!cfgReduceMotion && cfgShowCountdown && leftColumnPage()) {
+      sweepActive = true;
+      sweepStartMs = nowMs;
+      shinePrevCenter[0] = shinePrevCenter[1] = INT_MIN;
+    }
   }
+  if (!sweepActive) return false;
+  if (!leftColumnPage() || !cfgShowCountdown) { sweepActive = false; return false; }
+  int center = sweepCenter(nowMs);
+  bool done = center >= SHINE_BAR_W + SHINE_BAND_R;
+  bool changed = false;
+  for (int i = 0; i < 2; i++)
+    if (drawShineStrip(i, center, false)) changed = true;
+  if (done) sweepActive = false;
   return changed;
 }
 
-// Uppercase section label.
-static void drawCardLabel(int x, int y, const char* label) {
-  drawText(FONT_SMB, x, y, label, COL_TEXT2);
-}
-
-static void drawCard(int x, int y, int w, int h) {
-  g->fillRect(x, y, w, h, COL_SURFACE);
-  g->drawRect(x, y, w, h, COL_BORDER);
-}
-
+// ── SHARED LEFT COLUMN (status / mixed / note pages) ───────
 static const long SESSION_WINDOW_SEC = 5L * 3600;       // 5h
 static const long WEEK_WINDOW_SEC = 7L * 24 * 3600;     // 168h
 
-// Reset-countdown fill: 0% right after a reset, 100% right before the next.
+// Pace = % of the window elapsed: 0% right after a reset, 100% right before
+// the next.
 static int elapsedPercentOfWindow(long remainingSec, long windowSec) {
   if (remainingSec < 0) return -1;
   long elapsed = windowSec - remainingSec;
@@ -491,50 +688,57 @@ static String formatPaceDur(int currentPct, long elapsedSec, long remainingSec) 
   return String((int)(secToExhaust / 3600.0f + 0.5f)) + "h";
 }
 
-// A warning is only ever earned by pace, never by level -- callers gate
-// `ahead` on actual > pace + deadband. `baseline` is the big percent's
-// baseline; the flag sits on it.
+// Metric flag (design.md 11.3): "!" (headline, status.error) + the projection
+// (body, secondary) on the value's baseline -- earned only by pace, never by
+// level (callers gate `ahead` on actual > pace + deadband).
 static void drawPaceFlag(int x, int baseline, bool ahead, int currentPct, long elapsedSec, long remainingSec) {
   if (!ahead) return;
-  int x2 = drawText(FONT_MDB, x, baseline - fontAscent(FONT_MDB), "!", COL_WARN);
+  int x2 = drawText(TOK_TYPE_HEADLINE, x, baseline - fontAscent(TOK_TYPE_HEADLINE), "!", TOK_COLOR_STATUS_ERROR);
   String dur = formatPaceDur(currentPct, elapsedSec, remainingSec);
-  if (dur.length() > 0) drawText(FONT_MD, x2 + 3, baseline - fontAscent(FONT_MD), dur, COL_TEXT2);
+  if (dur.length() > 0)
+    drawText(TOK_TYPE_BODY, x2 + TOK_SPACE_HAIR, baseline - fontAscent(TOK_TYPE_BODY), dur, TOK_COLOR_TEXT_SECONDARY);
 }
 
-// One limits card half: big percent + label (+ pace flag), orange usage bar,
-// green reset-countdown bar with its shine, and the two reset lines.
-static void drawLimitHalf(int topY, const char* label, int percent, bool ahead, long elapsed, long rem,
-                          int pace, int barIdx, const char* resets, const String& inText,
-                          FontId resetsFont) {
-  String pctStr = percent >= 0 ? String(percent) + "%" : "--";
-  const int pctY = topY + 9;
-  const int baseline = pctY + fontAscent(FONT_LG);
-  int x = drawText(FONT_LG, 16, pctY, pctStr, COL_ACCENT);
-  drawCardLabel(x + 8, baseline - fontAscent(FONT_SMB), label);
-  drawPaceFlag(x + 8 + textW(FONT_SMB, label) + 8, baseline, ahead, percent, elapsed, rem);
+// One limit card (design.md 7.4): numeral.lg % + label (+ flag), the paired
+// meter (usage over pace), then two caption lines -- when it resets, and in
+// how long.
+static void drawLimitCard(int cardY, const char* label, int percent, bool ahead, long elapsed, long rem,
+                          int pace, int barIdx, const char* resets, const String& inText) {
+  drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
+  const int x = SHINE_BAR_X;
+  const int top = cardY + TOK_SPACE_CARD_PAD_COMPACT_V;
+  const int baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
+  int xe;
+  if (percent >= 0) xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, String(percent) + "%", TOK_COLOR_DATA_USAGE);
+  else xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, "--", TOK_COLOR_TEXT_TERTIARY);
+  int lx = xe + TOK_SPACE_SM;
+  drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);
+  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem);
 
-  const int barY = SHINE_BAR_Y[barIdx] - 14;
-  drawMiniBar(16, barY, SHINE_BAR_W, percent, COL_ACCENT);
-  // Green reset-countdown bars (and their shine) are optional via Settings
-  // "Show Countdown"; when off, clear the cached fill so shineTick no-ops.
+  int y = top + fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_STACK_TIGHT;
+  drawMeter(x, y, SHINE_BAR_W, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
+  y += TOK_METER_MD + TOK_SPACE_STACK_TIGHT;
+  // The pace meter is optional (Settings > Pace bars); off, the space closes up.
   if (cfgShowCountdown) {
-    shineFillPx[barIdx] = drawMiniBar(16, SHINE_BAR_Y[barIdx], SHINE_BAR_W, pace, COL_GOOD, COL_TRACK_BLACK, SHINE_BAR_H);
-    drawShineStrip(SHINE_BAR_X, SHINE_BAR_Y[barIdx], shineFillPx[barIdx], millis(), barIdx, true);
+    shineBarY[barIdx] = y;
+    shineFillPx[barIdx] = drawMeter(x, y, SHINE_BAR_W, SHINE_BAR_H, pace, TOK_COLOR_DATA_PACE);
+    if (sweepActive) drawShineStrip(barIdx, sweepCenter(millis()), true);
+    y += SHINE_BAR_H + TOK_SPACE_STACK_TIGHT;
   } else {
+    shineBarY[barIdx] = -1;
     shineFillPx[barIdx] = -1;
   }
 
-  const int resetsY = SHINE_BAR_Y[barIdx] + 12;
-  drawText(resetsFont, 16, resetsY,
-           resets[0] != '\0' ? String("resets ") + resets : String("resets --"), COL_TEXT2);
-  if (inText.length()) drawText(FONT_MD, 16, resetsY + 23, inText, COL_TEXT);
+  int rx = drawText(TOK_TYPE_CAPTION, x, y, "Resets ", TOK_COLOR_TEXT_SECONDARY);
+  if (resets[0] != '\0') drawText(TOK_TYPE_CAPTION, rx, y, resets, TOK_COLOR_TEXT_SECONDARY);
+  else drawText(TOK_TYPE_CAPTION, rx, y, "--", TOK_COLOR_TEXT_TERTIARY);
+  if (inText.length()) drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
 }
 
-// Week reset label for the shared limits card: the server's "Oct 1, 04:59"
-// with the month/day swapped for the weekday name (e.g. "Thu, 04:59"),
-// computed locally from the live countdown so it never depends on the
-// server's clock. Falls back to the server string verbatim when the
-// countdown or the comma (time-of-day suffix) is missing.
+// Week reset label: the server's "Oct 1, 04:59" with the date swapped for the
+// weekday name ("Thu 04:59"), computed locally from the live countdown so it
+// never depends on the server's clock. Falls back to the server string
+// verbatim when the countdown or the comma (time-of-day suffix) is missing.
 static String weekResetWeekdayLabel(long weekRem, const char* resets) {
   if (resets[0] == '\0') return String(resets);
   const char* comma = strchr(resets, ',');
@@ -543,20 +747,18 @@ static String weekResetWeekdayLabel(long weekRem, const char* resets) {
   struct tm ti;
   localtime_r(&resetT, &ti);
   if (ti.tm_wday < 0 || ti.tm_wday > 6) return String(resets);
-  return String(WDAY_ABBR[ti.tm_wday]) + comma;
+  const char* t = comma + 1;
+  while (*t == ' ') t++;
+  return String(WDAY_ABBR[ti.tm_wday]) + " " + t;
 }
 
-// Left column of the status / mixed / note pages: two cards (5h, week).
-static void drawLimitsCard() {
-  drawCard(LEFT_X, 3, LEFT_W, 132);
-  drawCard(LEFT_X, 137, LEFT_W, 116);
-
+static void drawLimitsColumn() {
   long sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
   long weekRem = liveResetsInSec(STATE.weekResetsInSec);
   String weekResetLabel = weekResetWeekdayLabel(weekRem, STATE.weekResets);
 
-  // QUOTA PACING: "% of the window elapsed" (also the green countdown bar)
-  // vs actual usage -- a flag is earned only by running ahead of pace.
+  // QUOTA PACING: "% of the window elapsed" (the pace meter) vs actual
+  // usage -- a flag is earned only by running ahead of pace.
   int sessionPace = elapsedPercentOfWindow(sessionRem, SESSION_WINDOW_SEC);
   int weekPace = elapsedPercentOfWindow(weekRem, WEEK_WINDOW_SEC);
   bool sessionAhead = STATE.sessionPercent >= 0 && sessionPace >= 0 &&
@@ -566,63 +768,66 @@ static void drawLimitsCard() {
   long sessionElapsed = sessionRem >= 0 ? SESSION_WINDOW_SEC - sessionRem : -1;
   long weekElapsed = weekRem >= 0 ? WEEK_WINDOW_SEC - weekRem : -1;
 
-  drawLimitHalf(3, "5H", STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem,
+  drawLimitCard(LIMIT5H_Y, "5H", STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem,
                 sessionPace, 0, STATE.sessionResets,
-                sessionRem >= 0 ? "in " + fmtCountdown(sessionRem) : String(""), FONT_MD);
-  drawLimitHalf(137, "WK", STATE.weekPercent, weekAhead, weekElapsed, weekRem,
+                sessionRem >= 0 ? "in " + fmtCountdown(sessionRem) : String(""));
+  drawLimitCard(LIMITWK_Y, "WK", STATE.weekPercent, weekAhead, weekElapsed, weekRem,
                 weekPace, 1, weekResetLabel.c_str(),
-                weekRem >= 0 ? "in " + fmtCountdownDHM(weekRem) : String(""), FONT_MD);
+                weekRem >= 0 ? "in " + fmtCountdownDHM(weekRem) : String(""));
 }
 
-// BTC price card under the week card: in-line "BTCUSDT <price>".
+// BTC (compact card): caption "BTC", then the price in headline, on one
+// baseline; the headline's line box is centred in the 32px card.
 static void drawBtcCard() {
-  drawCard(LEFT_X, 255, LEFT_W, 35);
-  const int baseline = 279;
-  int x = drawText(FONT_SM, 16, baseline - fontAscent(FONT_SM), "BTCUSDT", COL_TEXT2);
-  drawText(FONT_MDB, x + 10, baseline - fontAscent(FONT_MDB), fmtBtc(STATE.btcPrice), COL_TEXT);
+  drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
+  const int top = BTC_Y + (BTC_CARD_H - fontLineH(TOK_TYPE_HEADLINE)) / 2;
+  const int baseline = top + fontAscent(TOK_TYPE_HEADLINE);
+  int x = drawText(TOK_TYPE_CAPTION, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_CAPTION), "BTC",
+                   TOK_COLOR_TEXT_SECONDARY);
+  if (STATE.btcPrice >= 0)
+    drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
+  else
+    drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, "--", TOK_COLOR_TEXT_TERTIARY);
 }
 
 // ── NOTE PAGE (NOTE_PAGE) ──────────────────────────────────
-// Right-hand pane, same box as the status page's right column.
-static const int NOTE_X = RIGHT_X;
-static const int NOTE_Y = 3;
-static const int NOTE_W = RIGHT_W;
-static const int NOTE_H = CONTENT_Y1 - 3;
-static const int NOTE_TX = NOTE_X + 9;  // 250, first glyph column
-// First text row sits below BATTERY_ICON_Y1 and the sleep pill's bottom
-// (SLEEP_BTN_Y0 + SLEEP_BTN_H): drawBatterySaveIcon() and drawSleepButton()
-// punch COL_BG boxes into the top-right corner on *every* page after the content, so
-// text starting higher would lose the end of its first line whenever Battery
-// Save is on. The band that buys holds the "NOTE" label.
-static const int NOTE_TY = 26;
+// The right column as one card: "NOTE" label, then the text in type.mono.*
+// from the first row below the corner slots.
+static const int NOTE_X = TOK_LAYOUT_COL_RIGHT_X;
+static const int NOTE_Y = TOK_LAYOUT_CONTENT_Y0;
+static const int NOTE_W = TOK_LAYOUT_COL_RIGHT_W;
+static const int NOTE_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+static const int NOTE_TX = NOTE_X + TOK_SPACE_CARD_PAD;            // 200, first glyph column
+static const int NOTE_TY = NOTE_Y + TOK_SPACE_CARD_PAD + 17 + TOK_SPACE_SM;  // 45 (>= 40, clear of the corner)
 // Exclusive bottom limit: a row is drawn only while y + lineH <= this.
-static const int NOTE_TY_MAX = NOTE_Y + NOTE_H - 5;  // 285
-// Usable width 470 - 250 = 220px. Monospace advance per size (make_vlw.py):
+static const int NOTE_TY_MAX = NOTE_Y + NOTE_H - TOK_SPACE_CARD_PAD;  // 268
+// Usable width 260. Monospace advance per size (make_vlw.py):
 //   size | font  | adv | step | cols | rows
-//     1  | MONO1 |  7  |  15  |  31  |  17
-//     2  | MONO2 |  10 |  21  |  22  |  12
-//     3  | MONO3 |  13 |  29  |  16  |   8
+//     1  | MONO1 |  7  |  15  |  37  |  14
+//     2  | MONO2 |  10 |  21  |  26  |  10
+//     3  | MONO3 |  13 |  29  |  20  |   7
 // Every size holds at least the CYD pane's columns (24/12/8), so a note
 // written against the CYD's note.html fit check wraps no worse here.
-static const int NOTE_TEXT_W = 220;
-static const FontId NOTE_FONTS[3] = {FONT_MONO1, FONT_MONO2, FONT_MONO3};
+static const int NOTE_TEXT_W = NOTE_W - 2 * TOK_SPACE_CARD_PAD;
+static const FontId NOTE_FONTS[3] = {TOK_TYPE_MONO_S, TOK_TYPE_MONO_M, TOK_TYPE_MONO_L};
 
 // ── Syntax highlighting ───────────────────────────────────────────────────
 // This rule set is duplicated in simulator-s3.html, and in ~/cyd's pages.cpp,
 // simulator.html, note.html and note.py; all must agree or the board and the
 // editor disagree about what the text looks like. Tokenizing happens at two
 // levels -- source line, then word -- plus a one-character backtick toggle.
-// There is deliberately no per-character classification.
+// There is deliberately no per-character classification. The colours are
+// design.md's note.* tokens (section 11.19).
 //
 // Precedence, first match wins:
-//   1. inside a `backtick span`      -> COL_BLUE (delimiters included)
-//   2. word is TODO/FIXME/BUG        -> COL_WARN
-//      word is DONE/OK               -> COL_GOOD
-//      word is numeric               -> COL_YELLOW
-//   3. line begins '#'               -> COL_ACCENT (whole line)
-//      line begins '>'               -> COL_TEXT2  (whole line)
-//   4. leading "- ", "* ", "+ "      -> COL_ACCENT (the marker char only)
-//   5. otherwise                     -> COL_TEXT
+//   1. inside a `backtick span`      -> note.code (delimiters included)
+//   2. word is TODO/FIXME/BUG        -> note.keyword.bad
+//      word is DONE/OK               -> note.keyword.good
+//      word is numeric               -> note.number
+//   3. line begins '#'               -> note.heading (whole line)
+//      line begins '>'               -> note.quote   (whole line)
+//   4. leading "- ", "* ", "+ "      -> note.marker (the marker char only)
+//   5. otherwise                     -> note.text
 //
 // Keywords are matched case-SENSITIVE uppercase-only.
 static bool notePunctOpen(char c) {
@@ -655,14 +860,14 @@ static uint16_t noteWordColor(const char* s, int a, int b) {
   while (b > a && notePunctClose(s[b - 1])) b--;
   if (b == a) return 0;
   if (noteRangeEquals(s, a, b, "TODO") || noteRangeEquals(s, a, b, "FIXME") ||
-      noteRangeEquals(s, a, b, "BUG")) return COL_WARN;
-  if (noteRangeEquals(s, a, b, "DONE") || noteRangeEquals(s, a, b, "OK")) return COL_GOOD;
+      noteRangeEquals(s, a, b, "BUG")) return TOK_NOTE_KEYWORD_BAD;
+  if (noteRangeEquals(s, a, b, "DONE") || noteRangeEquals(s, a, b, "OK")) return TOK_NOTE_KEYWORD_GOOD;
   bool hasDigit = false;
   for (int i = a; i < b; i++) {
     if (!noteIsNumChar(s[i])) return 0;
     if (noteIsDigit(s[i])) hasDigit = true;
   }
-  return hasDigit ? COL_YELLOW : 0;
+  return hasDigit ? TOK_NOTE_NUMBER : 0;
 }
 
 // Word-wrapped, syntax-coloured render of STATE.note into the right-hand pane.
@@ -670,7 +875,7 @@ static uint16_t noteWordColor(const char* s, int a, int b) {
 // Caller holds stateMutex; this must not re-lock.
 static void drawNotePane() {
   drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
-  drawCardLabel(NOTE_TX, 7, "NOTE");
+  drawSectionLabel(NOTE_TX, NOTE_Y + TOK_SPACE_CARD_PAD, "NOTE");
 
   const char* s = STATE.note;
   const int size = constrain(STATE.noteSize, 1, 3);
@@ -681,9 +886,7 @@ static void drawNotePane() {
   const int cols = NOTE_TEXT_W / glyphW;
 
   if (s[0] == '\0') {
-    const int cx = NOTE_X + NOTE_W / 2;
-    drawTextC(FONT_SM, cx, 132, "no note yet", COL_TEXT2);
-    drawTextC(FONT_SM, cx, 152, "edit at :8787/note", COL_TEXT2);
+    drawEmptyState(NOTE_X + NOTE_W / 2, NOTE_Y, NOTE_H, "No note yet", "Edit at :8787/note", false);
     return;
   }
 
@@ -703,8 +906,8 @@ static void drawNotePane() {
     uint16_t lineColor = 0;
     int markerIdx = -1;
     if (p < lineEnd) {
-      if (s[p] == '#') lineColor = COL_ACCENT;
-      else if (s[p] == '>') lineColor = COL_TEXT2;
+      if (s[p] == '#') lineColor = TOK_NOTE_HEADING;
+      else if (s[p] == '>') lineColor = TOK_COLOR_TEXT_SECONDARY;  // note.quote
       else if ((s[p] == '-' || s[p] == '*' || s[p] == '+') &&
                (p + 1 == lineEnd || s[p + 1] == ' ')) markerIdx = p;
     }
@@ -748,17 +951,17 @@ static void drawNotePane() {
         uint16_t c;
         if (s[i] == '`') {
           inCode = !inCode;
-          c = COL_BLUE;  // colour the tick itself, so a stray one is visible
+          c = TOK_NOTE_CODE;  // colour the tick itself, so a stray one is visible
         } else if (inCode) {
-          c = COL_BLUE;
+          c = TOK_NOTE_CODE;
         } else if (wordColor) {
           c = wordColor;
         } else if (lineColor) {
           c = lineColor;
         } else if (i == markerIdx) {
-          c = COL_ACCENT;
+          c = TOK_NOTE_MARKER;
         } else {
-          c = COL_TEXT;
+          c = TOK_NOTE_TEXT;
         }
         drawChar(font, NOTE_TX + col * glyphW, y, s[i], c);
         col++; i++;
@@ -772,37 +975,37 @@ static void drawNotePane() {
   }
 }
 
-// Page 6: the mixed page's left column, with the note pane where the cats go.
+// Page 6: the shared left column, with the note pane where the cats go.
 static void drawNotePage() {
-  drawLimitsCard();
+  drawLimitsColumn();
   drawBtcCard();
   drawNotePane();
 }
 
-// Mixed page's static half: left column + footer. The right pane belongs to
-// the GIF player (gif_player.cpp draws the 2x-downscaled cat there).
+// Mixed page's static half: left column + strip. The right pane belongs to
+// the GIF player (gif_player.cpp cover-fits the cat there).
 void drawMixedPageStatic() {
-  g->fillRect(0, 0, MIXED_GIF_X0, SCREEN_H, COL_BG);
-  g->fillRect(MIXED_GIF_X0, CONTENT_Y1, SCREEN_W - MIXED_GIF_X0, SCREEN_H - CONTENT_Y1, COL_BG);
-  drawLimitsCard();
+  g->fillRect(0, 0, MIXED_GIF_X0, SCREEN_H, TOK_COLOR_BG_CANVAS);
+  g->fillRect(MIXED_GIF_X0, TOK_LAYOUT_CONTENT_Y1, SCREEN_W - MIXED_GIF_X0, SCREEN_H - TOK_LAYOUT_CONTENT_Y1,
+              TOK_COLOR_BG_CANVAS);
+  g->fillRect(MIXED_GIF_X0 + MIXED_GIF_W, 0, SCREEN_W - MIXED_GIF_X0 - MIXED_GIF_W, SCREEN_H, TOK_COLOR_BG_CANVAS);
+  g->fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, MIXED_GIF_Y0, TOK_COLOR_BG_CANVAS);
+  drawLimitsColumn();
   drawBtcCard();
-  drawFooter();
+  drawStatusStrip();
 }
 
-// Timer region fill colour: COL_GOOD blended 50% into COL_BG (no alpha on the
-// panel), precomputed per RGB565 channel -> 0x1B65 (~rgb(25,109,41)).
-const uint16_t COL_GOOD_50 = 0x1B65;
-
-// Filled pie wedge from the hour hand clockwise to the reset angle.
+// ── ANALOG CLOCK (design.md 11.18) ─────────────────────────
+// Filled pace wedge from the hour hand clockwise to the reset angle.
 static void drawTimerWedge(int cx, int cy, int r, float startAngle, float endAngle) {
   float delta = fmodf(endAngle - startAngle, 360.0f);
   if (delta < 0) delta += 360.0f;
-  g->fillArc(cx, cy, r, 0, startAngle, startAngle + delta, COL_GOOD_50);
+  g->fillArc(cx, cy, r, 0, startAngle, startAngle + delta, TOK_COLOR_DATA_PACE_WEDGE);
 }
 
-// Minimal analog clock: circle, 12 ticks, hour/minute/second hands, the
-// green 5h-reset radius and (optionally) the timer wedge. Angles are
-// screen-space with -90deg so 0 points up.
+// Face (2px AA ring), 12 ticks, hour/minute hands, the pace wedge (Pace bars
+// only), the green 5h-reset radius, the accent second hand, the hub. Angles
+// are screen-space with -90deg so 0 points up.
 static void drawAnalogClock(int cx, int cy, int r, int hour24, int minute, int second,
                              bool haveReset, int resetHour24, int resetMinute) {
   float hourAngle = ((hour24 % 12) + minute / 60.0f) * 30.0f - 90.0f;
@@ -812,20 +1015,18 @@ static void drawAnalogClock(int cx, int cy, int r, int hour24, int minute, int s
   float minRad = minAngle * PI / 180.0f;
   float secRad = secAngle * PI / 180.0f;
 
+  aaRing(cx, cy, r, 2, TOK_COLOR_TEXT_PRIMARY);
   if (haveReset && cfgShowCountdown) {
     float resetAngleWedge = ((resetHour24 % 12) + resetMinute / 60.0f) * 30.0f - 90.0f;
-    drawTimerWedge(cx, cy, r - 1, hourAngle, resetAngleWedge);
+    drawTimerWedge(cx, cy, r - 2, hourAngle, resetAngleWedge);
   }
-
-  g->drawCircle(cx, cy, r, COL_TEXT);
-  g->drawCircle(cx, cy, r - 1, COL_TEXT);
   for (int i = 0; i < 12; i++) {
     float tickRad = (i * 30.0f - 90.0f) * PI / 180.0f;
     int x0 = cx + (int)(cosf(tickRad) * (r - 2));
     int y0 = cy + (int)(sinf(tickRad) * (r - 2));
     int x1 = cx + (int)(cosf(tickRad) * (r - 8));
     int y1 = cy + (int)(sinf(tickRad) * (r - 8));
-    g->drawWideLine(x0, y0, x1, y1, 1.0f, COL_TEXT);
+    g->drawWideLine(x0, y0, x1, y1, 1.0f, TOK_COLOR_TEXT_PRIMARY);
   }
 
   int hx = cx + (int)(cosf(hourRad) * r * 0.5f);
@@ -835,8 +1036,8 @@ static void drawAnalogClock(int cx, int cy, int r, int hour24, int minute, int s
   int sx = cx + (int)(cosf(secRad) * (r - 3));
   int sy = cy + (int)(sinf(secRad) * (r - 3));
 
-  g->drawWideLine(cx, cy, hx, hy, 3.0f, COL_TEXT);
-  g->drawWideLine(cx, cy, mx, my, 2.0f, COL_TEXT);
+  g->drawWideLine(cx, cy, hx, hy, 3.0f, TOK_COLOR_TEXT_PRIMARY);
+  g->drawWideLine(cx, cy, mx, my, 2.0f, TOK_COLOR_TEXT_PRIMARY);
 
   // Session (5h) reset time: a thin green radius, drawn before the second
   // hand so the sweeping hand stays on top.
@@ -845,50 +1046,55 @@ static void drawAnalogClock(int cx, int cy, int r, int hour24, int minute, int s
     float resetRad = resetAngle * PI / 180.0f;
     int rx = cx + (int)(cosf(resetRad) * (r - 3));
     int ry = cy + (int)(sinf(resetRad) * (r - 3));
-    g->drawWideLine(cx, cy, rx, ry, 0.8f, COL_GOOD);
+    g->drawWideLine(cx, cy, rx, ry, 0.8f, TOK_COLOR_DATA_PACE);
   }
 
-  g->drawWideLine(cx, cy, sx, sy, 1.2f, COL_ACCENT);
-  g->fillCircle(cx, cy, 3, COL_TEXT);
+  g->drawWideLine(cx, cy, sx, sy, 1.2f, TOK_COLOR_ACCENT);
+  aaFillCircle(cx, cy, 3, TOK_COLOR_TEXT_PRIMARY);
 }
 
-// AQI badge colours, per the US EPA / aqicn.org scale; fg picked per box by
-// WCAG contrast (black wins everywhere except Hazardous's dark maroon).
-// Mirrored exactly in simulator-s3.html's aqiColors().
+// ── AQI BADGE (design.md 11.16) ────────────────────────────
+// Fill from the external EPA / aqicn.org scale; text gray.0, except white on
+// Hazardous (both picked for contrast). Mirrored in simulator-s3.html.
 static void aqiColors(int aqi, uint16_t& bg, uint16_t& fg) {
-  if (aqi <= 50)       { bg = COL_GOOD;       fg = COL_TRACK_BLACK; } // Good
-  else if (aqi <= 100) { bg = COL_YELLOW;     fg = COL_TRACK_BLACK; } // Moderate
-  else if (aqi <= 150) { bg = COL_AQI_ORANGE; fg = COL_TRACK_BLACK; } // Unhealthy for Sensitive Groups
-  else if (aqi <= 200) { bg = COL_WARN;       fg = COL_TRACK_BLACK; } // Unhealthy
-  else if (aqi <= 300) { bg = COL_PURPLE;     fg = COL_TRACK_BLACK; } // Very Unhealthy
-  else                 { bg = COL_MAROON;     fg = COL_TEXT; }        // Hazardous
+  fg = TOK_GRAY_0;
+  if (aqi <= 50)       bg = TOK_AQI_GOOD;
+  else if (aqi <= 100) bg = TOK_AQI_MODERATE;
+  else if (aqi <= 150) bg = TOK_AQI_USG;
+  else if (aqi <= 200) bg = TOK_AQI_UNHEALTHY;
+  else if (aqi <= 300) bg = TOK_AQI_VERY_UNHEALTHY;
+  else               { bg = TOK_AQI_HAZARDOUS; fg = TOK_GRAY_6; }
 }
 
-// Rounded AQI badge with its number, top-left at (x, y). Returns its width.
-static const int AQI_BADGE_H = 24;
 static int aqiBadgeW(int aqi) {
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", aqi);
-  return textW(FONT_MDB, buf) + 12;
+  return textW(TOK_TYPE_HEADLINE, buf) + 2 * TOK_BADGE_PAD_X;
 }
 static void drawAqiBadge(int x, int y, int aqi) {
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", aqi);
   uint16_t bg, fg;
   aqiColors(aqi, bg, fg);
-  g->fillRoundRect(x, y, aqiBadgeW(aqi), AQI_BADGE_H, 5, bg);
-  drawText(FONT_MDB, x + 6, y + (AQI_BADGE_H - fontLineH(FONT_MDB)) / 2, buf, fg);
+  aaFillRoundRect(x, y, aqiBadgeW(aqi), TOK_BADGE_H, TOK_RADIUS_SM, bg);
+  drawText(TOK_TYPE_HEADLINE, x + TOK_BADGE_PAD_X, y + (TOK_BADGE_H - fontLineH(TOK_TYPE_HEADLINE)) / 2, buf, fg);
 }
 
-// Status page (page 0). Left column: 5h / week limits cards + BTC card.
-// Right column: Bangkok analog + digital clock and date (with the AQI
-// badge), then the weather card (now, today's H/L, next 3 hours) -- tap it
-// for the Weather overlay.
+// ── STATUS PAGE (page 0, design.md 7.4) ────────────────────
+// Left: 5H / WK limit cards + BTC. Right: the clock hero (analog r 76 beside
+// the digital readout, date and AQI badge), then the tappable weather strip.
+static const int CLOCK_R = 76;
+static const int CLOCK_CX = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_HERO + CLOCK_R;          // 272
+static const int CLOCK_CY = CLOCK_CARD_Y + CLOCK_CARD_H / 2;                                     // 104
+static const int READOUT_X = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_HERO + 2 * CLOCK_R + 1 + TOK_SPACE_MD;  // 361
+
 static void drawStatusPage() {
-  drawLimitsCard();
+  drawLimitsColumn();
   drawBtcCard();
-  drawCard(RIGHT_X, 3, RIGHT_W, 216);
-  drawCard(RIGHT_X, 221, RIGHT_W, 69);
+  drawCard(TOK_LAYOUT_COL_RIGHT_X, CLOCK_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, CLOCK_CARD_H);
+  const bool wxPressed = (pressedId == PRESS_WEATHER);
+  const uint16_t wxBg = wxPressed ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD;
+  drawCardSurface(TOK_LAYOUT_COL_RIGHT_X, WEATHER_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, WEATHER_CARD_H, wxBg);
 
   struct tm timeinfo;
   bool haveTime = getLocalTime(&timeinfo, 0);
@@ -902,313 +1108,254 @@ static void drawStatusPage() {
     resetMinute = (totalSec % 3600) / 60;
   }
 
-  // Row 1: analog clock, centred on the card.
-  const int clockCx = RIGHT_X + RIGHT_W / 2, clockCy = 80, clockR = 68;
   if (haveTime) {
-    drawAnalogClock(clockCx, clockCy, clockR, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
-                     haveReset, resetHour, resetMinute);
+    drawAnalogClock(CLOCK_CX, CLOCK_CY, CLOCK_R, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+                    haveReset, resetHour, resetMinute);
   } else {
-    g->drawCircle(clockCx, clockCy, clockR, COL_TEXT);
+    aaRing(CLOCK_CX, CLOCK_CY, CLOCK_R, 2, TOK_COLOR_TEXT_TERTIARY);
   }
 
-  // Row 2: digital time + date, centred under the clock.
+  // Readout column: time (numeral.lg), date (body), AQI badge -- 92px tall,
+  // vertically centred on the card (a hero readout may centre, 7.2 rule 5).
+  const bool haveAqi = cfgShowAqi && STATE.aqi >= 0;
+  const int readH = fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_XS + fontLineH(TOK_TYPE_BODY) +
+                    (haveAqi ? TOK_SPACE_SM + TOK_BADGE_H : 0);
+  int y = CLOCK_CARD_Y + TOK_SPACE_CARD_PAD_HERO +
+          (CLOCK_CARD_H - 2 * TOK_SPACE_CARD_PAD_HERO - readH) / 2;
   if (haveTime) {
     char hm[8];
     snprintf(hm, sizeof(hm), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-    drawTextC(FONT_LG, clockCx, 152, hm, COL_TEXT);
+    drawText(TOK_TYPE_NUMERAL_LG, READOUT_X, y, hm, TOK_COLOR_TEXT_PRIMARY);
   } else {
-    drawTextC(FONT_LG, clockCx, 152, "--:--", COL_TEXT2);
+    drawText(TOK_TYPE_NUMERAL_LG, READOUT_X, y, "--:--", TOK_COLOR_TEXT_TERTIARY);
   }
-
+  y += fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_XS;
   if (haveTime) {
     char buf[20];
     snprintf(buf, sizeof(buf), "%s %d %s", WDAY_ABBR[timeinfo.tm_wday], timeinfo.tm_mday,
              MON_ABBR[timeinfo.tm_mon]);
-    int dateW = textW(FONT_MD, buf);
-    // AQI badge appended after the date, e.g. "Mon 3 Aug [81]"; skipped when
-    // the Mac hasn't delivered a reading (STATE.aqi < 0).
-    bool haveAqi = cfgShowAqi && STATE.aqi >= 0;
-    int badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
-    int gap = haveAqi ? 8 : 0;
-    int startX = clockCx - (dateW + gap + badgeW) / 2;
-    const int dateY = 190;
-    drawText(FONT_MD, startX, dateY, buf, COL_TEXT2);
-    if (haveAqi) drawAqiBadge(startX + dateW + gap, dateY - 1, STATE.aqi);
+    drawText(TOK_TYPE_BODY, READOUT_X, y, buf, TOK_COLOR_TEXT_SECONDARY);
   } else {
-    drawTextC(FONT_MD, clockCx, 190, "--", COL_TEXT2);
+    drawText(TOK_TYPE_BODY, READOUT_X, y, "--", TOK_COLOR_TEXT_TERTIARY);
   }
+  y += fontLineH(TOK_TYPE_BODY) + TOK_SPACE_SM;
+  if (haveAqi) drawAqiBadge(READOUT_X, y, STATE.aqi);
 
-  // ── weather card (y 221..289) ──
-  // 1px divider between the "now" block and the next-3-hours forecast.
-  g->fillRect(323, 229, 1, 53, COL_BORDER);
+  // ── weather strip (compact card, tappable -> Weather sheet) ──
+  // H/L 20 | now 40 | 4 x 44 hourly | 24 disclosure column = 260 inner.
+  const int ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;   // 200
+  const int iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;           // 216
+  const int glyphCy = iy + 17 + 11;                                       // 244
+  const int lowY = iy + 17 + 22;                                          // 255
+  drawText(TOK_TYPE_NUMERAL_SM, ix, iy, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : String("--"),
+           STATE.weatherHigh > -900 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  drawText(TOK_TYPE_NUMERAL_SM, ix, lowY, STATE.weatherLow > -900 ? String(STATE.weatherLow) : String("--"),
+           STATE.weatherLow > -900 ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
 
-  // Today's high / low, stacked bright-over-grey at the card's left edge.
-  drawText(FONT_SM, 250, 231, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : String("--"), COL_TEXT);
-  drawText(FONT_SM, 250, 263, STATE.weatherLow > -900 ? String(STATE.weatherLow) : String("--"), COL_TEXT2);
+  // "Now": the current-item marker is accent.
+  const int nowCx = ix + 20 + 20;
+  drawTextC(TOK_TYPE_CAPTION, nowCx, iy, "Now", TOK_COLOR_ACCENT);
+  drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2f);
+  drawTempC(TOK_TYPE_NUMERAL_SM, nowCx, lowY, (int)round(STATE.weatherTempC), STATE.weatherTempC > -900);
 
-  // "Now": icon over temp, centred between the H/L column and the divider.
-  const int NOW_CENTER_X = 295;
-  drawWeatherIcon(NOW_CENTER_X, 241, STATE.weatherCode, 1.4f);
-  if (STATE.weatherTempC > -900) {
-    String tempStr = String((int)round(STATE.weatherTempC));
-    int tw = textW(FONT_MDB, tempStr) + textW(FONT_SM, "C");
-    int x = NOW_CENTER_X - tw / 2;
-    const int baseline = 279;
-    x = drawText(FONT_MDB, x, baseline - fontAscent(FONT_MDB), tempStr, COL_TEXT);
-    drawText(FONT_SM, x, baseline - fontAscent(FONT_SM), "C", COL_TEXT2);
-  } else {
-    drawTextC(FONT_MDB, NOW_CENTER_X, 261, "--", COL_TEXT);
-  }
-
-  // Next 3 hours: weatherHourly[] starts at the current hour (index 0, the
-  // "now" block), so indices 1..3. Columns: hour label, icon, temp.
-  const int SLOT_X = 324, SLOT_W = 51;
-  for (int i = 0; i < 3; i++) {
+  // Next 4 hours: weatherHourly[] starts at the current hour (the "now"
+  // column), so indices 1..4.
+  for (int i = 0; i < 4; i++) {
     int idx = i + 1;
-    int cx = SLOT_X + i * SLOT_W + SLOT_W / 2;
+    int cx = ix + 60 + i * 44 + 22;
     bool have = STATE.weatherHourlyCount > idx;
-
     char hbuf[4];
     if (have) snprintf(hbuf, sizeof(hbuf), "%02d", STATE.weatherHourly[idx].hour);
-    else snprintf(hbuf, sizeof(hbuf), "--");
-    drawTextC(FONT_SM, cx, 225, hbuf, COL_TEXT2);
-
-    drawWeatherIcon(cx, 254, have ? STATE.weatherHourly[idx].code : -1, 1.2f);
-
-    char tbuf[6];
-    if (have) snprintf(tbuf, sizeof(tbuf), "%dC", STATE.weatherHourly[idx].tempC);
-    else snprintf(tbuf, sizeof(tbuf), "--");
-    drawTextC(FONT_SM, cx, 268, tbuf, COL_TEXT);
+    drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? hbuf : "--",
+              have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
+    drawWeatherIcon(cx, glyphCy, have ? STATE.weatherHourly[idx].code : -1, 1.2f);
+    drawTempC(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? STATE.weatherHourly[idx].tempC : 0, have);
   }
+  // Disclosure chevron: a hint, always tertiary; the whole card is the target.
+  drawChevron(TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - TOK_SPACE_CARD_PAD_COMPACT_H - 8,
+              WEATHER_CARD_Y + WEATHER_CARD_H / 2, TOK_COLOR_TEXT_TERTIARY);
 }
 
-// One Device Stats block: title, bar + percent, subtitle.
-static void drawFullStatBlock(int y, const char* title, int percent, const String& sub, uint16_t color) {
-  drawText(FONT_SMB, 15, y, title, COL_TEXT2);
-  const int barX = 15, barY = y + 19, barW = 369, barH = 14;
-  drawPercentBar(barX, barY, barW, barH, percent, color);
-  drawText(FONT_MDB, barX + barW + 12, barY + (barH - fontLineH(FONT_MDB)) / 2,
-           percent >= 0 ? String(percent) + "%" : String("--"), COL_TEXT);
-  if (sub.length()) drawText(FONT_SM, 15, barY + barH + 2, sub, COL_TEXT2);
+// ── DEVICE STATS SHEET ─────────────────────────────────────
+// Modal header ("Device stats"), then one card of five data rows: label,
+// detail (caption) + percent (headline), a data.system meter (status.error
+// at >= 80%, with the % beside it so colour is never the only cue).
+static void drawDeviceRow(int y, const char* label, const String& detail, int percent) {
+  const int x = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD, r = TOK_LAYOUT_CONTENT_X1 - TOK_SPACE_CARD_PAD;
+  drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
+  String pct = percent >= 0 ? String(percent) + "%" : String("--");
+  drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  int dx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
+  if (detail.length())
+    drawTextR(TOK_TYPE_CAPTION, dx, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), detail,
+              TOK_COLOR_TEXT_SECONDARY);
+  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent,
+            percent >= 80 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_DATA_SYSTEM);
 }
 
-// Device Stats overlay: reached only by tapping the footer's CPU/ROM/RAM line
-// (DEVICE_HIT_*); full-screen, no footer, any tap dismisses.
 static void drawDevicePage() {
-  drawText(FONT_LG, 15, 8, "Device Stats", COL_TEXT);
+  drawModalHeader(false, "Device stats", pressedId == PRESS_CLOSE);
+  const int cardY = TOK_LAYOUT_HEADER_CONTENT_Y;
+  drawCard(TOK_LAYOUT_CONTENT_X0, cardY, TOK_LAYOUT_CONTENT_W, 5 * ROW_H + 4 * TOK_SPACE_STACK + 2 * TOK_SPACE_CARD_PAD);
+  int y = cardY + TOK_SPACE_CARD_PAD;
 
   int cpuInt = (int)(cpuPercentAvg + 0.5f);
-  drawFullStatBlock(48, "CPU USAGE (render loop duty cycle, live)", cpuInt, "",
-                    cpuInt >= 80 ? COL_WARN : COL_BLUE);
-
+  drawDeviceRow(y, "CPU", "Render loop duty cycle", cpuInt);
+  y += ROW_STEP;
   uint32_t flashUsed, flashTotal;
   int flashPct = flashPercent(flashUsed, flashTotal);
-  drawFullStatBlock(98, "FLASH (APP PARTITION)", flashPct,
-                    fmtKB(flashUsed) + " / " + fmtKB(flashTotal), flashPct >= 80 ? COL_WARN : COL_BLUE);
-
+  drawDeviceRow(y, "Flash (app partition)", fmtKB(flashUsed) + " / " + fmtKB(flashTotal), flashPct);
+  y += ROW_STEP;
   uint32_t ramUsed, ramTotal;
   int ramPct = staticRamPercent(ramUsed, ramTotal);
-  drawFullStatBlock(152, "INTERNAL RAM", ramPct,
-                    fmtKB(ramUsed) + " / " + fmtKB(ramTotal), ramPct >= 80 ? COL_WARN : COL_BLUE);
-
+  drawDeviceRow(y, "Internal RAM", fmtKB(ramUsed) + " / " + fmtKB(ramTotal), ramPct);
+  y += ROW_STEP;
   uint32_t psUsed, psTotal;
   int psPct = psramPercent(psUsed, psTotal);
-  drawFullStatBlock(206, "PSRAM", psPct,
-                    fmtKB(psUsed) + " / " + fmtKB(psTotal), psPct >= 80 ? COL_WARN : COL_BLUE);
-
+  drawDeviceRow(y, "PSRAM", fmtKB(psUsed) + " / " + fmtKB(psTotal), psPct);
+  y += ROW_STEP;
   uint64_t sdUsed = 0, sdTotal = 0;
   int sdPct = cachedSdCapacityPercent(sdUsed, sdTotal);
-  drawFullStatBlock(260, "SD CARD", sdPct,
-                    sdPct >= 0 ? fmtGB(sdUsed) + " / " + fmtGB(sdTotal) : String("SD CARD NOT FOUND"),
-                    sdPct >= 80 ? COL_WARN : COL_BLUE);
+  drawDeviceRow(y, "SD card", sdPct >= 0 ? fmtGB(sdUsed) + " / " + fmtGB(sdTotal) : String("Not found"), sdPct);
 }
 
-// Weather detail overlay (tap the status-page weather card). Hero (icon ·
-// temp · condition · H/L · AQI), hourly 6-col strip, 5-day range bars.
-// Full 480x320, no footer; any tap dismisses. Twin of simulator-s3.html.
+// ── WEATHER SHEET ──────────────────────────────────────────
+// The hero card takes the header band in place of a title (design.md 7.3):
+// x 60..471, y 8..71. Then the hourly card (next 6) and the 5-day card.
+static const int WX_HERO_X = TOK_HEADER_TITLE_X, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
+static const int WX_HERO_W = TOK_LAYOUT_CONTENT_X1 - WX_HERO_X, WX_HERO_H = 64;
+static const int WX_HOURLY_Y = WX_HERO_Y + WX_HERO_H + TOK_SPACE_GUTTER;          // 80
+static const int WX_HOURLY_H = 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS + 23 + 2 * TOK_SPACE_CARD_PAD_COMPACT_V;  // 92
+static const int WX_DAILY_Y = WX_HOURLY_Y + WX_HOURLY_H + TOK_SPACE_GUTTER;       // 180
+static const int WX_DAILY_H = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - WX_DAILY_Y;          // 132
+
 static void drawWeatherPage() {
-  g->fillScreen(COL_BG);
-  const int CARD_X = 15, CARD_W = 450;
+  drawModalHeader(false, nullptr, pressedId == PRESS_CLOSE);
 
-  // ── Hero card (15, 5, 450, 72) ───────────────────────────
-  drawCard(CARD_X, 5, CARD_W, 72);
-  drawWeatherIcon(44, 41, STATE.weatherCode, 2.0f);
-  const int tempX = 72;
-
+  // ── Hero: glyph.content.lg, the display temperature + degree ring,
+  //    condition (headline) over H / L (body), AQI badge right ──
+  drawCard(WX_HERO_X, WX_HERO_Y, WX_HERO_W, WX_HERO_H);
+  const int hx = WX_HERO_X + TOK_SPACE_CARD_PAD_HERO;
+  drawWeatherIcon(hx + 18, WX_HERO_Y + WX_HERO_H / 2, STATE.weatherCode, 2.0f);
+  const int tempY = WX_HERO_Y + (WX_HERO_H - fontLineH(TOK_TYPE_DISPLAY)) / 2;
+  const int tempX = hx + 36 + TOK_SPACE_SM;
   int metaX;
   if (STATE.weatherTempC > -900) {
     char tbuf[6];
     snprintf(tbuf, sizeof(tbuf), "%d", (int)round(STATE.weatherTempC));
-    int x = drawText(FONT_XL, tempX, 16, tbuf, COL_TEXT);
-    // Degree ring (drawn, like the CYD's raised "o") -- muted so digits dominate.
-    g->drawCircle(x + 6, 24, 4, COL_TEXT2);
-    g->drawCircle(x + 6, 24, 3, COL_TEXT2);
-    metaX = x + 24;
+    int x = drawText(TOK_TYPE_NUMERAL_HERO, tempX, tempY, tbuf, TOK_COLOR_TEXT_PRIMARY);
+    int capTop = tempY + fontAscent(TOK_TYPE_DISPLAY) - 29;  // capH ~ 0.73 x 40
+    metaX = drawDegreeRing(x + TOK_SPACE_HAIR, capTop, TOK_COLOR_SURFACE_CARD) + TOK_SPACE_LG;
   } else {
-    int x = drawText(FONT_XL, tempX, 16, "--", COL_TEXT2);
-    metaX = x + 20;
+    metaX = drawText(TOK_TYPE_NUMERAL_HERO, tempX, tempY, "--", TOK_COLOR_TEXT_TERTIARY) + TOK_SPACE_LG;
   }
 
-  // AQI badge at the hero card's top-right, left of the corner overlays (the
-  // sleep pill, and the Battery Save icon's box -- reserved even when that
-  // icon is hidden, so the badge never jumps); the condition text truncates
-  // around it.
-  bool haveAqi = cfgShowAqi && STATE.aqi >= 0;
-  int badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
-  const int badgeX = BATTERY_ICON_X0 - 8 - badgeW;
-  const int metaMaxX = (haveAqi ? badgeX : BATTERY_ICON_X0) - 10;
-
+  // AQI badge right, 8px clear of corner slot b (reserved even while hidden).
+  const bool haveAqi = cfgShowAqi && STATE.aqi >= 0;
+  const int badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
+  const int badgeX = TOK_CORNER_INK_X1 - badgeW;
+  const int metaMaxX = (haveAqi ? badgeX - TOK_SPACE_SM : TOK_CORNER_INK_X1);
+  const int metaY = WX_HERO_Y + (WX_HERO_H - (23 + TOK_SPACE_XS + 23)) / 2;
   {
     const char* cond = STATE.weatherCondition[0] ? STATE.weatherCondition : "--";
-    char cbuf[20];
-    int n = 0;
-    // Truncate by measured width, not a character count (proportional font).
-    while (cond[n] && n < (int)sizeof(cbuf) - 1) {
-      cbuf[n] = cond[n];
-      cbuf[n + 1] = 0;
-      if (metaX + textW(FONT_MDB, cbuf) > metaMaxX) break;
-      n++;
-    }
-    cbuf[n] = 0;
-    drawText(FONT_MDB, metaX, 14, cbuf, STATE.weatherCondition[0] ? COL_TEXT : COL_TEXT2);
+    drawText(TOK_TYPE_HEADLINE, metaX, metaY, fitText(TOK_TYPE_HEADLINE, cond, metaMaxX - metaX),
+             STATE.weatherCondition[0] ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   }
-
-  // High / Low -- "H 35   L 26", under the condition.
   {
-    char hStr[5], lStr[5];
-    if (STATE.weatherHigh > -900) snprintf(hStr, sizeof(hStr), "%d", STATE.weatherHigh);
-    else snprintf(hStr, sizeof(hStr), "--");
-    if (STATE.weatherLow > -900) snprintf(lStr, sizeof(lStr), "%d", STATE.weatherLow);
-    else snprintf(lStr, sizeof(lStr), "--");
-    int x = metaX;
-    x = drawText(FONT_MD, x, 43, "H ", COL_TEXT2);
-    x = drawText(FONT_MD, x, 43, hStr, COL_TEXT);
-    x = drawText(FONT_MD, x + 16, 43, "L ", COL_TEXT2);
-    drawText(FONT_MD, x, 43, lStr, COL_TEXT);
+    const int y = metaY + 23 + TOK_SPACE_XS;
+    int x = drawText(TOK_TYPE_BODY, metaX, y, "H ", TOK_COLOR_TEXT_SECONDARY);
+    if (STATE.weatherHigh > -900) x = drawText(TOK_TYPE_BODY, x, y, String(STATE.weatherHigh), TOK_COLOR_TEXT_PRIMARY);
+    else x = drawText(TOK_TYPE_BODY, x, y, "--", TOK_COLOR_TEXT_TERTIARY);
+    x = drawText(TOK_TYPE_BODY, x + TOK_SPACE_LG, y, "L ", TOK_COLOR_TEXT_SECONDARY);
+    if (STATE.weatherLow > -900) drawText(TOK_TYPE_BODY, x, y, String(STATE.weatherLow), TOK_COLOR_TEXT_PRIMARY);
+    else drawText(TOK_TYPE_BODY, x, y, "--", TOK_COLOR_TEXT_TERTIARY);
   }
+  if (haveAqi) drawAqiBadge(badgeX, WX_HERO_Y + (WX_HERO_H - TOK_BADGE_H) / 2, STATE.aqi);
 
-  if (haveAqi) drawAqiBadge(badgeX, 12, STATE.aqi);
-
-  // ── Hourly (next 6) (15, 81, 450, 78) ────────────────────
-  drawCard(CARD_X, 81, CARD_W, 78);
-  const int hourCount = STATE.weatherHourlyCount > 0
-                          ? (int)STATE.weatherHourlyCount : WEATHER_HOURLY_N;
-  const int slotW = 75;  // 6 x 75 = 450
-  for (int i = 0; i < hourCount && i < WEATHER_HOURLY_N; i++) {
-    int sx = CARD_X + i * slotW;
-    int cx = sx + slotW / 2;
+  // ── Hourly (next 6): hour (caption), glyph.content.md, temperature (body) ──
+  drawCard(TOK_LAYOUT_CONTENT_X0, WX_HOURLY_Y, TOK_LAYOUT_CONTENT_W, WX_HOURLY_H);
+  const int innerX = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD_COMPACT_H;
+  const int innerW = TOK_LAYOUT_CONTENT_W - 2 * TOK_SPACE_CARD_PAD_COMPACT_H;
+  const int slotW = innerW / WEATHER_HOURLY_N;
+  const int slotX0 = innerX + (innerW - slotW * WEATHER_HOURLY_N) / 2;
+  const int hy = WX_HOURLY_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  for (int i = 0; i < WEATHER_HOURLY_N; i++) {
+    int cx = slotX0 + i * slotW + slotW / 2;
     bool have = (i < (int)STATE.weatherHourlyCount);
     int hour = have ? STATE.weatherHourly[i].hour : -1;
-    int temp = have ? STATE.weatherHourly[i].tempC : 0;
-    int code = have ? STATE.weatherHourly[i].code : -1;
-
-    // First slot = current hour: accent tick + accent hour label.
-    if (i == 0) g->fillRoundRect(sx + 10, 83, slotW - 20, 3, 1, COL_ACCENT);
-
     char hbuf[4];
     if (have && hour >= 0) snprintf(hbuf, sizeof(hbuf), "%02d", hour);
-    else snprintf(hbuf, sizeof(hbuf), "--");
-    drawTextC(FONT_SM, cx, 89, hbuf, i == 0 ? COL_ACCENT : COL_TEXT2);
-
-    drawWeatherIcon(cx, 118, code, 1.5f);
-
-    if (have) {
-      char tbuf[5];
-      snprintf(tbuf, sizeof(tbuf), "%d", temp);
-      drawTextC(FONT_MD, cx, 133, tbuf, COL_TEXT);
-    } else {
-      drawTextC(FONT_MD, cx, 133, "--", COL_TEXT2);
-    }
+    // First slot = the current hour: the current-item marker (accent).
+    drawTextC(TOK_TYPE_NUMERAL_SM, cx, hy, (have && hour >= 0) ? hbuf : "--",
+              i == 0 ? TOK_COLOR_ACCENT : (have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY));
+    drawWeatherIcon(cx, hy + 17 + TOK_SPACE_XS + 14, have ? STATE.weatherHourly[i].code : -1, 1.5f);
+    const int ty = hy + 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS;
+    if (have) drawTextC(TOK_TYPE_BODY, cx, ty, String(STATE.weatherHourly[i].tempC), TOK_COLOR_TEXT_PRIMARY);
+    else drawTextC(TOK_TYPE_BODY, cx, ty, "--", TOK_COLOR_TEXT_TERTIARY);
   }
 
-  // ── 5-day (15, 163, 450, 152) ────────────────────────────
-  drawCard(CARD_X, 163, CARD_W, 152);
-
+  // ── 5-day: day | glyph | low | range meter | high, rows one line box apart ──
+  drawCard(TOK_LAYOUT_CONTENT_X0, WX_DAILY_Y, TOK_LAYOUT_CONTENT_W, WX_DAILY_H);
   int minT = 100, maxT = -100;
   for (uint8_t i = 0; i < STATE.weatherDailyCount; i++) {
     if (STATE.weatherDaily[i].low < minT) minT = STATE.weatherDaily[i].low;
     if (STATE.weatherDaily[i].high > maxT) maxT = STATE.weatherDaily[i].high;
   }
-  if (maxT <= minT) {
-    minT = 20;
-    maxT = 40;
-  }
-
-  // Columns: day 28 | icon centre 84 | low right@136 | bar 144..408 | high 416
-  const int dayY0 = 166;
-  const int dayStep = 30;
-  const int barX = 144, barW = 264, barH = 8;
-  const int dayCount = STATE.weatherDailyCount > 0
-                         ? (int)STATE.weatherDailyCount : WEATHER_DAILY_N;
-  for (int i = 0; i < dayCount && i < WEATHER_DAILY_N; i++) {
-    int y = dayY0 + i * dayStep;
+  if (maxT <= minT) { minT = 20; maxT = 40; }
+  const int dayX = innerX, iconCx = innerX + 64, lowR = innerX + 120;
+  const int barX = TOK_LAYOUT_COL_RIGHT_X - 36, barW = 260, highX = barX + barW + TOK_SPACE_SM;
+  const int rowH = fontLineH(TOK_TYPE_BODY);
+  const int dy0 = WX_DAILY_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
+  for (int i = 0; i < WEATHER_DAILY_N; i++) {
+    int y = dy0 + i * rowH;
     bool have = (i < (int)STATE.weatherDailyCount);
     int wd = have ? STATE.weatherDaily[i].wday : -1;
     int lo = have ? STATE.weatherDaily[i].low : 0;
     int hi = have ? STATE.weatherDaily[i].high : 0;
-    int code = have ? STATE.weatherDaily[i].code : -1;
-
-    // Vertically centre text/icon/bar in the 30px row.
-    const int textY = y + (dayStep - fontLineH(FONT_MD)) / 2;
-    const int barY = y + (dayStep - barH) / 2;
-
-    drawText(FONT_MD, 28, textY, (have && wd >= 0 && wd < 7) ? WDAY_ABBR[wd] : "---",
-             i == 0 ? COL_ACCENT : COL_TEXT);
-
-    drawWeatherIcon(90, y + dayStep / 2, code, 1.2f);
-
-    char lbuf[5], hbuf[5];
+    bool haveWd = have && wd >= 0 && wd < 7;
+    drawText(TOK_TYPE_BODY, dayX, y, haveWd ? WDAY_ABBR[wd] : "--",
+             !haveWd ? TOK_COLOR_TEXT_TERTIARY : (i == 0 ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_PRIMARY));
+    drawWeatherIcon(iconCx, y + rowH / 2, have ? STATE.weatherDaily[i].code : -1, 1.0f);
+    if (have) drawTextR(TOK_TYPE_BODY, lowR, y, String(lo), TOK_COLOR_TEXT_SECONDARY);
+    else drawTextR(TOK_TYPE_BODY, lowR, y, "--", TOK_COLOR_TEXT_TERTIARY);
+    const int barY = y + 12 - TOK_METER_MD / 2;
+    aaFillRoundRect(barX, barY, barW, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_FILL_TRACK);
     if (have) {
-      snprintf(lbuf, sizeof(lbuf), "%d", lo);
-      snprintf(hbuf, sizeof(hbuf), "%d", hi);
-    } else {
-      snprintf(lbuf, sizeof(lbuf), "--");
-      snprintf(hbuf, sizeof(hbuf), "--");
-    }
-    drawTextR(FONT_MD, barX - 8, textY, lbuf, COL_TEXT2);
-
-    g->fillRoundRect(barX, barY, barW, barH, 4, COL_TRACK);
-    if (have && maxT > minT) {
       float span = (float)(maxT - minT);
       int x0 = barX + (int)((lo - minT) / span * barW);
       int x1 = barX + (int)((hi - minT) / span * barW);
-      if (x1 - x0 < barH) x1 = x0 + barH;
-      g->fillRoundRect(x0, barY, x1 - x0, barH, 4, COL_ACCENT);
+      if (x1 - x0 < TOK_METER_MD) x1 = x0 + TOK_METER_MD;
+      aaFillRoundRect(x0, barY, x1 - x0, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_TEXT_PRIMARY);
     }
-
-    drawText(FONT_MD, barX + barW + 8, textY, hbuf, COL_TEXT);
+    if (have) drawText(TOK_TYPE_BODY, highX, y, String(hi), TOK_COLOR_TEXT_PRIMARY);
+    else drawText(TOK_TYPE_BODY, highX, y, "--", TOK_COLOR_TEXT_TERTIARY);
   }
 }
 
+// ── RENDER ─────────────────────────────────────────────────
 void render() {
   // The cat pages are animated frame-by-frame by gifTick() in loop(), not
-  // drawn here; offline is also gifTick()'s (cats double as the offline
-  // screen), so render() is never called while offline.
-  if (currentPage == GIF_PAGE || currentPage == MIXED_PAGE) return;
+  // drawn here (unless a sheet is up over them); offline is also gifTick()'s.
+  bool sheet = weatherPageOpen || devicePageOpen;
+  if (!sheet && (currentPage == GIF_PAGE || currentPage == MIXED_PAGE)) return;
   uint32_t startUs = micros();
   // Hold the lock across all STATE reads, release before the present.
   lockState();
+  g->fillScreen(TOK_COLOR_BG_CANVAS);
   if (weatherPageOpen) {
     drawWeatherPage();
-    drawBatterySaveIcon();
-    drawSleepButton();
   } else if (devicePageOpen) {
-    g->fillScreen(COL_BG);
     drawDevicePage();
-    drawBatterySaveIcon();
-    drawSleepButton();
   } else {
-    g->fillScreen(COL_BG);
     switch (currentPage) {
       case 0: drawStatusPage(); break;
-      case 1: drawProjectsPage(); break;  // projects (7d) + 7-day trend combined
+      case 1: drawProjectsPage(); break;  // top projects + 7-day trend
       case 2: drawLimitsPage(); break;    // /usage-style limits panel
-      case 5: drawNotePage(); break;      // left column + note text pane
+      case 5: drawNotePage(); break;      // left column + note pane
     }
-    drawFooter();
-    drawBatterySaveIcon();
-    drawSleepButton();
+    drawStatusStrip();
   }
+  drawSystemCorner(false);
   unlockState();
   uint32_t drawUs = micros() - startUs;
   presentFrame();
@@ -1222,4 +1369,25 @@ void render() {
                   (unsigned long)drawUs, (unsigned long)displayLastPresentUs(),
                   (unsigned long)displayLastTeWaitUs());
   }
+}
+
+// ── MEDIA OVERLAYS (gif_player.cpp) ────────────────────────
+// Reset readout on the full-screen cat page and the offline screen: the
+// usage % (data.usage) + "Resets 03:19" (primary), headline -- one weight up
+// from body, as text over media must be -- on a plate, bottom-left.
+void drawResetPlate() {
+  lockState();
+  int percent = STATE.sessionPercent;
+  String resets = STATE.sessionResets;
+  unlockState();
+  if (percent < 0 || !resets.length()) return;
+  String a = String(percent) + "%", b = "Resets " + resets;
+  const int padX = TOK_SPACE_SM, padY = 6;
+  const int gap = TOK_SPACE_SM;
+  int w = textW(TOK_TYPE_HEADLINE, a) + gap + textW(TOK_TYPE_HEADLINE, b) + 2 * padX;
+  int h = fontLineH(TOK_TYPE_HEADLINE) + 2 * padY;
+  int x = TOK_SPACE_SM, y = SCREEN_H - TOK_SPACE_SM - h;
+  aaFillRoundRect(x, y, w, h, TOK_RADIUS_SM, TOK_COLOR_PLATE);
+  int tx = drawText(TOK_TYPE_HEADLINE, x + padX, y + padY, a, TOK_COLOR_DATA_USAGE);
+  drawText(TOK_TYPE_HEADLINE, tx + gap, y + padY, b, TOK_COLOR_TEXT_PRIMARY);
 }
