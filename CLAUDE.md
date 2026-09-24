@@ -150,9 +150,11 @@ are gitignored.
   **no calibration keys** exist (the CYD's `touch_*` NVS keys were dropped).
 - **Cats (`gif_player.cpp`):** RAW-mode decode composited into `gifCanvas`
   (GIF-sized RGB565 in PSRAM), then blitted into `frame` — 1:1 centred on the
-  full-screen cat page, or **2× box-filtered** into the mixed page's 240px
-  pane. Compositing on a GIF-owned canvas is what keeps transparency/disposal
-  right under the downscale and the overlays. Frame delays are honoured
+  full-screen cat page, or **cover-fit** (nearest-sampled, uniform scale
+  computed once per GIF open, cropped to fill — never stretched) into the
+  mixed page's 240px pane. Compositing on a GIF-owned canvas is what keeps
+  transparency/disposal right under the resize and the overlays. Frame delays
+  are honoured
   as-is (no 12fps ceiling). A layout flip under an open GIF (going
   offline/online on the mixed page) reopens it for the new layout.
   **Never present between a close and the next decoded frame.** Opening

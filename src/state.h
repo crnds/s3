@@ -158,15 +158,18 @@ const int DEVICE_HIT_Y0 = FOOTER_Y0, DEVICE_HIT_Y1 = SCREEN_H;
 const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
 const int SETTINGS_HIT_Y0 = FOOTER_Y0, SETTINGS_HIT_Y1 = SCREEN_H;
 
-// Cat pages only (GIF_PAGE/MIXED_PAGE), and only while Cat Shuffle is FIXED:
-// the middle third of the screen advances to the next random cat. The outer
-// thirds deliberately fall through to the normal left/right page swipe, which
-// still splits at SWIPE_SPLIT_X (240) -- 160 and 320 sit either side of it,
-// so tapping outside this band navigates exactly as it does on every other
-// page. The CYD's first version of this claimed the whole right half, which
-// swallowed every forward tap and made later pages unreachable from the cat
-// pages (and from everywhere while offline, since catMode is true on any page
-// then). Don't widen this band back over the split.
+// Cat pages only, and only while Cat Shuffle is FIXED: tapping advances to
+// the next random cat instead of navigating. Two separate bands, because the
+// cat only fills the whole screen on one of the two pages:
+//   - GIF_PAGE (full-screen cat): the middle third of the screen. The outer
+//     thirds deliberately fall through to the normal left/right page swipe,
+//     which still splits at SWIPE_SPLIT_X (240) -- 160 and 320 sit either
+//     side of it, so tapping outside this band navigates exactly as it does
+//     on every other page. The CYD's first version of this claimed the whole
+//     right half, which swallowed every forward tap and made later pages
+//     unreachable from the cat pages (and from everywhere while offline,
+//     since catMode is true on any page then). Don't widen this band back
+//     over the split.
 const int CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;
 
 // Screen-sleep pill (drawSleepButton() in pages.cpp), top-right corner of
@@ -491,11 +494,18 @@ void forgetWifiFromFlash();
 // ── PAGES / RENDER (pages.cpp) ─────────────────────────────
 void render();
 void drawMixedPageStatic();
-// Mixed page's cat pane (right column): the GIF player draws the cat 2x
-// downscaled into it. Defined here so pages.cpp's placeholder and
-// gif_player.cpp agree.
+// Mixed page's cat pane (right column): the GIF player cover-fits the cat
+// into it. Defined here so pages.cpp's placeholder and gif_player.cpp agree.
 const int MIXED_GIF_X0 = 240, MIXED_GIF_W = 240;
 const int MIXED_GIF_Y0 = 3, MIXED_GIF_H = CONTENT_Y1 - 3;
+//   - MIXED_PAGE (cat pane on the right half only): the left half of the
+//     pane, bounded to the pane's own height so it doesn't reach down into
+//     the footer below it. MIXED_GIF_X0 already sits at SWIPE_SPLIT_X, so the
+//     pane's right half is untouched and keeps doing the normal forward
+//     swipe -- only the pane's left half changes from "next page" to "next
+//     cat".
+const int MIXED_CAT_ADVANCE_X0 = MIXED_GIF_X0, MIXED_CAT_ADVANCE_X1 = MIXED_GIF_X0 + MIXED_GIF_W / 2;
+const int MIXED_CAT_ADVANCE_Y0 = 0, MIXED_CAT_ADVANCE_Y1 = CONTENT_Y1;
 void drawBatterySaveIcon();
 void drawSleepButton();
 

@@ -267,7 +267,7 @@ const SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
 const SETTINGS_HIT_Y0 = FOOTER_Y0, SETTINGS_HIT_Y1 = SCREEN_H;
 // Middle-third "next cat" band while Cat Shuffle is FIXED. Not playback --
 // it decides page navigation, so it is kept in parity (see state.h).
-const CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;
+const CAT_ADVANCE_X0 = 160, CAT_ADVANCE_X1 = 320;  // GIF_PAGE: middle third of the screen
 // Screen-sleep pill (top-right of every screen) + its bigger hit box; the
 // Battery Save icon sits just left of it.
 const SLEEP_BTN_X0 = 432, SLEEP_BTN_Y0 = 8, SLEEP_BTN_W = 40, SLEEP_BTN_H = 9;
@@ -275,6 +275,10 @@ const SLEEP_WAKE_GUARD_MS = 600;  // ignore the tap that put it to sleep
 const SLEEP_HIT_X0 = 416, SLEEP_HIT_X1 = SCREEN_W, SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = 36;
 const BATTERY_ICON_X0 = 400, BATTERY_ICON_X1 = 428, BATTERY_ICON_Y0 = 3, BATTERY_ICON_Y1 = 21;
 const MIXED_GIF_X0 = 240, MIXED_GIF_W = 240, MIXED_GIF_Y0 = 3, MIXED_GIF_H = CONTENT_Y1 - 3;
+// MIXED_PAGE: left half of the cat pane, bounded to the pane's own height --
+// twin of MIXED_CAT_ADVANCE_* in state.h.
+const MIXED_CAT_ADVANCE_X0 = MIXED_GIF_X0, MIXED_CAT_ADVANCE_X1 = MIXED_GIF_X0 + MIXED_GIF_W / 2;
+const MIXED_CAT_ADVANCE_Y0 = 0, MIXED_CAT_ADVANCE_Y1 = CONTENT_Y1;
 
 const SHIFT_ORBIT = [[0,0],[1,0],[2,0],[2,-1],[2,-2],[1,-2],[0,-2],[0,-1]];
 let SHIFT_STEP_MS = 180000;  // firmware default; flash "pixel_shift_min" * 60000
@@ -1864,9 +1868,15 @@ function handleTap(tx, ty) {
     STATE.devicePageOpen = true;
     return;
   }
-  if (STATE.catShuffleSec < 0 && (STATE.currentPage === GIF_PAGE || STATE.currentPage === MIXED_PAGE) &&
+  if (STATE.catShuffleSec < 0 && STATE.currentPage === GIF_PAGE &&
       tx >= CAT_ADVANCE_X0 && tx < CAT_ADVANCE_X1) {
     console.log('[sim] Cat Shuffle FIXED: middle-third tap advances the cat on the device (page unchanged).');
+    return;
+  }
+  if (STATE.catShuffleSec < 0 && STATE.currentPage === MIXED_PAGE &&
+      tx >= MIXED_CAT_ADVANCE_X0 && tx < MIXED_CAT_ADVANCE_X1 &&
+      ty >= MIXED_CAT_ADVANCE_Y0 && ty < MIXED_CAT_ADVANCE_Y1) {
+    console.log('[sim] Cat Shuffle FIXED: left-half-of-pane tap advances the cat on the device (page unchanged).');
     return;
   }
   const forward = tx >= SWIPE_SPLIT_X;

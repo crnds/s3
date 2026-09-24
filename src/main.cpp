@@ -531,12 +531,19 @@ void loop() {
                ty >= DEVICE_HIT_Y0 && ty < DEVICE_HIT_Y1) {
       devicePageOpen = true;
       render();
-    } else if (catShuffleFixed &&
-               (currentPage == GIF_PAGE || currentPage == MIXED_PAGE) &&
+    } else if (catShuffleFixed && currentPage == GIF_PAGE &&
                tx >= CAT_ADVANCE_X0 && tx < CAT_ADVANCE_X1) {
-      // Cat Shuffle FIXED: only the MIDDLE third changes the cat, and only on
-      // the two real cat pages (gated on currentPage, not catMode -- see
-      // CAT_ADVANCE_X0/X1 in state.h). The outer thirds still navigate.
+      // Cat Shuffle FIXED, full-screen cat page: only the MIDDLE third
+      // changes the cat (CAT_ADVANCE_X0/X1 in state.h). The outer thirds
+      // still navigate.
+      gifPlayerResetForPageChange();
+      flashTouchCenter();
+    } else if (catShuffleFixed && currentPage == MIXED_PAGE &&
+               tx >= MIXED_CAT_ADVANCE_X0 && tx < MIXED_CAT_ADVANCE_X1 &&
+               ty >= MIXED_CAT_ADVANCE_Y0 && ty < MIXED_CAT_ADVANCE_Y1) {
+      // Cat Shuffle FIXED, mixed page: the LEFT HALF of the cat pane changes
+      // the cat (MIXED_CAT_ADVANCE_* in state.h); the pane's right half still
+      // does the normal forward swipe.
       gifPlayerResetForPageChange();
       flashTouchCenter();
     } else {

@@ -6,11 +6,12 @@
 //
 // What changed from the CYD player: every GIF frame is composited in RAW mode
 // into gifCanvas, a GIF-sized RGB565 canvas in PSRAM, and only then copied
-// into `frame` -- 1:1 on the full-screen cat page, or 2x box-filtered into the
-// mixed page's 240px pane. Compositing on a canvas that belongs to the GIF
-// (rather than straight onto the page) is what keeps transparency/disposal
-// correct under the downscale and under the overlays drawn on top. The CYD's
-// dirty-band partial pushes are gone: the panel only takes whole frames.
+// into `frame` -- 1:1 on the full-screen cat page, or cover-fit (uniform
+// scale, cropped to fill, never stretched) into the mixed page's 240px pane.
+// Compositing on a canvas that belongs to the GIF (rather than straight onto
+// the page) is what keeps transparency/disposal correct under the resize and
+// under the overlays drawn on top. The CYD's dirty-band partial pushes are
+// gone: the panel only takes whole frames.
 //
 // Everything below except the functions declared in state.h is file-local.
 #include "state.h"
@@ -44,8 +45,18 @@ static int canvasW = 0, canvasH = 0;
 // Bounding box of canvas pixels touched by the current frame (inclusive).
 static int dirtyX0, dirtyY0, dirtyX1, dirtyY1;
 // Where the canvas lands in `frame`: full-screen 1:1 offset, or the mixed
-// pane's 2x-downscaled offset.
+// pane's origin (cover-fit always fills the whole pane, so no centering
+// offset is needed there -- see mixedScale/mixedSrcOffX/Y below).
 static int destX = 0, destY = 0;
+// Mixed-pane cover-fit, computed once per GIF open (openCatAtIndex): the
+// single scale factor (same on both axes, so the aspect ratio never
+// distorts) that makes the canvas cover the MIXED_GIF_W x MIXED_GIF_H pane,
+// plus the canvas-space top-left of the visible (uncropped) window. Whichever
+// axis has leftover after the other is scaled to fit gets cropped -- usually
+// the sides, since fit_cats.py enlarges every cat to touch the full-screen
+// page's height first.
+static float mixedScale = 1.0f;
+static float mixedSrcOffX = 0.0f, mixedSrcOffY = 0.0f;
 
 static void drawSessionResetOverlay();
 
@@ -129,18 +140,6 @@ static void GIFDraw(GIFDRAW* pDraw) {
 }
 
 // ── CANVAS -> FRAME ────────────────────────────────────────
-// Byte-swapped RGB565 (the canvas and the sprite both hold big-endian pixels)
-// averaged per channel over a 2x2 block.
-static inline uint16_t avg4(uint16_t a, uint16_t b, uint16_t c, uint16_t d) {
-  a = (a >> 8) | (a << 8); b = (b >> 8) | (b << 8);
-  c = (c >> 8) | (c << 8); d = (d >> 8) | (d << 8);
-  uint32_t r = ((a >> 11) + (b >> 11) + (c >> 11) + (d >> 11) + 2) >> 2;
-  uint32_t gg = (((a >> 5) & 0x3F) + ((b >> 5) & 0x3F) + ((c >> 5) & 0x3F) + ((d >> 5) & 0x3F) + 2) >> 2;
-  uint32_t bl = ((a & 0x1F) + (b & 0x1F) + (c & 0x1F) + (d & 0x1F) + 2) >> 2;
-  uint16_t o = (uint16_t)((r << 11) | (gg << 5) | bl);
-  return (o >> 8) | (o << 8);
-}
-
 // Copy the frame's dirty box from the canvas into `frame`.
 static void blitDirty() {
   if (dirtyX1 < 0) return;
@@ -157,22 +156,32 @@ static void blitDirty() {
     }
     return;
   }
-  // 2x box filter into the mixed pane. Snap the dirty box outward to even
-  // canvas coordinates so every output pixel averages a whole 2x2 block.
-  int x0 = dirtyX0 & ~1, y0 = dirtyY0 & ~1;
-  int x1 = dirtyX1 | 1, y1 = dirtyY1 | 1;
-  if (x1 >= canvasW) x1 = canvasW - 1;
-  if (y1 >= canvasH) y1 = canvasH - 1;
-  for (int y = y0; y + 1 <= y1; y += 2) {
-    int dy = destY + y / 2;
-    if (dy < MIXED_GIF_Y0 || dy >= MIXED_GIF_Y0 + MIXED_GIF_H) continue;
-    const uint16_t* r0 = gifCanvas + y * canvasW;
-    const uint16_t* r1 = r0 + canvasW;
-    uint16_t* d = fb + dy * SCREEN_W + destX;
-    for (int x = x0; x + 1 <= x1; x += 2) {
-      int dx = destX + x / 2;
-      if (dx < MIXED_GIF_X0 || dx >= MIXED_GIF_X0 + MIXED_GIF_W) continue;
-      d[x / 2] = avg4(r0[x], r0[x + 1], r1[x], r1[x + 1]);
+  // Cover-fit into the mixed pane: nearest-sample the canvas through the
+  // open-time scale/crop (mixedScale/mixedSrcOffX/Y), touching only the
+  // destination pixels whose nearest source pixel falls in this frame's
+  // dirty box. Nearest-neighbour, not a box average: the scale here is
+  // rarely a clean ratio (it depends on each GIF's own aspect ratio), and at
+  // this pane size the aliasing is not visible.
+  float invScale = 1.0f / mixedScale;
+  int dstX0 = (int)floorf((dirtyX0 - mixedSrcOffX) * mixedScale);
+  int dstX1 = (int)ceilf((dirtyX1 + 1 - mixedSrcOffX) * mixedScale) - 1;
+  int dstY0 = (int)floorf((dirtyY0 - mixedSrcOffY) * mixedScale);
+  int dstY1 = (int)ceilf((dirtyY1 + 1 - mixedSrcOffY) * mixedScale) - 1;
+  if (dstX0 < 0) dstX0 = 0;
+  if (dstY0 < 0) dstY0 = 0;
+  if (dstX1 >= MIXED_GIF_W) dstX1 = MIXED_GIF_W - 1;
+  if (dstY1 >= MIXED_GIF_H) dstY1 = MIXED_GIF_H - 1;
+  for (int py = dstY0; py <= dstY1; py++) {
+    int sy = (int)(mixedSrcOffY + (py + 0.5f) * invScale);
+    if (sy < 0) sy = 0;
+    if (sy >= canvasH) sy = canvasH - 1;
+    const uint16_t* srow = gifCanvas + sy * canvasW;
+    uint16_t* drow = fb + (destY + py) * SCREEN_W + destX;
+    for (int px = dstX0; px <= dstX1; px++) {
+      int sx = (int)(mixedSrcOffX + (px + 0.5f) * invScale);
+      if (sx < 0) sx = 0;
+      if (sx >= canvasW) sx = canvasW - 1;
+      drow[px] = srow[sx];
     }
   }
 }
@@ -267,8 +276,15 @@ static bool openCatAtIndex(int index, bool resetOpenedTime) {
   bool offline = !STATE.haveData;
   gifMixedMode = (currentPage == MIXED_PAGE && !offline);
   if (gifMixedMode) {
-    destX = MIXED_GIF_X0 + (MIXED_GIF_W - canvasW / 2) / 2;
-    destY = MIXED_GIF_Y0 + (MIXED_GIF_H - canvasH / 2) / 2;
+    // Cover fit: the larger of the two axis ratios wins, so the pane is
+    // always fully covered and the other axis crops instead of letterboxing.
+    // Same scale on both axes -- the aspect ratio is never distorted.
+    mixedScale = max((float)MIXED_GIF_W / canvasW, (float)MIXED_GIF_H / canvasH);
+    float visW = MIXED_GIF_W / mixedScale, visH = MIXED_GIF_H / mixedScale;
+    mixedSrcOffX = (canvasW - visW) / 2.0f;
+    mixedSrcOffY = (canvasH - visH) / 2.0f;
+    destX = MIXED_GIF_X0;
+    destY = MIXED_GIF_Y0;
     g->fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, CONTENT_Y1, 0x0000);  // clear only the pane
   } else {
     destX = (SCREEN_W - canvasW) / 2;
