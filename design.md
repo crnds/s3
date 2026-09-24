@@ -1189,6 +1189,10 @@ excluded on purpose are listed in §11.23.
 - **Vertical:** glyph centres at y 303. Any caption text in the strip uses top y 295.
 - **Removed:** the CPU/ROM/RAM readout. It is developer telemetry on every page, it is already in
   Device Stats, and as a target it is invisible (§15.1).
+- **Pinned during the carousel slide.** "Persistent" means visually static: the strip
+  (and the hairline under it) stays put while the page above it slides horizontally,
+  rather than sliding off with the outgoing page and back in with the incoming one.
+  Settings' push/pop has no strip, so nothing is pinned there.
 
 ### 11.13 Progress hairline
 

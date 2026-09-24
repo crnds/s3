@@ -98,6 +98,7 @@ static TransKind tKind = T_NONE;
 static Spring spring;            // T_PAGE/T_PUSH: incoming offset 0..480; T_SHEET: visible height 0..320
 static bool tForward = true;     // T_PAGE: next page from the right; T_PUSH: push (true) or pop
 static int tFromPage = 0;        // T_PAGE: the page to go back to if it reverts
+static bool tPinStrip = false;    // T_PAGE: pin the status strip (neither end is GIF_PAGE, which has none)
 static bool sheetClosing = false;  // T_SHEET: false = sheet live over behindFrame; true = page live under prevFrame
 static const uint16_t* fadeFrom = nullptr;
 static int fadeStep = 0;
@@ -126,8 +127,14 @@ static void presentComposite() {
   int off = (int)lroundf(spring.x);
   switch (tKind) {
     case T_PAGE:
+      // The status strip (design.md 7) is pinned so it never slides with the
+      // carousel, except into/out of GIF_PAGE, which has no strip -- its full-
+      // screen cat frame really does occupy that band.
+      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, BG,
+                          tPinStrip ? TOK_LAYOUT_STRIP_Y0 : SCREEN_H);
+      break;
     case T_PUSH:
-      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, BG);
+      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, BG, SCREEN_H);
       break;
     case T_SHEET:
       if (!sheetClosing) displayPresentSheet(behindFrame, fb(), off, sheetScrimLevel(off), shiftX, shiftY, BG);
@@ -172,6 +179,7 @@ static void endTransition() {
 static void beginPageTransition(int page, bool forward) {
   memcpy(prevFrame, fb(), FRAME_BYTES);
   tFromPage = currentPage;
+  tPinStrip = tFromPage != GIF_PAGE && page != GIF_PAGE;
   currentPage = page;
   preparePage();
   tKind = T_PAGE;

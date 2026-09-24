@@ -172,6 +172,7 @@ struct PresentSrc {
   int level;           // sheet: scrim step on `a` (0..2); fade: 1..3 = 25/50/75% of `b`
   int shiftX, shiftY;
   uint16_t bg;         // byte-swapped
+  int pinY0;           // slide only: rows >= this show `b` unmoved (SCREEN_H = no pin)
 };
 
 static uint32_t lastTeWaitUs = 0;
@@ -278,6 +279,12 @@ static void fillStrip(uint16_t* dst, const PresentSrc& p, int py0) {
     switch (p.mode) {
       case PM_SLIDE_H: {
         const uint16_t* rb = p.b + sy * SCREEN_W;
+        // Pinned band (design.md 7's status strip): always `b`, unmoved, so it
+        // doesn't slide with the page above it.
+        if (ly >= p.pinY0) {
+          for (int i = 0; i < STRIP_ROWS; i++, sx += step) d[i * PANEL_W] = (sx < 0 || sx >= SCREEN_W) ? p.bg : rb[sx];
+          break;
+        }
         const int off = p.offset, split = SCREEN_W - off;
         for (int i = 0; i < STRIP_ROWS; i++, sx += step) {
           uint16_t v;
@@ -337,28 +344,28 @@ static void presentSrc(const PresentSrc& p) {
 }
 
 void displayPresent(const uint16_t* frame, int shiftX, int shiftY, uint16_t bg) {
-  PresentSrc p = {PM_PLAIN, frame, nullptr, 0, true, 0, shiftX, shiftY, swap16(bg)};
+  PresentSrc p = {PM_PLAIN, frame, nullptr, 0, true, 0, shiftX, shiftY, swap16(bg), SCREEN_H};
   presentSrc(p);
 }
 
 void displayPresentSlide(const uint16_t* from, const uint16_t* to, int offset, bool forward,
-                         int shiftX, int shiftY, uint16_t bg) {
+                         int shiftX, int shiftY, uint16_t bg, int pinY0) {
   if (offset < 0) offset = 0;
   if (offset > SCREEN_W) offset = SCREEN_W;
-  PresentSrc p = {PM_SLIDE_H, from, to, offset, forward, 0, shiftX, shiftY, swap16(bg)};
+  PresentSrc p = {PM_SLIDE_H, from, to, offset, forward, 0, shiftX, shiftY, swap16(bg), pinY0};
   presentSrc(p);
 }
 
 void displayPresentSheet(const uint16_t* behind, const uint16_t* sheet, int visibleH, int scrimLevel,
                          int shiftX, int shiftY, uint16_t bg) {
   if (visibleH < 0) visibleH = 0;
-  PresentSrc p = {PM_SHEET, behind, sheet, visibleH, true, scrimLevel, shiftX, shiftY, swap16(bg)};
+  PresentSrc p = {PM_SHEET, behind, sheet, visibleH, true, scrimLevel, shiftX, shiftY, swap16(bg), SCREEN_H};
   presentSrc(p);
 }
 
 void displayPresentFade(const uint16_t* from, const uint16_t* to, int level,
                         int shiftX, int shiftY, uint16_t bg) {
-  PresentSrc p = {PM_FADE, from, to, 0, true, constrain(level, 1, 3), shiftX, shiftY, swap16(bg)};
+  PresentSrc p = {PM_FADE, from, to, 0, true, constrain(level, 1, 3), shiftX, shiftY, swap16(bg), SCREEN_H};
   presentSrc(p);
 }
 

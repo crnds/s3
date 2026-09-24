@@ -36,8 +36,10 @@ void displayPresent(const uint16_t* frame, int shiftX, int shiftY, uint16_t bg);
 // Page-change slide: composite two full frames in the rotate copy (no third
 // buffer). `offset` is how far (0..SCREEN_W) the incoming frame has slid in;
 // forward = the new page enters from the right, backward = from the left.
+// `pinY0` pins rows [pinY0, SCREEN_H) to `to` unmoved (design.md 7's status
+// strip stays put while the page above it slides); pass SCREEN_H for no pin.
 void displayPresentSlide(const uint16_t* from, const uint16_t* to, int offset, bool forward,
-                         int shiftX, int shiftY, uint16_t bg);
+                         int shiftX, int shiftY, uint16_t bg, int pinY0);
 // Sheet rise/drop (design.md 12.5): `sheet` occupies the bottom `visibleH`
 // rows (its top row at y = 320 - visibleH; past 320 = overshoot, bg below it),
 // the page `behind` shows above it through a scrim step (0 none, 1 = 75%,

@@ -333,6 +333,7 @@ const TOK_SPACE_LIST_GAP = TOK_SPACE_SM;
 const TOK_LAYOUT_CONTENT_X0 = 8, TOK_LAYOUT_CONTENT_X1 = 472;
 const TOK_LAYOUT_CONTENT_Y0 = 8, TOK_LAYOUT_CONTENT_Y1 = 280;
 const TOK_LAYOUT_CONTENT_W = TOK_LAYOUT_CONTENT_X1 - TOK_LAYOUT_CONTENT_X0;
+const TOK_LAYOUT_STRIP_Y0 = 288, TOK_LAYOUT_STRIP_H = 32;
 const TOK_LAYOUT_OVERLAY_CONTENT_Y1 = 312;
 const TOK_LAYOUT_HEADER_H = 44, TOK_LAYOUT_HEADER_CONTENT_Y = 52;
 const TOK_LAYOUT_COL_LEFT_X = 8, TOK_LAYOUT_COL_LEFT_W = 172;
@@ -1933,13 +1934,23 @@ function presentPlain() {
   screenCtx.drawImage(frameCanvas, STATE.shiftX, STATE.shiftY);
   STATE.shiftDirty = false;
 }
-function presentSlide(from, to, off, forward) {
+function presentSlide(from, to, off, forward, pinY0 = SCREEN_H) {
   off = Math.max(0, Math.min(SCREEN_W, off));
   const sx = STATE.shiftX, sy = STATE.shiftY;
   screenCtx.fillStyle = TOK_COLOR_BG_CANVAS;
   screenCtx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  screenCtx.save();
+  screenCtx.beginPath();
+  screenCtx.rect(0, 0, SCREEN_W, pinY0);
+  screenCtx.clip();
   if (forward) { screenCtx.drawImage(from, sx - off, sy); screenCtx.drawImage(to, sx + SCREEN_W - off, sy); }
   else { screenCtx.drawImage(from, sx + off, sy); screenCtx.drawImage(to, sx + off - SCREEN_W, sy); }
+  screenCtx.restore();
+  // Pinned band (design.md 7's status strip): always `to`, unmoved, so it
+  // doesn't slide with the page above it.
+  if (pinY0 < SCREEN_H) {
+    screenCtx.drawImage(to, 0, pinY0, SCREEN_W, SCREEN_H - pinY0, sx, sy + pinY0, SCREEN_W, SCREEN_H - pinY0);
+  }
 }
 function presentSheet(behind, sheet, vis, level) {
   vis = Math.max(0, vis);
@@ -1970,7 +1981,7 @@ function presentFade(from, to, level) {
 const NAV = {
   pressedId: null, pressedIndex: -1,
   tKind: null,           // null | 'page' | 'sheet' | 'push' | 'fade'
-  spring: makeSpring(), tForward: true, tFromPage: 0, sheetClosing: false,
+  spring: makeSpring(), tForward: true, tFromPage: 0, tPinStrip: false, sheetClosing: false,
   fadeFrom: null, fadeStep: 0, tHeld: false, lastTickMs: 0,
   saved: null,
   listCoasting: false, listPos: 0, listV: 0, listSpring: makeSpring(),
@@ -1999,7 +2010,8 @@ function sheetScrimLevel(vis) {
 function presentComposite() {
   const off = Math.round(NAV.spring.x);
   switch (NAV.tKind) {
-    case 'page': case 'push': presentSlide(prevFrame, frameCanvas, off, NAV.tForward); break;
+    case 'page': presentSlide(prevFrame, frameCanvas, off, NAV.tForward, NAV.tPinStrip ? TOK_LAYOUT_STRIP_Y0 : SCREEN_H); break;
+    case 'push': presentSlide(prevFrame, frameCanvas, off, NAV.tForward); break;
     case 'sheet':
       if (!NAV.sheetClosing) presentSheet(behindFrame, frameCanvas, off, sheetScrimLevel(off));
       else presentSheet(frameCanvas, prevFrame, off, sheetScrimLevel(off));
@@ -2019,6 +2031,7 @@ function saveLastPage() { STATE.cfgLastPage = STATE.currentPage; lsSet(LAST_PAGE
 function beginPageTransition(page, forward) {
   copyFrame(prevFrame, frameCanvas);
   NAV.tFromPage = STATE.currentPage;
+  NAV.tPinStrip = NAV.tFromPage !== GIF_PAGE && page !== GIF_PAGE;
   STATE.currentPage = page;
   preparePage();
   NAV.tKind = 'page'; NAV.tForward = forward;
