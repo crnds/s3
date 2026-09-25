@@ -318,7 +318,6 @@ void setup() {
   randomSeed(esp_random());           // so the cat picked on the cat pages differs each boot
 
   if (!displayBegin()) Serial.println("[display] panel init FAILED");
-  backlightFadeTo(200, 0);  // provisional; re-applied from flash once loadRuntimeConfig() runs
   touchBegin();
   fontsBegin();
 
@@ -331,6 +330,8 @@ void setup() {
   }
   frame.fillScreen(TOK_COLOR_BG_CANVAS);
   presentFrame();
+  // Backlight only after a real frame is on the panel (never light raw GRAM).
+  backlightFadeTo(200, 0);  // provisional; re-applied from flash once loadRuntimeConfig() runs
 
   // TF card on SD_MMC, 1-bit (the board wires CLK/CMD/D0 only). Attempted
   // once: SD I/O is blocking, so a flaky card must not stall the poll loop.

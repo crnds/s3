@@ -111,16 +111,21 @@ bool displayBegin() {
   pc.bits_per_pixel = 16;
   pc.vendor_config = &vendor;
   if (esp_lcd_new_panel_axs15231b(ioHandle, &pc, &panelHandle) != ESP_OK) return false;
-  esp_lcd_panel_reset(panelHandle);
-  esp_lcd_panel_init(panelHandle);
-  // The vendored driver's disp_on_off hook names its argument `off`, so
-  // false here means DISPLAY ON (same call the seller's BSP makes).
-  esp_lcd_panel_disp_on_off(panelHandle, false);
-
   for (int i = 0; i < 2; i++) {
     strips[i] = (uint16_t*)heap_caps_malloc(STRIP_PIXELS * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!strips[i]) return false;
   }
+
+  esp_lcd_panel_reset(panelHandle);
+  esp_lcd_panel_init(panelHandle);
+  // GRAM powers up as random bits: clear it to black while the display is
+  // still off, so DISPON never scans out noise on a cold boot.
+  memset(strips[0], 0, STRIP_PIXELS * 2);
+  for (int s = 0; s < STRIP_COUNT; s++)
+    esp_lcd_panel_draw_bitmap(panelHandle, 0, s * STRIP_ROWS, PANEL_W, (s + 1) * STRIP_ROWS, strips[0]);
+  // The vendored driver's disp_on_off hook names its argument `off`, so
+  // false here means DISPLAY ON (same call the seller's BSP makes).
+  esp_lcd_panel_disp_on_off(panelHandle, false);
 
   teSem = xSemaphoreCreateBinary();
   gpio_config_t te = {};
