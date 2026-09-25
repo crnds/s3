@@ -903,12 +903,8 @@ function drawSystemCorner(overMedia) {
     gfx.fillRect(x + 3, y + 3, 5, 4, c);
     gfx.fillRect(x + 16, y + 3, 2, 4, c);
   }
-  const ax = TOK_CORNER_SLOT_A_X;
-  if (overMedia) gfx.fillRect(ax - 4, ay - 4, sz + 8, sz + 8, TOK_COLOR_PLATE);
-  const cx = ax + sz / 2, cy = ay + sz / 2;
+  const cx = TOK_CORNER_SLOT_A_X + sz / 2, cy = ay + sz / 2;
   const pressed = NAV.pressedId === 'sleep';
-  const disc = pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_RAISED;
-  gfx.fillSmoothCircle(cx, cy, 11, disc);
   gfx.fillSmoothRoundRect(cx - 7, cy - 3, 14, 6, 3, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
 }
 

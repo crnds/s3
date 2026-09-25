@@ -223,10 +223,10 @@ void shuffleCentre(bool mixed, int& cx, int& cy) {
 }
 
 // ── SYSTEM CORNER (design.md 7.3) ──────────────────────────
-// Slot a: the sleep icon button (a minimal grey pill on a raised 24px disc;
-// pressed = the disc steps to fill.pressed). Slot b: the Battery Save glyph, only while
-// active. Drawn last on every screen; over media each occupied slot sits on a
-// plate with a 4px inset around its glyph box.
+// Slot a: the sleep icon button (a bare minimal grey pill, no disc or plate;
+// pressed = the pill steps to primary). Slot b: the Battery Save glyph, only
+// while active; over media it sits on a plate with a 4px inset around its
+// glyph box. Drawn last on every screen.
 void drawSystemCorner(bool overMedia) {
   const int ay = TOK_CORNER_SLOT_Y, sz = TOK_CORNER_SLOT_SIZE;
   if (batterySaveActive()) {
@@ -240,12 +240,8 @@ void drawSystemCorner(bool overMedia) {
     g->fillRect(x + 3, y + 3, 5, 4, c);
     g->fillRect(x + 16, y + 3, 2, 4, c);
   }
-  const int ax = TOK_CORNER_SLOT_A_X;
-  if (overMedia) g->fillRect(ax - 4, ay - 4, sz + 8, sz + 8, TOK_COLOR_PLATE);
-  const int cx = ax + sz / 2, cy = ay + sz / 2;
+  const int cx = TOK_CORNER_SLOT_A_X + sz / 2, cy = ay + sz / 2;
   const bool pressed = (pressedId == PRESS_SLEEP);
-  const uint16_t disc = pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_RAISED;
-  aaFillCircle(cx, cy, 11, disc);
   aaFillRoundRect(cx - 7, cy - 3, 14, 6, 3, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
 }
 
