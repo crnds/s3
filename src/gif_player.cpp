@@ -1,8 +1,20 @@
 // CATS / GIF_PAGE and the MIXED_PAGE cat pane: random cat GIFs from /cats/ on
 // the SD card, played endlessly (and full-screen on any page while offline --
-// the cats ARE the offline screen). Decode + draw happen on the render core
-// (core 1) in gifTick(); SD reads there are guarded by sdMutex so they can't
-// collide with the network task's writes.
+// the cats ARE the offline screen, regardless of currentPage: see gifTick()'s
+// top). Decode + draw happen on the render core (core 1) in gifTick(); SD
+// reads there are guarded by sdMutex so they can't collide with the network
+// task's writes.
+//
+// MOVIE_PAGE (random .mjpeg playback from /movies/) is a sibling module,
+// movie_player.cpp, with its own decoder/canvas -- but it shares this file's
+// integration points rather than getting its own nav.cpp/main.cpp wiring.
+// nav.cpp's isCatPage()/navCatLayout() treat GIF_PAGE/MOVIE_PAGE/MIXED_PAGE
+// as one "cat mode" (a pre-existing name that predates movies), so every
+// caller here -- gifTick() and the five gifPlayer* entry points below --
+// dispatches to movie_player.cpp's equivalents whenever currentPage ==
+// MOVIE_PAGE && online, and otherwise runs unchanged. Offline always falls
+// through to cats, regardless of currentPage, matching the existing offline
+// behaviour above.
 //
 // What changed from the CYD player: every GIF frame is composited in RAW mode
 // into gifCanvas, a GIF-sized RGB565 canvas in PSRAM, and only then copied
@@ -215,14 +227,18 @@ void scanCats() {
   Serial.printf("[cats] %d GIF(s) in %s\n", catCount, CATS_DIR);
 }
 
-// Everything drawn over the cat after each frame: the reset plate (the
-// full-screen layout -- the cat page, and the offline screen, where it and
-// the corner glyphs carry the status), the shuffle media control (Cat Shuffle
-// Fixed only), then the system corner on plates.
-static void drawMediaOverlays(bool offline) {
+// Everything drawn over the cat (or movie) after each frame: the reset plate
+// (the full-screen layout -- the cat/movie page, and the offline screen,
+// where it and the corner glyphs carry the status), the shuffle media
+// control (Cat Shuffle Fixed only), then the system corner on plates. Shared
+// with movie_player.cpp (declared in state.h) since MOVIE_PAGE uses the same
+// overlays, just counting movies instead of cats.
+void drawMediaOverlays(bool offline) {
   bool mixed = (currentPage == MIXED_PAGE && !offline);
   if (!mixed) drawResetPlate();
-  if (catShuffleFixed && catCount > 0) {
+  bool onMoviePage = (currentPage == MOVIE_PAGE && !offline);
+  int count = onMoviePage ? movieCount : catCount;
+  if (catShuffleFixed && count > 0) {
     int cx, cy;
     shuffleCentre(mixed, cx, cy);
     drawShuffleButton(cx, cy, pressedId == PRESS_SHUFFLE);
@@ -312,6 +328,7 @@ static void closeGif() {
 // delays; when a GIF ends it opens another at random -- endless cats. Returns
 // true when it changed `frame` (loop() then presents).
 bool gifTick(bool offline) {
+  if (currentPage == MOVIE_PAGE && !offline) return movieTick(offline);
   if (!STATE.sdOk || catCount == 0 || !gif || !gifCanvas) return drawGifPlaceholder(offline);
   uint32_t now = millis();
 
@@ -393,6 +410,10 @@ bool gifTick(bool offline) {
 
 // Allocate the decoder only while it's needed (entering a cat page, or going
 // offline on any page) and reset the placeholder/timer for the fresh visit.
+// Also lazily allocates the movie decoder: isCatPage() treats GIF_PAGE/
+// MOVIE_PAGE/MIXED_PAGE as one mode, so swiping straight from Cats to Movies
+// (or vice versa) never re-fires this function -- entering "cat mode" from
+// any other page must get both decoders ready up front.
 void gifPlayerEnterCatMode() {
   if (!gifCanvas)
     gifCanvas = (uint16_t*)heap_caps_malloc((size_t)SCREEN_W * SCREEN_H * 2, MALLOC_CAP_SPIRAM);
@@ -400,6 +421,7 @@ void gifPlayerEnterCatMode() {
   gifPlaceholderDrawn = false;
   nextOpenIsLoop = false;
   gifNextFrameMs = millis();
+  moviePlayerEnter();
 }
 
 // Leaving cat mode: close any open GIF and free the decoder. The PSRAM canvas
@@ -408,11 +430,15 @@ void gifPlayerExitCatMode() {
   closeGif();
   delete gif;
   gif = nullptr;
+  moviePlayerExit();
 }
 
 // Force the next gifTick() to open a fresh (random) GIF -- page changes onto
-// GIF_PAGE/MIXED_PAGE, and the shuffle media control.
+// GIF_PAGE/MIXED_PAGE, and the shuffle media control. On MOVIE_PAGE, hand
+// this over to the movie player's equivalent instead (its own random-pick
+// state is separate from the GIF path's).
 void gifPlayerResetForPageChange() {
+  if (currentPage == MOVIE_PAGE && STATE.haveData) { moviePlayerResetForPageChange(); return; }
   closeGif();
   gifPlaceholderDrawn = false;
   nextOpenIsLoop = false;
@@ -422,6 +448,7 @@ void gifPlayerResetForPageChange() {
 // Draw the first frame immediately (page slide renders the incoming page
 // before animating to it).
 void gifPlayerPrimeFrame(bool offline) {
+  if (currentPage == MOVIE_PAGE && !offline) { moviePlayerPrimeFrame(offline); return; }
   gifNextFrameMs = millis();  // "due now" (0 would read as far future after ~24.8 days' uptime)
   gifTick(offline);
 }
@@ -431,6 +458,7 @@ void gifPlayerPrimeFrame(bool offline) {
 // With no GIF open (between cats, or none on the card) it falls back to a
 // fresh open, which clears and decodes in one tick.
 void gifPlayerRepaint(bool offline) {
+  if (currentPage == MOVIE_PAGE && !offline) { moviePlayerRepaint(offline); return; }
   bool mixed = (currentPage == MIXED_PAGE && !offline);
   if (mixed) {
     lockState();

@@ -83,17 +83,19 @@ extern volatile uint32_t POLL_INTERVAL_MS;
 // ── SHARED CONSTANTS ───────────────────────────────────────
 // Internal linkage per TU (C++ global `const` default) — safe to define
 // identically in every file that includes this header; no ODR issue.
-const int PAGE_COUNT = 6;
+const int PAGE_COUNT = 7;
 // cfgBootPage sentinel: resume whichever page was on screen before the last
 // restart (cfgLastPage), rather than a fixed page. See the Boot Page setting.
 const int BOOT_PAGE_AUTO = -1;
 const int GIF_PAGE = 3;    // 4th page (0-indexed): random cat GIFs from /cats/ on SD
-const int MIXED_PAGE = 4;  // 5th page: status + cats split
-// 6th page: the same left column as MIXED_PAGE, but the right half shows the
-// note text from note.html instead of cats. Unlike GIF_PAGE/MIXED_PAGE this is
-// an ordinary render() page (a `case` in its switch) — nothing here needs the
-// per-frame decode loop or the partial-push path those two require.
-const int NOTE_PAGE = 5;
+const int MOVIE_PAGE = 4;  // 5th page: random movies from /movies/ on SD (see movie_player.cpp)
+const int MIXED_PAGE = 5;  // 6th page: status + cats split
+// 7th page: the same left column as MIXED_PAGE, but the right half shows the
+// note text from note.html instead of cats. Unlike GIF_PAGE/MOVIE_PAGE/
+// MIXED_PAGE this is an ordinary render() page (a `case` in its switch) —
+// nothing here needs the per-frame decode loop or the partial-push path
+// those three require.
+const int NOTE_PAGE = 6;
 // Note buffer. The server caps its copy at 480 chars (NOTE_MAX_CHARS); 512
 // leaves room for the NUL. The S3 pane (37 cols x 14 rows at size 1) could
 // show slightly more than that, but the server cap, not the pane, is the
@@ -315,6 +317,10 @@ extern uint32_t catShuffleMs;
 // handler reads this to decide whether a tap on the CATS/mixed page should
 // manually advance to a new random cat.
 extern bool catShuffleFixed;
+// Count of movies found in /movies/ at boot (movie_player.cpp's scanMovies).
+// gif_player.cpp's drawMediaOverlays() reads this instead of catCount while
+// on MOVIE_PAGE, to decide whether there's anything to shuffle to.
+extern int movieCount;
 
 // Runtime overrides for the compiled config.h defaults, loaded from internal
 // flash (NVS, see sd_store.cpp's loadRuntimeConfig). Defined in main.cpp.
@@ -515,6 +521,25 @@ void gifPlayerRepaint(bool offline);
 // -- a pressed state changed; each overlay keeps its footprint, so nothing
 // under it needs restoring.
 void gifPlayerRedrawOverlays(bool offline);
+// Reset plate + shuffle button + corner glyphs, drawn over whichever media is
+// active. Shared with movie_player.cpp: MOVIE_PAGE uses the same overlays.
+void drawMediaOverlays(bool offline);
+
+// ── MOVIE PLAYER (movie_player.cpp) ─────────────────────────
+// Random .mjpeg playback on MOVIE_PAGE, the same shape as the GIF player
+// above but for raw MJPEG streams from /movies/ on the SD card. Reuses
+// catShuffleMs/catShuffleFixed (the "Cat Shuffle" setting) for its own
+// rotation timing -- see movie_player.cpp for why. gif_player.cpp's gifTick()
+// and its five sibling entry points each dispatch into this module's
+// equivalents when currentPage == MOVIE_PAGE, so main.cpp/nav.cpp need no
+// separate call sites for movies.
+void scanMovies();
+bool movieTick(bool offline);
+void moviePlayerEnter();
+void moviePlayerExit();
+void moviePlayerResetForPageChange();
+void moviePlayerPrimeFrame(bool offline);
+void moviePlayerRepaint(bool offline);
 
 // ── SETTINGS (settings.cpp) ────────────────────────────────
 // The Settings sheet: SET_LIST (scrolling list of rows) and SET_LEAF (a

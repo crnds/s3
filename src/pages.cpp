@@ -1351,10 +1351,10 @@ static void drawWeatherPage() {
 
 // ── RENDER ─────────────────────────────────────────────────
 void render() {
-  // The cat pages are animated frame-by-frame by gifTick() in loop(), not
+  // The media pages are animated frame-by-frame by gifTick() in loop(), not
   // drawn here (unless a sheet is up over them); offline is also gifTick()'s.
   bool sheet = weatherPageOpen || devicePageOpen;
-  if (!sheet && (currentPage == GIF_PAGE || currentPage == MIXED_PAGE)) return;
+  if (!sheet && (currentPage == GIF_PAGE || currentPage == MOVIE_PAGE || currentPage == MIXED_PAGE)) return;
   uint32_t startUs = micros();
   // Hold the lock across all STATE reads, release before the present.
   lockState();
@@ -1368,7 +1368,7 @@ void render() {
       case 0: drawStatusPage(); break;
       case 1: drawProjectsPage(); break;  // top projects + 7-day trend
       case 2: drawLimitsPage(); break;    // /usage-style limits panel
-      case 5: drawNotePage(); break;      // left column + note pane
+      case 6: drawNotePage(); break;      // left column + note pane
     }
     drawStatusStrip();
   }

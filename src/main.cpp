@@ -350,6 +350,7 @@ void setup() {
     loadWeatherCache(); // full Weather-page snapshot (hourly/daily) if present
     showBootSplash();   // optional /splash.bmp, briefly, before the WiFi spinner
     scanCats();         // index /cats/*.gif for the cat GIF player page
+    scanMovies();       // index /movies/*.mjpeg for the movie player page
   } else {
     Serial.println("[sd] card not found or failed to mount");
   }

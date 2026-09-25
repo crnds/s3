@@ -51,10 +51,11 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   "6px per character" rule).
 - **Colours:** firmware RGB565 in `state.h`, simulator RGB888 with the
   `// 0x....` comment beside each. Change both together.
-- **Deliberate non-twins:** cat GIF playback (sim shows the placeholder layout
-  with the real overlays), the AP setup screen, boot splash/spinner, and TE
-  sync — firmware-only. Slides, sheets, scrims, fades and the backlight
-  animator ARE twinned (the sim quantises scrims/fades through RGB565 too).
+- **Deliberate non-twins:** cat GIF and movie (`.mjpeg`) playback (sim shows
+  the placeholder layout with the real overlays), the AP setup screen, boot
+  splash/spinner, and TE sync — firmware-only. Slides, sheets, scrims, fades
+  and the backlight animator ARE twinned (the sim quantises scrims/fades
+  through RGB565 too).
 - After any UI change: screenshot the sim headless **and** the board
   (`tools/grab_screen.py`) and compare (see Commands).
 - **Note tokenizer is a six-copy parity surface**: `src/pages.cpp`,

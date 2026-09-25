@@ -246,10 +246,11 @@ pre {
 // are design.md's tokens -- the TOKENS block mirrors src/tokens.h line for line.
 const SCREEN_W = 480, SCREEN_H = 320;
 const POLL_DEFAULT_MS = 20000;
-const PAGE_COUNT = 6;
+const PAGE_COUNT = 7;
 const GIF_PAGE = 3;    // cat GIFs on the device (placeholder here -- see drawGifPage)
-const MIXED_PAGE = 4;  // limits column + cats pane
-const NOTE_PAGE = 5;   // limits column + note pane (an ordinary render() page)
+const MOVIE_PAGE = 4;  // movies on the device (placeholder here -- see drawGifPage)
+const MIXED_PAGE = 5;  // limits column + cats pane
+const NOTE_PAGE = 6;   // limits column + note pane (an ordinary render() page)
 const OFFLINE_AFTER_MS = 60000;  // wall-clock, like main.cpp -- never a poll-cycle count
 const BOOT_PAGE_AUTO = -1;
 
@@ -759,8 +760,8 @@ const SETTINGS = [
   { label: 'Rotation', subtitle: 'For upside-down mounting', hint: '', kind: ROW_NAV, cols: 2, count: 2,
     values: [1, 3], valueLabels: ['Normal', 'Flipped'], getCurrent: getCurrentRotation, apply: applyRotation },
   { label: 'Boot page', subtitle: 'Page shown after a restart', hint: 'Auto resumes the last page shown',
-    kind: ROW_NAV, cols: 4, count: 7, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5],
-    valueLabels: ['Auto', 'Status', 'Projects', 'Limits', 'Cats', 'Status + cats', 'Note'],
+    kind: ROW_NAV, cols: 4, count: 8, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5, 6],
+    valueLabels: ['Auto', 'Status', 'Projects', 'Limits', 'Cats', 'Movies', 'Status + cats', 'Note'],
     getCurrent: getCurrentBootPage, apply: applyBootPage },
   { label: 'Cat shuffle', subtitle: 'How long each cat plays', hint: 'Off plays each cat to its end; Fixed keeps one',
     kind: ROW_NAV, cols: 5, count: 5, values: [-1, 0, 5, 10, 30], valueLabels: ['Fixed', 'Off', '5s', '10s', '30s'],
@@ -1661,6 +1662,7 @@ function drawMediaOverlays(offline) {
 }
 function drawGifPage(offline) {
   const mixed = STATE.currentPage === MIXED_PAGE && !offline;
+  const movie = STATE.currentPage === MOVIE_PAGE && !offline;
   if (mixed) {
     gfx.fillScreen(TOK_COLOR_BG_CANVAS);
     drawMixedPageStatic();
@@ -1669,6 +1671,15 @@ function drawGifPage(offline) {
       drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'Cats play here', 'Cover-fit GIFs on the device', false);
     else
       drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'No SD card', 'Insert a card with /cats/ GIFs', true);
+  } else if (movie) {
+    // Deliberate non-twin, same as the cats placeholder below: no real MJPEG
+    // decode in the browser either (CLAUDE.md's "Deliberate non-twins").
+    gfx.fillScreen(TOK_COLOR_BG_CANVAS);
+    if (catsAvailable())
+      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'Movies play here', 'Random .mjpeg files from /movies/ on the device', false,
+                     TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
+    else
+      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'No SD card', 'Insert an SD card with /movies/ .mjpeg files', true);
   } else {
     gfx.fillScreen(TOK_COLOR_BG_CANVAS);
     if (catsAvailable())
@@ -1691,7 +1702,7 @@ function render() {
       case 0: drawStatusPage(); break;
       case 1: drawProjectsPage(); break;
       case 2: drawLimitsPage(); break;
-      case 5: drawNotePage(); break;
+      case 6: drawNotePage(); break;
     }
     drawStatusStrip();
   }
@@ -1999,7 +2010,7 @@ const NAV = {
   G: null, vt: makeVelocity(), lastUpMs: -1e9, wasDown: false,
 };
 const LIST_VIEW_H = SCREEN_H - TOK_LAYOUT_HEADER_H;
-function isCatPage(p) { return p === GIF_PAGE || p === MIXED_PAGE; }
+function isCatPage(p) { return p === GIF_PAGE || p === MOVIE_PAGE || p === MIXED_PAGE; }
 function navCatLayout() { return isCatPage(STATE.currentPage) || !STATE.haveData; }
 function navTransitionActive() { return NAV.tKind !== null; }
 function navSheetOpen() { return STATE.weatherPageOpen || STATE.devicePageOpen || STATE.settingsScreen !== 'off'; }
@@ -2042,7 +2053,7 @@ function saveLastPage() { STATE.cfgLastPage = STATE.currentPage; lsSet(LAST_PAGE
 function beginPageTransition(page, forward) {
   copyFrame(prevFrame, frameCanvas);
   NAV.tFromPage = STATE.currentPage;
-  NAV.tPinStrip = NAV.tFromPage !== GIF_PAGE && page !== GIF_PAGE;
+  NAV.tPinStrip = NAV.tFromPage !== GIF_PAGE && NAV.tFromPage !== MOVIE_PAGE && page !== GIF_PAGE && page !== MOVIE_PAGE;
   STATE.currentPage = page;
   preparePage();
   NAV.tKind = 'page'; NAV.tForward = forward;
@@ -2199,7 +2210,7 @@ function listStep(dt) {
 
 // ── GESTURES (nav.cpp twin) ───────────────────────────────────
 function inRect(x, y, x0, y0, x1, y1) { return x >= x0 && x < x1 && y >= y0 && y < y1; }
-function stripPage() { return STATE.haveData && STATE.currentPage !== GIF_PAGE; }
+function stripPage() { return STATE.haveData && STATE.currentPage !== GIF_PAGE && STATE.currentPage !== MOVIE_PAGE; }
 function hitTest(x, y) {
   if (inRect(x, y, SLEEP_HIT_X0, SLEEP_HIT_Y0, SLEEP_HIT_X1, SLEEP_HIT_Y1)) return ['sleep', -1];
   const closeHit = inRect(x, y, 0, 0, TOK_CLOSE_HIT_X1, TOK_CLOSE_HIT_Y1);
@@ -2379,7 +2390,9 @@ function commitTap(now) {
     case 'health': redrawScreen(); navOpenSheet(1); break;
     case 'gear': redrawScreen(); navOpenSheet(2); break;
     case 'shuffle':
-      console.log('[sim] shuffle: the device opens a new random cat here.');
+      console.log(STATE.currentPage === MOVIE_PAGE
+        ? '[sim] shuffle: the device opens a new random movie here.'
+        : '[sim] shuffle: the device opens a new random cat here.');
       redrawScreen();
       break;
     case 'half':
@@ -2720,7 +2733,7 @@ function describeScreen() {
   if (STATE.weatherPageOpen) return 'WEATHER (tap to close)';
   if (STATE.devicePageOpen) return 'DEVICE STATS (tap to close)';
   if (!STATE.haveData) return 'OFFLINE (cat GIFs)';
-  const names = ['status', 'projects', 'limits', 'cats', 'status + cats', 'note'];
+  const names = ['status', 'projects', 'limits', 'cats', 'movies', 'status + cats', 'note'];
   let s = `page ${STATE.currentPage + 1}/${PAGE_COUNT} (${names[STATE.currentPage]})`;
   if (STATE.shiftX || STATE.shiftY) s += ` · shift (${STATE.shiftX},${STATE.shiftY})`;
   if (motionTimeScale > 1) s += ` · slow motion x${motionTimeScale}`;

@@ -34,8 +34,14 @@ static bool ensureBuffers() {
 }
 
 // ── CAT MODE ───────────────────────────────────────────────
+// "Cat mode" now covers all three full-bleed media pages (cats, movies, and
+// the mixed cats pane) -- the name predates MOVIE_PAGE and isn't worth
+// renaming everywhere it's used, but isCatPage()/navCatLayout() are the
+// single gate every caller below keys off, so widening this one check is
+// enough: gif_player.cpp's entry points (gifTick and friends) each dispatch
+// internally to movie_player.cpp when currentPage == MOVIE_PAGE.
 static bool prevCatMode = false;
-static bool isCatPage(int p) { return p == GIF_PAGE || p == MIXED_PAGE; }
+static bool isCatPage(int p) { return p == GIF_PAGE || p == MOVIE_PAGE || p == MIXED_PAGE; }
 bool navCatLayout() { return isCatPage(currentPage) || !STATE.haveData; }
 void navSyncCatMode(bool catMode) {
   if (catMode == prevCatMode) return;
@@ -98,7 +104,7 @@ static TransKind tKind = T_NONE;
 static Spring spring;            // T_PAGE/T_PUSH: incoming offset 0..480; T_SHEET: visible height 0..320
 static bool tForward = true;     // T_PAGE: next page from the right; T_PUSH: push (true) or pop
 static int tFromPage = 0;        // T_PAGE: the page to go back to if it reverts
-static bool tPinStrip = false;    // T_PAGE: pin the status strip (neither end is GIF_PAGE, which has none)
+static bool tPinStrip = false;    // T_PAGE: pin the status strip (neither end is GIF_PAGE/MOVIE_PAGE, which have none)
 static bool sheetClosing = false;  // T_SHEET: false = sheet live over behindFrame; true = page live under prevFrame
 static const uint16_t* fadeFrom = nullptr;
 static int fadeStep = 0;
@@ -128,8 +134,8 @@ static void presentComposite() {
   switch (tKind) {
     case T_PAGE:
       // The status strip (design.md 7) is pinned so it never slides with the
-      // carousel, except into/out of GIF_PAGE, which has no strip -- its full-
-      // screen cat frame really does occupy that band.
+      // carousel, except into/out of GIF_PAGE/MOVIE_PAGE, which have no strip
+      // -- their full-screen media frame really does occupy that band.
       displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, BG,
                           tPinStrip ? TOK_LAYOUT_STRIP_Y0 : SCREEN_H);
       break;
@@ -179,7 +185,7 @@ static void endTransition() {
 static void beginPageTransition(int page, bool forward) {
   memcpy(prevFrame, fb(), FRAME_BYTES);
   tFromPage = currentPage;
-  tPinStrip = tFromPage != GIF_PAGE && page != GIF_PAGE;
+  tPinStrip = tFromPage != GIF_PAGE && tFromPage != MOVIE_PAGE && page != GIF_PAGE && page != MOVIE_PAGE;
   currentPage = page;
   preparePage();
   tKind = T_PAGE;
@@ -489,7 +495,7 @@ static bool inRect(int32_t x, int32_t y, int x0, int y0, int x1, int y1) {
 
 // Pages with the status strip: everything but the full-screen cat page (and
 // the offline cats).
-static bool stripPage() { return STATE.haveData && currentPage != GIF_PAGE; }
+static bool stripPage() { return STATE.haveData && currentPage != GIF_PAGE && currentPage != MOVIE_PAGE; }
 
 // Hit-test order (design.md 9.2): sleep corner, the modal layer, page
 // controls, then the page halves.

@@ -1532,9 +1532,9 @@ brightness jumps are easiest to avoid.
 ### 13.1 Navigation model
 
 ```
-                +-------------------- CAROUSEL (X axis, wraps) ---------------------+
-                | Status | Projects | Limits | Cats | Mixed | Note |  (6 peers)      |
-                +--------------------------------------------------------------------+
+                +-------------------- CAROUSEL (X axis, wraps) -----------------------------+
+                | Status | Projects | Limits | Cats | Movies | Mixed | Note |  (7 peers)     |
+                +----------------------------------------------------------------------------+
                      |  tap card / strip target               |  gear
                      v  (Y axis: sheet up)                    v  (Y axis: sheet up)
               +--------------+  +---------------+     +------------------+  push (X)  +-------------+
