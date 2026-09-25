@@ -619,7 +619,7 @@ forward" has to stay symmetric and predictable whatever the layout. Only tappabl
 - Slot b's space is reserved even while its icon is hidden, so nothing jumps when Battery Save turns on.
 - Over media, slot b gets a `color.plate` backing (§11.20). Slot a's sleep pill is drawn bare, with no plate.
 
-**The close slot** (top-left, on every overlay, sheet and modal screen):
+**The close slot** (top-left, on every overlay, sheet and modal screen except Weather):
 
 | Glyph box | Hit box |
 |---|---|
@@ -627,9 +627,9 @@ forward" has to stay symmetric and predictable whatever the layout. Only tappabl
 
 It mirrors the system corner. The band y 0..43 across the top of these screens is the
 **modal header** (§11.14): close or back in the slot, the title in headline at x 60, and the
-system corner on the right. An overlay whose first content is a hero readout (Weather)
-may put that hero card at x 60..471, y 8..71 **in place of the title**. Nothing else
-may share the band.
+system corner on the right. Nothing else may share the band. The Weather sheet has no
+close glyph (a tap anywhere dismisses it), so its hero card takes the whole band instead,
+x 8..471, y 8..71 (its ink still 8 px clear of the system corner).
 
 **The status strip.** See §11.12.
 
@@ -676,7 +676,8 @@ What the migration does to page 0:
 - Each limit card keeps two short caption lines, `Resets …` then `in …`, now in caption
   rather than body.
 - The clock moves beside its readout and grows to r 76.
-- The Weather strip gains a fourth hour and a disclosure chevron, because it's tappable.
+- The Weather strip shows five hours after Now (5 × 40 px columns). It carries no disclosure chevron and no `C`
+  unit (see §11.1).
 
 **The same left column is shared** by the Mixed and Note pages (`drawLimitsCard` +
 `drawBtcCard`), so their right panes widen to 284 × 272 too:
@@ -982,6 +983,23 @@ reads as a quantity and an outline reads as an object or action.
 - **Semantics:** one glyph means one thing everywhere. Don't reuse the gear
   for anything but Settings, or a chevron for anything but "goes deeper".
 
+### 10.5 Content glyph material
+
+Weather glyphs keep their flat shape and their `color.content.*` base colour, and
+get a light 3D finish on top. The shape renders white-on-black into a 64 × 64
+coverage mask, and every effect below is derived from that mask, so no effect
+can move an edge. System glyphs stay flat.
+
+| Effect | Rule |
+|---|---|
+| **Drop shadow** | The mask, 3 × 3 box-blurred, offset (max(1, 0.6k), max(1, 1.2k)), darkens what's under it by up to 55%. |
+| **Gradient** | Vertical, across the glyph's 9k radius: up to 22% toward white at the top, the base colour at the centre, up to 25% toward black at the bottom. |
+| **Bevel** | Emboss with light from the top-left: `cov(x−1, y−1) − cov(x+1, y+1)` lightens lit edges by up to 43% and darkens shaded edges by up to 35%. |
+| **Reflection** | A specular ellipse centred at (−0.35, −0.45) of the radius, 0.45 × 0.30 in size, up to 51% toward white and fading to its rim. |
+
+The integer maths lives in `pages.cpp`'s `compositeWeatherIcon`, and the simulator
+twins it exactly. Colours differ only by RGB565 rounding.
+
 ---
 
 ## 11. Components
@@ -1011,6 +1029,10 @@ excluded on purpose are listed in §11.23.
   the right edge of its content box, vertically centred. The card reserves a 24 px
   column for it (the glyph plus `space.sm`). The **whole card** is the hit box. A card
   never contains a second target unless each target is ≥44 px and 8 px apart.
+  **Exception:** the status page's Weather strip draws no chevron (a fifth hour takes its
+  24 px column) and its temperatures carry no `C` unit; the strip still opens the Weather sheet.
+  A 1 px `text.primary` divider (x 260, the content box's height) separates Now from the
+  next hour.
 
 ### 11.2 Section label
 
@@ -1318,7 +1340,7 @@ settings, overlays and media. Sleep is checked first in hit-testing (§9.2).
 - **Enter:** rises from the bottom edge, where its trigger is (§12.5), with
   `motion.spring.sheet`. The page behind steps through the scrim (§8.4).
 - **Dismiss**, always downward along the path it came in:
-  - the close glyph
+  - the close glyph (every sheet but Weather, which has none)
   - a vertical drag down (§9.4), with velocity handoff
   - **tap anywhere**, on read-only sheets only (Weather and Device Stats have no other
     targets). Settings has targets, so a stray tap there must never close it.

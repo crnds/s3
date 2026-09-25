@@ -52,11 +52,13 @@ bool pixelShiftTick(uint32_t now) {
 // through the library's per-pixel readRect/writeImage effect path, which cost
 // ~30 ms on the status page. The pixels are the same algorithm's; the
 // simulator's gfx.fillSmoothRoundRect is the twin. Respects the clip rect.
+// aaTarget is the sprite `g` draws into: `frame`, or the weather icon mask.
+static LGFX_Sprite* aaTarget = &frame;
 static inline void blendPx(int x, int y, uint16_t c, uint8_t a) {
   int32_t cx, cy, cw, ch;
   g->getClipRect(&cx, &cy, &cw, &ch);
   if (x < cx || y < cy || x >= cx + cw || y >= cy + ch) return;
-  uint16_t* p = (uint16_t*)frame.getBuffer() + y * SCREEN_W + x;
+  uint16_t* p = (uint16_t*)aaTarget->getBuffer() + y * aaTarget->width() + x;
   uint16_t d = (uint16_t)((*p >> 8) | (*p << 8));
   uint32_t dr = (d >> 11) & 31, dg = (d >> 5) & 63, db = d & 31;
   uint32_t sr = (c >> 11) & 31, sg = (c >> 5) & 63, sb = c & 31;
@@ -522,26 +524,29 @@ static void drawProjectsPage() {
 
 // ── WEATHER GLYPHS (content family, design.md 10) ──────────
 // Filled vector shapes mapped from Open-Meteo's WMO weather_code, CENTRED on
-// (cx, cy) and scaled by k from the CYD's ~18px geometry.
-static void drawWeatherIcon(int cx, int cy, int code, float k) {
+// (cx, cy) and scaled by k from the CYD's ~18px geometry. Each is one colour.
+static uint16_t weatherIconColour(int code) {
+  if (code <= 1 || code >= 95) return TOK_COLOR_CONTENT_SUN;  // clear, thunderstorm
+  if ((code >= 71 && code <= 77) || code == 85 || code == 86) return TOK_COLOR_CONTENT_SNOW;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return TOK_COLOR_CONTENT_RAIN;
+  return TOK_COLOR_CONTENT_CLOUD;
+}
+
+// The shape alone, every part in ink `c`.
+static void weatherIconShape(int cx, int cy, int code, float k, uint16_t c) {
   auto S = [k](float v) { return (int)lroundf(v * k); };
   float lw = 1.0f * k;
-  if (code < 0) {
-    drawTextC(TOK_TYPE_CAPTION, cx, cy - fontLineH(TOK_TYPE_CAPTION) / 2, "--", TOK_COLOR_TEXT_TERTIARY);
-    return;
-  }
-  const uint16_t sun = TOK_COLOR_CONTENT_SUN;
   if (code == 0 || code == 1) {
     // clear: sun disc + 8 short rounded rays with a gap between disc and rays.
-    aaFillCircle(cx, cy, S(4), sun);
-    g->drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, sun);
-    g->drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, sun);
-    g->drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, sun);
-    g->drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, sun);
-    g->drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, sun);
-    g->drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, sun);
-    g->drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, sun);
-    g->drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, sun);
+    aaFillCircle(cx, cy, S(4), c);
+    g->drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, c);
+    g->drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, c);
+    g->drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, c);
+    g->drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, c);
+    g->drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, c);
+    g->drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, c);
+    g->drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, c);
+    g->drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, c);
     return;
   }
   // Rain/snow/lightning are drawn standalone (no cloud underneath) so the
@@ -549,37 +554,140 @@ static void drawWeatherIcon(int cx, int cy, int code, float k) {
   if (code >= 95) {
     // thunderstorm: zigzag bolt as 4 triangles. Vertices:
     // A(-1,+8) B(-1,+2) C(-5,+2) D(+1,-8) E(+1,-2) F(+5,-2).
-    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), sun);
-    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), sun);
-    g->fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), sun);
-    g->fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), sun);
+    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), c);
+    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), c);
+    g->fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), c);
+    g->fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), c);
     return;
   }
   if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
     // snow: six-armed snowflake = three rounded lines crossing at 60deg
-    const uint16_t c = TOK_COLOR_CONTENT_SNOW;
     g->drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, c);
     g->drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, c);
     g->drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, c);
     return;
   }
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
-    // rain: three staggered teardrops, two small on top, one large below.
-    const uint16_t c = TOK_COLOR_CONTENT_RAIN;
-    g->fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), c);
-    aaFillCircle(cx - S(6), cy - S(3), S(2), c);
-    g->fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), c);
-    aaFillCircle(cx + S(5), cy - S(1), S(2), c);
-    g->fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), c);
-    aaFillCircle(cx - S(1), cy + S(6), S(3), c);
+    // rain: one centred teardrop, tip at y -8, a r 5 bulb centred at y +3;
+    // the triangle meets the bulb on its tangents (x +-4.45, y +0.7).
+    g->fillTriangle(cx, cy - S(8), cx - S(4.45f), cy + S(0.7f), cx + S(4.45f), cy + S(0.7f), c);
+    aaFillCircle(cx, cy + S(3), S(5), c);
     return;
   }
   // Everything else shares a plain cloud (2/3/45/48 = cloudy/fog, or any
   // unmapped code): two overlapping puffs on a fully-rounded pill base.
-  const uint16_t c = TOK_COLOR_CONTENT_CLOUD;
   aaFillCircle(cx - S(4), cy - S(2), S(4), c);
   aaFillCircle(cx + S(3), cy - S(3), S(5), c);
   aaFillRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), c);
+}
+
+
+// ── Weather glyph material (design.md 10.5): drop shadow, vertical gradient,
+//    emboss bevel, specular spot. The shape renders white-on-black into a
+//    64x64 coverage mask; every effect is computed from that mask and
+//    composited over the frame, so shape and base colour stay exactly the
+//    shape's. Integer math, twin of simulator-s3.html's compositeWeatherIcon.
+static const int WX_MASK = 64, WX_MASK_C = WX_MASK / 2;
+static LGFX_Sprite wxMask;
+static uint8_t wxCov[WX_MASK * WX_MASK];
+static int wxX0, wxY0, wxX1, wxY1;  // coverage bbox in the mask, inclusive
+
+static inline int covAt(int x, int y) {
+  return (x < 0 || y < 0 || x >= WX_MASK || y >= WX_MASK) ? 0 : wxCov[y * WX_MASK + x];
+}
+static inline int lighten(int v, int amt) { return v + (((255 - v) * amt) >> 8); }  // amt 0..256
+static inline int darken(int v, int amt) { return v - ((v * amt) >> 8); }
+
+// Base colour shaded for mask pixel (mx, my); r9 = the glyph's 9-unit radius.
+static void wxShade(int mx, int my, int r9, int& r, int& gg, int& b) {
+  int ch[3] = {r, gg, b};
+  int t = (my - WX_MASK_C) * 256 / r9;                      // -256 top .. 256 bottom
+  if (t > 256) t = 256;
+  if (t < -256) t = -256;
+  int e = covAt(mx - 1, my - 1) - covAt(mx + 1, my + 1);    // emboss, light from top-left
+  int u = (mx - WX_MASK_C) * 256 / r9 + 90, v = (my - WX_MASK_C) * 256 / r9 + 115;
+  int spot = u * u / 52 + v * v / 23;                        // < 256 inside the specular ellipse
+  for (int i = 0; i < 3; i++) {
+    int c = ch[i];
+    c = t < 0 ? lighten(c, (-t * 56) >> 8) : darken(c, (t * 64) >> 8);   // gradient
+    c = e < 0 ? lighten(c, (-e * 110) >> 8) : darken(c, (e * 90) >> 8);  // bevel
+    if (spot < 256) c = lighten(c, ((256 - spot) * 130) >> 8);            // reflection
+    ch[i] = c;
+  }
+  r = ch[0]; gg = ch[1]; b = ch[2];
+}
+
+static void compositeWeatherIcon(int cx, int cy, float k, uint16_t base) {
+  const int r9 = (int)lroundf(9 * k);
+  const int sdx = max(1, (int)lroundf(0.6f * k)), sdy = max(1, (int)lroundf(1.2f * k));
+  int br = (base >> 11) & 31, bg = (base >> 5) & 63, bb = base & 31;
+  br = (br << 3) | (br >> 2); bg = (bg << 2) | (bg >> 4); bb = (bb << 3) | (bb >> 2);
+  uint16_t* fb = (uint16_t*)frame.getBuffer();
+  const int ox = cx - WX_MASK_C, oy = cy - WX_MASK_C;
+  // Only the coverage bbox, grown by the shadow's reach (offset + blur).
+  const int x0 = max(0, wxX0 - 1), y0 = max(0, wxY0 - 1);
+  const int x1 = min(WX_MASK - 1, wxX1 + sdx + 1), y1 = min(WX_MASK - 1, wxY1 + sdy + 1);
+  for (int my = y0; my <= y1; my++) {
+    int fy = oy + my;
+    if (fy < 0 || fy >= SCREEN_H) continue;
+    for (int mx = x0; mx <= x1; mx++) {
+      int fx = ox + mx;
+      if (fx < 0 || fx >= SCREEN_W) continue;
+      int cov = wxCov[my * WX_MASK + mx];
+      int sh = 0;  // 3x3 box-blurred coverage under the offset shadow
+      for (int j = -1; j <= 1; j++)
+        for (int i = -1; i <= 1; i++) sh += covAt(mx - sdx + i, my - sdy + j);
+      sh /= 9;
+      if (!cov && !sh) continue;
+      uint16_t* p = fb + fy * SCREEN_W + fx;
+      uint16_t d = (uint16_t)((*p >> 8) | (*p << 8));
+      int dr = (d >> 11) & 31, dg = (d >> 5) & 63, db = d & 31;
+      dr = (dr << 3) | (dr >> 2); dg = (dg << 2) | (dg >> 4); db = (db << 3) | (db >> 2);
+      if (sh) {
+        int a = (sh * 140) >> 8;  // shadow.opacity ~55%
+        dr = darken(dr, a); dg = darken(dg, a); db = darken(db, a);
+      }
+      if (cov) {
+        int sr = br, sg = bg, sb = bb;
+        wxShade(mx, my, r9, sr, sg, sb);
+        dr += (sr - dr) * cov / 255; dg += (sg - dg) * cov / 255; db += (sb - db) * cov / 255;
+      }
+      uint16_t o = (uint16_t)(((dr >> 3) << 11) | ((dg >> 2) << 5) | (db >> 3));
+      *p = (uint16_t)((o >> 8) | (o << 8));
+    }
+  }
+}
+
+static void drawWeatherIcon(int cx, int cy, int code, float k) {
+  if (code < 0) {
+    drawTextC(TOK_TYPE_CAPTION, cx, cy - fontLineH(TOK_TYPE_CAPTION) / 2, "--", TOK_COLOR_TEXT_TERTIARY);
+    return;
+  }
+  if (!wxMask.getBuffer()) {
+    wxMask.setColorDepth(16);
+    wxMask.setPsram(false);
+    if (!wxMask.createSprite(WX_MASK, WX_MASK)) {  // no mask: the flat glyph
+      weatherIconShape(cx, cy, code, k, weatherIconColour(code));
+      return;
+    }
+  }
+  lgfx::LovyanGFX* saved = g;
+  wxMask.fillSprite(TFT_BLACK);
+  g = &wxMask; aaTarget = &wxMask;
+  weatherIconShape(WX_MASK_C, WX_MASK_C, code, k, TFT_WHITE);
+  g = saved; aaTarget = &frame;
+  const uint16_t* m = (const uint16_t*)wxMask.getBuffer();
+  wxX0 = wxY0 = WX_MASK; wxX1 = wxY1 = -1;
+  for (int i = 0; i < WX_MASK * WX_MASK; i++) {
+    int g6 = (((uint16_t)((m[i] >> 8) | (m[i] << 8))) >> 5) & 63;
+    wxCov[i] = (uint8_t)((g6 << 2) | (g6 >> 4));
+    if (g6) {
+      int x = i % WX_MASK, y = i / WX_MASK;
+      wxX0 = min(wxX0, x); wxX1 = max(wxX1, x); wxY0 = min(wxY0, y); wxY1 = max(wxY1, y);
+    }
+  }
+  if (wxX1 < 0) return;
+  compositeWeatherIcon(cx, cy, k, weatherIconColour(code));
 }
 
 // Degree ring (design.md 10.3): r 4 / r 3, text.secondary, top-aligned to
@@ -592,12 +700,9 @@ static int drawDegreeRing(int x, int capTop, uint16_t bg) {
 
 // Compact temperature: the value, then "C" in caption + secondary on the
 // same baseline (design.md 5.3 rule 4). Centred on cx.
-static void drawTempC(FontId f, int cx, int y, int t, bool have) {
-  if (!have) { drawTextC(f, cx, y, "--", TOK_COLOR_TEXT_TERTIARY); return; }
-  String v = String(t);
-  int w = textW(f, v) + textW(TOK_TYPE_CAPTION, "C");
-  int x = drawText(f, cx - w / 2, y, v, TOK_COLOR_TEXT_PRIMARY);
-  drawText(TOK_TYPE_CAPTION, x, y + fontAscent(f) - fontAscent(TOK_TYPE_CAPTION), "C", TOK_COLOR_TEXT_SECONDARY);
+static void drawTemp(FontId f, int cx, int y, int t, bool have) {
+  if (have) drawTextC(f, cx, y, String(t), TOK_COLOR_TEXT_PRIMARY);
+  else drawTextC(f, cx, y, "--", TOK_COLOR_TEXT_TERTIARY);
 }
 
 // ── PACE SWEEP (motion.sweep) ──────────────────────────────
@@ -1164,7 +1269,8 @@ static void drawStatusPage() {
   if (haveAqi) drawAqiBadge(READOUT_X, y, STATE.aqi);
 
   // ── weather strip (compact card, tappable -> Weather sheet) ──
-  // H/L 20 | now 40 | 4 x 44 hourly | 24 disclosure column = 260 inner.
+  // H/L 20 | now 40 | 5 x 40 hourly = 260 inner. No disclosure chevron
+  // (design.md 11.1's exception); the whole card is still the target.
   const int ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;   // 200
   const int iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;           // 216
   const int glyphCy = iy + 17 + 11;                                       // 244
@@ -1178,24 +1284,23 @@ static void drawStatusPage() {
   const int nowCx = ix + 20 + 20;
   drawTextC(TOK_TYPE_CAPTION, nowCx, iy, "Now", TOK_COLOR_ACCENT);
   drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2f);
-  drawTempC(TOK_TYPE_NUMERAL_SM, nowCx, lowY, (int)round(STATE.weatherTempC), STATE.weatherTempC > -900);
+  drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, lowY, (int)round(STATE.weatherTempC), STATE.weatherTempC > -900);
+  // 1px divider on the now | next-hour column boundary, the content box's height.
+  g->fillRect(ix + 60, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_PRIMARY);
 
-  // Next 4 hours: weatherHourly[] starts at the current hour (the "now"
-  // column), so indices 1..4.
-  for (int i = 0; i < 4; i++) {
+  // Next 5 hours: weatherHourly[] starts at the current hour (the "now"
+  // column), so indices 1..5.
+  for (int i = 0; i < 5; i++) {
     int idx = i + 1;
-    int cx = ix + 60 + i * 44 + 22;
+    int cx = ix + 60 + i * 40 + 20;
     bool have = STATE.weatherHourlyCount > idx;
     char hbuf[4];
     if (have) snprintf(hbuf, sizeof(hbuf), "%02d", STATE.weatherHourly[idx].hour);
     drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? hbuf : "--",
               have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
     drawWeatherIcon(cx, glyphCy, have ? STATE.weatherHourly[idx].code : -1, 1.2f);
-    drawTempC(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? STATE.weatherHourly[idx].tempC : 0, have);
+    drawTemp(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? STATE.weatherHourly[idx].tempC : 0, have);
   }
-  // Disclosure chevron: a hint, always tertiary; the whole card is the target.
-  drawChevron(TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - TOK_SPACE_CARD_PAD_COMPACT_H - 8,
-              WEATHER_CARD_Y + WEATHER_CARD_H / 2, TOK_COLOR_TEXT_TERTIARY);
 }
 
 // ── DEVICE STATS SHEET ─────────────────────────────────────
@@ -1242,9 +1347,10 @@ static void drawDevicePage() {
 }
 
 // ── WEATHER SHEET ──────────────────────────────────────────
-// The hero card takes the header band in place of a title (design.md 7.3):
-// x 60..471, y 8..71. Then the hourly card (next 6) and the 5-day card.
-static const int WX_HERO_X = TOK_HEADER_TITLE_X, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
+// No close glyph -- a tap anywhere dismisses it -- so the hero card spans the
+// full content width: x 8..471, y 8..71. Then the hourly card (next 6) and the
+// 5-day card.
+static const int WX_HERO_X = TOK_LAYOUT_CONTENT_X0, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
 static const int WX_HERO_W = TOK_LAYOUT_CONTENT_X1 - WX_HERO_X, WX_HERO_H = 64;
 static const int WX_HOURLY_Y = WX_HERO_Y + WX_HERO_H + TOK_SPACE_GUTTER;          // 80
 static const int WX_HOURLY_H = 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS + 23 + 2 * TOK_SPACE_CARD_PAD_COMPACT_V;  // 92
@@ -1252,8 +1358,6 @@ static const int WX_DAILY_Y = WX_HOURLY_Y + WX_HOURLY_H + TOK_SPACE_GUTTER;     
 static const int WX_DAILY_H = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - WX_DAILY_Y;          // 132
 
 static void drawWeatherPage() {
-  drawModalHeader(false, nullptr, pressedId == PRESS_CLOSE);
-
   // ── Hero: glyph.content.lg, the display temperature + degree ring,
   //    condition (headline) over H / L (body), AQI badge right ──
   drawCard(WX_HERO_X, WX_HERO_Y, WX_HERO_W, WX_HERO_H);
@@ -1347,7 +1451,7 @@ static void drawWeatherPage() {
       int x0 = barX + (int)((lo - minT) / span * barW);
       int x1 = barX + (int)((hi - minT) / span * barW);
       if (x1 - x0 < TOK_METER_MD) x1 = x0 + TOK_METER_MD;
-      aaFillRoundRect(x0, barY, x1 - x0, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_TEXT_PRIMARY);
+      aaFillRoundRect(x0, barY, x1 - x0, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_ACCENT);
     }
     if (have) drawText(TOK_TYPE_BODY, highX, y, String(hi), TOK_COLOR_TEXT_PRIMARY);
     else drawText(TOK_TYPE_BODY, highX, y, "--", TOK_COLOR_TEXT_TERTIARY);

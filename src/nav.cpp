@@ -513,7 +513,8 @@ static Target hitTest(int32_t x, int32_t y, int& idx) {
     idx = settingsLeafHit(x, y);
     return idx >= 0 ? TG_CELL : TG_NONE;
   }
-  if (weatherPageOpen || devicePageOpen) return closeHit ? TG_CLOSE : TG_SHEET_ANY;
+  if (weatherPageOpen) return TG_SHEET_ANY;  // no close glyph: tap anywhere
+  if (devicePageOpen) return closeHit ? TG_CLOSE : TG_SHEET_ANY;
   bool offline = !STATE.haveData;
   if (!offline && currentPage == 0 &&
       inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return TG_WEATHER;

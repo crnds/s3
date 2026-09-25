@@ -467,7 +467,7 @@ function makeFrame() {
   return c;
 }
 const frameCanvas = makeFrame();
-const ctx = frameCanvas.getContext('2d', { willReadFrequently: true });
+let ctx = frameCanvas.getContext('2d', { willReadFrequently: true });  // swapped to the weather icon mask while it draws
 const prevFrame = makeFrame(), behindFrame = makeFrame();
 function copyFrame(dst, src) { dst.getContext('2d').drawImage(src, 0, 0); }
 
@@ -1099,63 +1099,144 @@ function drawProjectsPage() {
 }
 
 // ── WEATHER GLYPHS ────────────────────────────────────────────
-function drawWeatherIcon(cx, cy, code, k) {
+function weatherIconColour(code) {
+  if (code <= 1 || code >= 95) return TOK_COLOR_CONTENT_SUN;
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return TOK_COLOR_CONTENT_SNOW;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return TOK_COLOR_CONTENT_RAIN;
+  return TOK_COLOR_CONTENT_CLOUD;
+}
+function weatherIconShape(cx, cy, code, k, c) {
   const S = (v) => Math.round(v * k);
   const lw = 1.0 * k;
-  if (code < 0) { drawTextC(TOK_TYPE_CAPTION, cx, cy - Math.trunc(fontLineH(TOK_TYPE_CAPTION) / 2), '--', TOK_COLOR_TEXT_TERTIARY); return; }
-  const sun = TOK_COLOR_CONTENT_SUN;
   if (code === 0 || code === 1) {
-    gfx.fillSmoothCircle(cx, cy, S(4), sun);
-    gfx.drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, sun);
-    gfx.drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, sun);
-    gfx.drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, sun);
-    gfx.drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, sun);
-    gfx.drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, sun);
-    gfx.drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, sun);
-    gfx.drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, sun);
-    gfx.drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, sun);
+    gfx.fillSmoothCircle(cx, cy, S(4), c);
+    gfx.drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, c);
+    gfx.drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, c);
+    gfx.drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, c);
+    gfx.drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, c);
+    gfx.drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, c);
+    gfx.drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, c);
+    gfx.drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, c);
+    gfx.drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, c);
     return;
   }
   if (code >= 95) {
-    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), sun);
-    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), sun);
-    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), sun);
-    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), sun);
+    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), c);
+    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), c);
+    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), c);
+    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), c);
     return;
   }
   if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
-    const c = TOK_COLOR_CONTENT_SNOW;
     gfx.drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, c);
     gfx.drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, c);
     gfx.drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, c);
     return;
   }
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
-    const c = TOK_COLOR_CONTENT_RAIN;
-    gfx.fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), c);
-    gfx.fillSmoothCircle(cx - S(6), cy - S(3), S(2), c);
-    gfx.fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), c);
-    gfx.fillSmoothCircle(cx + S(5), cy - S(1), S(2), c);
-    gfx.fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), c);
-    gfx.fillSmoothCircle(cx - S(1), cy + S(6), S(3), c);
+    gfx.fillTriangle(cx, cy - S(8), cx - S(4.45), cy + S(0.7), cx + S(4.45), cy + S(0.7), c);
+    gfx.fillSmoothCircle(cx, cy + S(3), S(5), c);
     return;
   }
-  const c = TOK_COLOR_CONTENT_CLOUD;
   gfx.fillSmoothCircle(cx - S(4), cy - S(2), S(4), c);
   gfx.fillSmoothCircle(cx + S(3), cy - S(3), S(5), c);
   gfx.fillSmoothRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), c);
+}
+
+// Weather glyph material (design.md 10.5): pages.cpp's compositeWeatherIcon,
+// same integer math. The shape renders white-on-black into a 64x64 mask; the
+// shadow, gradient, bevel and specular spot all come from that coverage.
+const WX_MASK = 64, WX_MASK_C = WX_MASK / 2;
+const wxMaskCanvas = document.createElement('canvas');
+wxMaskCanvas.width = wxMaskCanvas.height = WX_MASK;
+const wxMaskCtx = wxMaskCanvas.getContext('2d', { willReadFrequently: true });
+const wxCov = new Uint8Array(WX_MASK * WX_MASK);
+let wxX0 = 0, wxY0 = 0, wxX1 = -1, wxY1 = -1;  // coverage bbox in the mask, inclusive
+function covAt(x, y) { return (x < 0 || y < 0 || x >= WX_MASK || y >= WX_MASK) ? 0 : wxCov[y * WX_MASK + x]; }
+const lighten = (v, amt) => v + (((255 - v) * amt) >> 8);
+const darken = (v, amt) => v - ((v * amt) >> 8);
+function wxShade(mx, my, r9, ch) {
+  let t = Math.trunc((my - WX_MASK_C) * 256 / r9);
+  if (t > 256) t = 256;
+  if (t < -256) t = -256;
+  const e = covAt(mx - 1, my - 1) - covAt(mx + 1, my + 1);
+  const u = Math.trunc((mx - WX_MASK_C) * 256 / r9) + 90, v = Math.trunc((my - WX_MASK_C) * 256 / r9) + 115;
+  const spot = Math.trunc(u * u / 52) + Math.trunc(v * v / 23);
+  for (let i = 0; i < 3; i++) {
+    let c = ch[i];
+    c = t < 0 ? lighten(c, (-t * 56) >> 8) : darken(c, (t * 64) >> 8);
+    c = e < 0 ? lighten(c, (-e * 110) >> 8) : darken(c, (e * 90) >> 8);
+    if (spot < 256) c = lighten(c, ((256 - spot) * 130) >> 8);
+    ch[i] = c;
+  }
+}
+function compositeWeatherIcon(cx, cy, k, base) {
+  const r9 = Math.round(9 * k);
+  const sdx = Math.max(1, Math.round(0.6 * k)), sdy = Math.max(1, Math.round(1.2 * k));
+  const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(base);
+  const b0 = [+m[1], +m[2], +m[3]];
+  const ox = cx - WX_MASK_C, oy = cy - WX_MASK_C;
+  const img = ctx.getImageData(ox, oy, WX_MASK, WX_MASK), d = img.data;
+  const ch = [0, 0, 0];
+  const x0 = Math.max(0, wxX0 - 1), y0 = Math.max(0, wxY0 - 1);
+  const x1 = Math.min(WX_MASK - 1, wxX1 + sdx + 1), y1 = Math.min(WX_MASK - 1, wxY1 + sdy + 1);
+  for (let my = y0; my <= y1; my++) {
+    for (let mx = x0; mx <= x1; mx++) {
+      const cov = wxCov[my * WX_MASK + mx];
+      let sh = 0;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) sh += covAt(mx - sdx + i, my - sdy + j);
+      sh = Math.trunc(sh / 9);
+      if (!cov && !sh) continue;
+      const p = (my * WX_MASK + mx) * 4;
+      let dr = d[p], dg = d[p + 1], db = d[p + 2];
+      if (sh) {
+        const a = (sh * 140) >> 8;
+        dr = darken(dr, a); dg = darken(dg, a); db = darken(db, a);
+      }
+      if (cov) {
+        ch[0] = b0[0]; ch[1] = b0[1]; ch[2] = b0[2];
+        wxShade(mx, my, r9, ch);
+        dr += Math.trunc((ch[0] - dr) * cov / 255);
+        dg += Math.trunc((ch[1] - dg) * cov / 255);
+        db += Math.trunc((ch[2] - db) * cov / 255);
+      }
+      d[p] = dr; d[p + 1] = dg; d[p + 2] = db;
+    }
+  }
+  ctx.putImageData(img, ox, oy);
+}
+function drawWeatherIcon(cx, cy, code, k) {
+  if (code < 0) { drawTextC(TOK_TYPE_CAPTION, cx, cy - Math.trunc(fontLineH(TOK_TYPE_CAPTION) / 2), '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  const saved = ctx;
+  wxMaskCtx.fillStyle = 'rgb(0,0,0)';
+  wxMaskCtx.fillRect(0, 0, WX_MASK, WX_MASK);
+  ctx = wxMaskCtx;
+  // Additive, so the canvas's AA seams where two parts meet sum back to solid
+  // (the firmware's fillTriangle has no AA, so it has no seams to close).
+  wxMaskCtx.globalCompositeOperation = 'lighter';
+  weatherIconShape(WX_MASK_C, WX_MASK_C, code, k, 'rgb(255,255,255)');
+  wxMaskCtx.globalCompositeOperation = 'source-over';
+  ctx = saved;
+  const md = wxMaskCtx.getImageData(0, 0, WX_MASK, WX_MASK).data;
+  wxX0 = wxY0 = WX_MASK; wxX1 = wxY1 = -1;
+  for (let i = 0; i < WX_MASK * WX_MASK; i++) {
+    wxCov[i] = md[i * 4 + 1];
+    if (wxCov[i]) {
+      const x = i % WX_MASK, y = Math.trunc(i / WX_MASK);
+      wxX0 = Math.min(wxX0, x); wxX1 = Math.max(wxX1, x); wxY0 = Math.min(wxY0, y); wxY1 = Math.max(wxY1, y);
+    }
+  }
+  if (wxX1 < 0) return;
+  compositeWeatherIcon(cx, cy, k, weatherIconColour(code));
 }
 function drawDegreeRing(x, capTop, bg) {
   gfx.fillSmoothCircle(x + 4, capTop + 4, 4, TOK_COLOR_TEXT_SECONDARY);
   gfx.fillSmoothCircle(x + 4, capTop + 4, 2, bg);
   return x + 9;
 }
-function drawTempC(f, cx, y, t, have) {
-  if (!have) { drawTextC(f, cx, y, '--', TOK_COLOR_TEXT_TERTIARY); return; }
-  const v = String(t);
-  const w = textW(f, v) + textW(TOK_TYPE_CAPTION, 'C');
-  const x = drawText(f, cx - Math.trunc(w / 2), y, v, TOK_COLOR_TEXT_PRIMARY);
-  drawText(TOK_TYPE_CAPTION, x, y + fontAscent(f) - fontAscent(TOK_TYPE_CAPTION), 'C', TOK_COLOR_TEXT_SECONDARY);
+function drawTemp(f, cx, y, t, have) {
+  if (have) drawTextC(f, cx, y, String(t), TOK_COLOR_TEXT_PRIMARY);
+  else drawTextC(f, cx, y, '--', TOK_COLOR_TEXT_TERTIARY);
 }
 
 // ── PACE SWEEP (one per successful poll) ──────────────────────
@@ -1503,19 +1584,18 @@ function drawStatusPage() {
   const nowCx = ix + 20 + 20;
   drawTextC(TOK_TYPE_CAPTION, nowCx, iy, 'Now', TOK_COLOR_ACCENT);
   drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2);
-  drawTempC(TOK_TYPE_NUMERAL_SM, nowCx, lowY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
-  for (let i = 0; i < 4; i++) {
+  drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, lowY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
+  gfx.fillRect(ix + 60, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_PRIMARY);
+  for (let i = 0; i < 5; i++) {
     const idx = i + 1;
-    const cx = ix + 60 + i * 44 + 22;
+    const cx = ix + 60 + i * 40 + 20;
     const have = STATE.weatherHourly.length > idx;
     const hr = have ? STATE.weatherHourly[idx] : null;
     drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? String(hr.h).padStart(2, '0') : '--',
               have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
     drawWeatherIcon(cx, glyphCy, have ? hr.code : -1, 1.2);
-    drawTempC(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? hr.tempC : 0, have);
+    drawTemp(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? hr.tempC : 0, have);
   }
-  drawChevron(TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - TOK_SPACE_CARD_PAD_COMPACT_H - 8,
-              WEATHER_CARD_Y + WEATHER_CARD_H / 2, TOK_COLOR_TEXT_TERTIARY);
 }
 
 // ── DEVICE STATS SHEET ────────────────────────────────────────
@@ -1545,14 +1625,13 @@ function drawDevicePage() {
 }
 
 // ── WEATHER SHEET ─────────────────────────────────────────────
-const WX_HERO_X = TOK_HEADER_TITLE_X, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
+const WX_HERO_X = TOK_LAYOUT_CONTENT_X0, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
 const WX_HERO_W = TOK_LAYOUT_CONTENT_X1 - WX_HERO_X, WX_HERO_H = 64;
 const WX_HOURLY_Y = WX_HERO_Y + WX_HERO_H + TOK_SPACE_GUTTER;
 const WX_HOURLY_H = 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS + 23 + 2 * TOK_SPACE_CARD_PAD_COMPACT_V;
 const WX_DAILY_Y = WX_HOURLY_Y + WX_HOURLY_H + TOK_SPACE_GUTTER;
 const WX_DAILY_H = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - WX_DAILY_Y;
 function drawWeatherPage() {
-  drawModalHeader(false, null, NAV.pressedId === 'close');
   drawCard(WX_HERO_X, WX_HERO_Y, WX_HERO_W, WX_HERO_H);
   const hx = WX_HERO_X + TOK_SPACE_CARD_PAD_HERO;
   drawWeatherIcon(hx + 18, WX_HERO_Y + WX_HERO_H / 2, STATE.weatherCode, 2.0);
@@ -1628,7 +1707,7 @@ function drawWeatherPage() {
       const x0 = barX + Math.trunc((d.low - minT) / span * barW);
       let x1 = barX + Math.trunc((d.high - minT) / span * barW);
       if (x1 - x0 < TOK_METER_MD) x1 = x0 + TOK_METER_MD;
-      gfx.fillSmoothRoundRect(x0, barY, x1 - x0, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_TEXT_PRIMARY);
+      gfx.fillSmoothRoundRect(x0, barY, x1 - x0, TOK_METER_MD, TOK_METER_MD / 2, TOK_COLOR_ACCENT);
     }
     if (have) drawText(TOK_TYPE_BODY, highX, y, String(d.high), TOK_COLOR_TEXT_PRIMARY);
     else drawText(TOK_TYPE_BODY, highX, y, '--', TOK_COLOR_TEXT_TERTIARY);
@@ -2225,7 +2304,8 @@ function hitTest(x, y) {
     const i = settingsLeafHit(x, y);
     return i >= 0 ? ['cell', i] : [null, -1];
   }
-  if (STATE.weatherPageOpen || STATE.devicePageOpen) return [closeHit ? 'close' : 'sheetAny', -1];
+  if (STATE.weatherPageOpen) return ['sheetAny', -1];  // no close glyph: tap anywhere
+  if (STATE.devicePageOpen) return [closeHit ? 'close' : 'sheetAny', -1];
   const offline = !STATE.haveData;
   if (!offline && STATE.currentPage === 0 && inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return ['weather', -1];
   if (stripPage() && y >= STRIP_HIT_Y0) {
