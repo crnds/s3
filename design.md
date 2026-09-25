@@ -961,7 +961,7 @@ reads as a quantity and an outline reads as an object or action.
 | **Back** | 20 | A chevron, 8 px wide × 14 px tall, pointing left, at the left of its label | Same as close |
 | **Disclosure** | 16 | A right-pointing chevron, 5 × 10 | Always `text.tertiary`. It's a hint, not a control. The row or card is the target. |
 | **Gear** | 20 | A ring (r 5, 2 px) plus 8 teeth (2 px, from r 7 to r 9) | Rest: secondary. Pressed: primary. |
-| **Sleep** | 20 | A crescent: a filled r 7 disc minus an offset r 6 disc in the background colour, on a `surface.raised` 24 px disc | Rest: secondary. It **replaces the meaningless 40 × 9 grey pill.** |
+| **Sleep** | 20 | A minimal pill: 14 × 6, radius 3, on a `surface.raised` 24 px disc | Rest: secondary. Pressed: primary, with the disc stepping to `fill.pressed`. |
 | **Battery Save** | 20 | Rounded body 16 × 10 (radius 2) plus a 2 × 4 nub; filled at 50% | Always `status.warning` (a mode indicator; not a target). |
 | **Wi-Fi** | 16 | 3 filled bars, 3 px wide with 2 px gaps, heights 4 / 8 / 12, bottom-aligned | Connected: `status.success`, all filled. **Down: `status.error`, bars drawn as 1 px outlines** (the shape changes, not just the colour). |
 | **Status dot** | 8 | A dot | Server OK: `status.success`, filled. Unreachable: `status.warning` **ring** (2 px). Unknown or booting: `text.tertiary` ring. |

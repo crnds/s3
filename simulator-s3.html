@@ -909,8 +909,7 @@ function drawSystemCorner(overMedia) {
   const pressed = NAV.pressedId === 'sleep';
   const disc = pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_RAISED;
   gfx.fillSmoothCircle(cx, cy, 11, disc);
-  gfx.fillSmoothCircle(cx, cy, 7, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
-  gfx.fillSmoothCircle(cx + 3, cy - 3, 6, disc);
+  gfx.fillSmoothRoundRect(cx - 7, cy - 3, 14, 6, 3, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
 }
 
 function drawModalHeader(back, title, pressed) {

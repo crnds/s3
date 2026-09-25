@@ -223,8 +223,8 @@ void shuffleCentre(bool mixed, int& cx, int& cy) {
 }
 
 // ── SYSTEM CORNER (design.md 7.3) ──────────────────────────
-// Slot a: the sleep icon button (a crescent on a raised 24px disc; pressed =
-// the disc steps to fill.pressed). Slot b: the Battery Save glyph, only while
+// Slot a: the sleep icon button (a minimal grey pill on a raised 24px disc;
+// pressed = the disc steps to fill.pressed). Slot b: the Battery Save glyph, only while
 // active. Drawn last on every screen; over media each occupied slot sits on a
 // plate with a 4px inset around its glyph box.
 void drawSystemCorner(bool overMedia) {
@@ -246,8 +246,7 @@ void drawSystemCorner(bool overMedia) {
   const bool pressed = (pressedId == PRESS_SLEEP);
   const uint16_t disc = pressed ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_SURFACE_RAISED;
   aaFillCircle(cx, cy, 11, disc);
-  aaFillCircle(cx, cy, 7, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
-  aaFillCircle(cx + 3, cy - 3, 6, disc);  // the bite that makes the crescent
+  aaFillRoundRect(cx - 7, cy - 3, 14, 6, 3, pressed ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY);
 }
 
 // ── MODAL HEADER (design.md 11.14) ─────────────────────────
