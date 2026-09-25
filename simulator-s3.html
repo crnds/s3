@@ -305,6 +305,31 @@ const TOK_COLOR_CONTENT_RAIN = TOK_BLUE_500;
 const TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
 const TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
 const TOK_COLOR_PLATE = TOK_BLACK;
+
+// Weather icon depth & gradient tokens
+const TOK_SUN_CORE = 'rgb(255,232,83)';         // 0xFF4A
+const TOK_SUN_MID = 'rgb(255,183,3)';           // 0xFDA0
+const TOK_SUN_EDGE = 'rgb(251,133,0)';          // 0xFC20
+const TOK_SUN_RAY = 'rgb(255,176,0)';           // 0xFD80
+const TOK_CLOUD_LIGHT_TOP = 'rgb(255,255,255)'; // 0xFFFF
+const TOK_CLOUD_LIGHT_MID = 'rgb(226,232,240)'; // 0xE75E
+const TOK_CLOUD_LIGHT_BOT = 'rgb(148,163,184)'; // 0x9517
+const TOK_CLOUD_BACK_TOP = 'rgb(148,163,184)';  // 0x9517
+const TOK_CLOUD_BACK_BOT = 'rgb(100,116,139)';  // 0x63B1
+const TOK_CLOUD_RAIN_TOP = 'rgb(148,163,184)';  // 0x9517
+const TOK_CLOUD_RAIN_BOT = 'rgb(71,85,105)';    // 0x42AD
+const TOK_CLOUD_STORM_TOP = 'rgb(100,116,139)'; // 0x63B1
+const TOK_CLOUD_STORM_BOT = 'rgb(30,41,59)';    // 0x1947
+const TOK_RAIN_TOP = 'rgb(56,189,248)';         // 0x3DFF
+const TOK_RAIN_BOT = 'rgb(29,78,216)';          // 0x1A7B
+const TOK_BOLT_CORE = 'rgb(255,251,235)';       // 0xFFDD
+const TOK_BOLT_MID = 'rgb(250,204,21)';         // 0xFE62
+const TOK_BOLT_TIP = 'rgb(245,158,11)';         // 0xF4E1
+const TOK_SNOW_WHITE = 'rgb(255,255,255)';      // 0xFFFF
+const TOK_SNOW_ICE = 'rgb(186,230,253)';        // 0xBF3F
+const TOK_FOG_BAR1 = 'rgb(226,232,240)';        // 0xE75E
+const TOK_FOG_BAR2 = 'rgb(148,163,184)';        // 0x9517
+const TOK_FOG_BAR3 = 'rgb(100,116,139)';        // 0x63B1
 // Increase Contrast swaps these at runtime (applyContrast).
 let TOK_COLOR_TEXT_SECONDARY = TOK_GRAY_5;
 let TOK_COLOR_FILL_TRACK = TOK_GRAY_3;
@@ -1102,52 +1127,275 @@ function drawProjectsPage() {
   }
 }
 
+// ── WEATHER GLYPH HELPERS ────────────────────────────────────
+function drawSunDisc(cx, cy, r) {
+  const g = ctx.createRadialGradient(cx - r * 0.25, cy - r * 0.25, r * 0.1, cx, cy, r);
+  g.addColorStop(0, TOK_SUN_CORE);
+  g.addColorStop(0.5, TOK_SUN_MID);
+  g.addColorStop(1, TOK_SUN_EDGE);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (r >= 4) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawSunRays(cx, cy, rIn, rOut, lw) {
+  ctx.strokeStyle = TOK_SUN_RAY;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    const isDiag = i % 2 === 1;
+    const rO = isDiag ? rOut * 0.94 : rOut;
+    const rI = isDiag ? rIn * 1.02 : rIn;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * rI, cy + Math.sin(a) * rI);
+    ctx.lineTo(cx + Math.cos(a) * rO, cy + Math.sin(a) * rO);
+    ctx.stroke();
+  }
+}
+
+function drawCloudPath(cx, cy, k, puffScale = 1.0) {
+  const S = (v) => v * k;
+  const p = puffScale;
+  ctx.beginPath();
+  ctx.arc(cx - S(4.5), cy + S(0.8), S(3.6) * p, 0, Math.PI * 2);
+  ctx.arc(cx - S(0.8), cy - S(2.0), S(5.2) * p, 0, Math.PI * 2);
+  ctx.arc(cx + S(3.5), cy + S(0.8), S(3.4) * p, 0, Math.PI * 2);
+  const bw = S(14.5) * p, bh = S(5.5) * p, br = S(2.7) * p;
+  ctx.roundRect(cx - bw / 2, cy + S(1.8) - bh / 2, bw, bh, br);
+}
+
+function drawCloud(cx, cy, k, cTop, cMid, cBot, withHighlight = true, puffScale = 1.0) {
+  const S = (v) => v * k;
+  const yTop = cy - S(7.2) * puffScale;
+  const yBot = cy + S(4.5) * puffScale;
+  const grad = ctx.createLinearGradient(0, yTop, 0, yBot);
+  grad.addColorStop(0, cTop);
+  grad.addColorStop(0.45, cMid);
+  grad.addColorStop(1, cBot);
+
+  drawCloudPath(cx, cy, k, puffScale);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  if (withHighlight && k >= 1.2) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.lineWidth = Math.max(1, 0.9 * k);
+    ctx.beginPath();
+    ctx.arc(cx - S(0.8), cy - S(2.0), S(5.2) - ctx.lineWidth / 2, Math.PI * 1.05, Math.PI * 1.85);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 // ── WEATHER GLYPHS ────────────────────────────────────────────
 function drawWeatherIcon(cx, cy, code, k) {
-  const S = (v) => Math.round(v * k);
-  const lw = 1.0 * k;
   if (code < 0) { drawTextC(TOK_TYPE_CAPTION, cx, cy - Math.trunc(fontLineH(TOK_TYPE_CAPTION) / 2), '--', TOK_COLOR_TEXT_TERTIARY); return; }
-  const sun = TOK_COLOR_CONTENT_SUN;
-  if (code === 0 || code === 1) {
-    gfx.fillSmoothCircle(cx, cy, S(4), sun);
-    gfx.drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, sun);
-    gfx.drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, sun);
-    gfx.drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, sun);
-    gfx.drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, sun);
-    gfx.drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, sun);
-    gfx.drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, sun);
-    gfx.drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, sun);
-    gfx.drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, sun);
+  const S = (v) => Math.round(v * k);
+  const lw = Math.max(1.2, 1.3 * k);
+
+  if (code === 0) {
+    // 0: CLEAR SKY (SUNNY)
+    const r = S(4.5);
+    drawSunDisc(cx, cy, r);
+    drawSunRays(cx, cy, r + S(2.2), r + S(5.2), lw);
     return;
   }
-  if (code >= 95) {
-    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), sun);
-    gfx.fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), sun);
-    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), sun);
-    gfx.fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), sun);
+
+  if (code === 1 || code === 2) {
+    // 1, 2: MAINLY CLEAR / PARTLY CLOUDY (SUN + CLOUD)
+    const sx = cx + S(3.8);
+    const sy = cy - S(3.8);
+    const sr = S(4.2);
+
+    ctx.strokeStyle = TOK_SUN_RAY;
+    ctx.lineWidth = Math.max(1.1, 1.2 * k);
+    ctx.lineCap = 'round';
+    const angles = [-Math.PI * 0.7, -Math.PI * 0.45, -Math.PI * 0.2, 0.0, Math.PI * 0.2];
+    for (const a of angles) {
+      ctx.beginPath();
+      ctx.moveTo(sx + Math.cos(a) * (sr + S(1.8)), sy + Math.sin(a) * (sr + S(1.8)));
+      ctx.lineTo(sx + Math.cos(a) * (sr + S(4.4)), sy + Math.sin(a) * (sr + S(4.4)));
+      ctx.stroke();
+    }
+    drawSunDisc(sx, sy, sr);
+
+    // Dark separator halo behind cloud
+    ctx.save();
+    drawCloudPath(cx - S(1.5), cy + S(1.5), k, 1.08);
+    ctx.fillStyle = 'rgba(24, 24, 25, 0.75)';
+    ctx.fill();
+    ctx.restore();
+
+    drawCloud(cx - S(1.5), cy + S(1.5), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_LIGHT_BOT, true);
     return;
   }
+
+  if (code === 3) {
+    // 3: OVERCAST / CLOUDY (DUAL-LAYER CLOUD)
+    const bx = cx + S(3.2), by = cy - S(2.5);
+    const bGrad = ctx.createLinearGradient(0, by - S(5), 0, by + S(3));
+    bGrad.addColorStop(0, TOK_CLOUD_BACK_TOP);
+    bGrad.addColorStop(1, TOK_CLOUD_BACK_BOT);
+    ctx.fillStyle = bGrad;
+    ctx.beginPath();
+    ctx.arc(bx, by, S(4.6), 0, Math.PI * 2);
+    ctx.arc(bx + S(2.5), by + S(2.0), S(3.2), 0, Math.PI * 2);
+    ctx.fill();
+
+    drawCloud(cx - S(1.2), cy + S(1.0), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_BACK_BOT, true);
+    return;
+  }
+
+  if (code === 45 || code === 48) {
+    // 45, 48: FOG / MIST
+    drawCloud(cx, cy - S(3.0), k * 0.88, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_LIGHT_BOT, false);
+    const bar = (y, w, h, col) => {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.roundRect(cx - w / 2, y - h / 2, w, h, h / 2);
+      ctx.fill();
+    };
+    const bh = Math.max(1.4, 1.7 * k);
+    bar(cy + S(3.2), S(15.0), bh, TOK_FOG_BAR1);
+    bar(cy + S(5.8), S(12.0), bh, TOK_FOG_BAR2);
+    bar(cy + S(8.2), S(8.0),  Math.max(1.2, 1.4 * k), TOK_FOG_BAR3);
+    return;
+  }
+
+  if (code >= 51 && code <= 57) {
+    // 51..57: DRIZZLE / LIGHT RAIN
+    drawCloud(cx, cy - S(2.6), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_RAIN_TOP, TOK_CLOUD_RAIN_BOT, false);
+
+    const drop = (dx, dy) => {
+      const x = cx + dx, y = cy + dy;
+      const r = Math.max(1.1, 1.2 * k);
+      const len = Math.max(2.5, 3.2 * k);
+      const angle = Math.PI * 0.38;
+      const gx = Math.cos(angle), gy = Math.sin(angle);
+      const grad = ctx.createLinearGradient(x - gx * len * 0.5, y - gy * len * 0.5, x + gx * len * 0.5, y + gy * len * 0.5);
+      grad.addColorStop(0, TOK_RAIN_TOP);
+      grad.addColorStop(1, TOK_RAIN_BOT);
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = r * 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x - gx * len * 0.5, y - gy * len * 0.5);
+      ctx.lineTo(x + gx * len * 0.5, y + gy * len * 0.5);
+      ctx.stroke();
+    };
+    drop(-S(4.5), S(4.0));
+    drop(-S(0.5), S(5.5));
+    drop(S(3.5), S(4.0));
+    return;
+  }
+
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) {
+    // 61..67, 80..82: RAIN / SHOWERS / HEAVY RAIN
+    drawCloud(cx, cy - S(2.6), k, TOK_CLOUD_RAIN_TOP, TOK_CLOUD_RAIN_BOT, TOK_CLOUD_STORM_BOT, false);
+
+    const streak = (x0, y0, len) => {
+      const angle = Math.PI * 0.36;
+      const x1 = x0 + Math.cos(angle) * len;
+      const y1 = y0 + Math.sin(angle) * len;
+      const grad = ctx.createLinearGradient(x0, y0, x1, y1);
+      grad.addColorStop(0, TOK_RAIN_TOP);
+      grad.addColorStop(1, TOK_RAIN_BOT);
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = Math.max(1.6, 1.8 * k);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    };
+    const slen = S(6.0);
+    streak(cx - S(4.2), cy + S(3.0), slen);
+    streak(cx - S(0.2), cy + S(4.2), slen);
+    streak(cx + S(3.8), cy + S(3.0), slen);
+    return;
+  }
+
   if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
-    const c = TOK_COLOR_CONTENT_SNOW;
-    gfx.drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, c);
-    gfx.drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, c);
-    gfx.drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, c);
+    // 71..77, 85, 86: SNOW / FLURRIES
+    drawCloud(cx, cy - S(2.6), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_BACK_BOT, false);
+
+    const sfx = cx, sfy = cy + S(5.0);
+    const slw = Math.max(1.1, 1.1 * k);
+    const r = S(3.5);
+
+    ctx.strokeStyle = TOK_SNOW_WHITE;
+    ctx.lineWidth = slw;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const a = (i * Math.PI) / 3;
+      ctx.beginPath();
+      ctx.moveTo(sfx - Math.cos(a) * r, sfy - Math.sin(a) * r);
+      ctx.lineTo(sfx + Math.cos(a) * r, sfy + Math.sin(a) * r);
+      ctx.stroke();
+    }
+    ctx.fillStyle = TOK_SNOW_ICE;
+    ctx.beginPath();
+    ctx.arc(sfx, sfy, Math.max(0.8, 1.0 * k), 0, Math.PI * 2);
+    ctx.fill();
+
+    const dot = (x, y) => {
+      ctx.fillStyle = TOK_SNOW_ICE;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(0.9, 1.1 * k), 0, Math.PI * 2);
+      ctx.fill();
+    };
+    dot(cx - S(4.8), cy + S(4.2));
+    dot(cx + S(4.5), cy + S(4.2));
     return;
   }
-  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
-    const c = TOK_COLOR_CONTENT_RAIN;
-    gfx.fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), c);
-    gfx.fillSmoothCircle(cx - S(6), cy - S(3), S(2), c);
-    gfx.fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), c);
-    gfx.fillSmoothCircle(cx + S(5), cy - S(1), S(2), c);
-    gfx.fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), c);
-    gfx.fillSmoothCircle(cx - S(1), cy + S(6), S(3), c);
+
+  if (code >= 95) {
+    // 95+: THUNDERSTORM
+    drawCloud(cx, cy - S(3.2), k, TOK_CLOUD_RAIN_BOT, TOK_CLOUD_STORM_TOP, TOK_CLOUD_STORM_BOT, false);
+
+    const yTop = cy - S(1.5);
+    const yBot = cy + S(9.8);
+    const bGrad = ctx.createLinearGradient(0, yTop, 0, yBot);
+    bGrad.addColorStop(0, '#FFFFFF');
+    bGrad.addColorStop(0.2, TOK_BOLT_CORE);
+    bGrad.addColorStop(0.65, TOK_BOLT_MID);
+    bGrad.addColorStop(1, TOK_BOLT_TIP);
+
+    ctx.fillStyle = bGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx + S(1.5), cy - S(1.5));
+    ctx.lineTo(cx + S(4.2), cy + S(2.5));
+    ctx.lineTo(cx + S(0.8), cy + S(2.8));
+    ctx.lineTo(cx - S(1.8), cy + S(9.6));
+    ctx.lineTo(cx - S(0.2), cy + S(4.2));
+    ctx.lineTo(cx - S(2.8), cy + S(3.8));
+    ctx.closePath();
+    ctx.fill();
+
+    if (k >= 1.5) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.4)';
+      ctx.lineWidth = Math.max(1, 0.8 * k);
+      ctx.stroke();
+      ctx.restore();
+    }
     return;
   }
-  const c = TOK_COLOR_CONTENT_CLOUD;
-  gfx.fillSmoothCircle(cx - S(4), cy - S(2), S(4), c);
-  gfx.fillSmoothCircle(cx + S(3), cy - S(3), S(5), c);
-  gfx.fillSmoothRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), c);
+
+  // Fallback: generic overcast cloud
+  drawCloud(cx, cy, k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_LIGHT_BOT, true);
 }
 function drawDegreeRing(x, capTop, bg) {
   gfx.fillSmoothCircle(x + 4, capTop + 4, 4, TOK_COLOR_TEXT_SECONDARY);

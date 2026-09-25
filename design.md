@@ -981,6 +981,24 @@ reads as a quantity and an outline reads as an object or action.
 - **Semantics:** one glyph means one thing everywhere. Don't reuse the gear
   for anything but Settings, or a chevron for anything but "goes deeper".
 
+### 10.5 Content glyph set (Weather, depth & gradient)
+
+Weather icons use a high-end, volumetric vector design language with multi-stop depth gradients, specular highlights, and optical layering:
+
+| Condition | WMO Code | Visual Construction & Depth Gradient |
+|---|---|---|
+| **Clear / Sunny** | `0` | Sun disc with warm radial gradient (`TOK_SUN_CORE` `#FFE853` -> `TOK_SUN_MID` `#FFB703` -> `TOK_SUN_EDGE` `#FB8500`), specular gleam crescent, and 8 rounded pill rays. |
+| **Partly Cloudy** | `1, 2` | Radiant golden sun peeking out from behind an overlapping volumetric cloud. Features a dark separation halo and vertical pearlescent gradient (`TOK_CLOUD_LIGHT_TOP` `#FFFFFF` -> `TOK_CLOUD_LIGHT_MID` `#E2E8F0` -> `TOK_CLOUD_LIGHT_BOT` `#94A3B8`). |
+| **Overcast / Cloudy** | `3` | Dual-layer 3D cloud: deep atmospheric back puff (`TOK_CLOUD_BACK_TOP` `#94A3B8` -> `TOK_CLOUD_BACK_BOT` `#64748B`) plus luminous multi-puff front cloud with top rim highlight. |
+| **Fog / Mist** | `45, 48` | Elevated atmospheric cloud above 3 sleek horizontal mist pill bars with gradient opacity and staggered widths. |
+| **Drizzle / Light Rain** | `51..57` | Cool slate rain cloud (`TOK_CLOUD_RAIN_TOP` `#94A3B8` -> `TOK_CLOUD_RAIN_BOT` `#475569`) with 3 delicate angled teardrops in sky-cyan to azure gradient. |
+| **Rain Showers** | `61..67, 80..82` | Deep stormy rain cloud (`TOK_CLOUD_RAIN_TOP` -> `TOK_CLOUD_STORM_BOT` `#1E293B`) with 3 dynamic 65° angled rain streaks in luminous cyan to azure (`TOK_RAIN_TOP` `#38BDF8` -> `TOK_RAIN_BOT` `#1D4ED8`). |
+| **Snow / Flurries** | `71..77, 85, 86` | Crisp winter cloud with a central 6-point crystalline snowflake (`TOK_SNOW_WHITE` `#FFFFFF`, `TOK_SNOW_ICE` `#BAE6FD` core) and soft ambient flurries. |
+| **Thunderstorm** | `95..99` | Dark dramatic storm cloud (`TOK_CLOUD_RAIN_BOT` -> `TOK_CLOUD_STORM_BOT`) with a sharp, bold incandescent electric lightning bolt (`#FFFFFF` -> `TOK_BOLT_CORE` -> `TOK_BOLT_MID` -> `TOK_BOLT_TIP`) striking down through the cloud. |
+
+- **Scaling (`k`):** Scales smoothly from `k = 1.0` (~18 px daily forecast rows), `k = 1.2` (~22 px status card strip), `k = 1.5` (~27 px hourly cards), to `k = 2.0` (~36 px weather hero).
+- **Parity Invariant:** Rendered with mathematical scanline and vector equivalence between ESP32-S3 C++ firmware (`src/pages.cpp`) and the browser simulator (`simulator-s3.html`).
+
 ---
 
 ## 11. Components
