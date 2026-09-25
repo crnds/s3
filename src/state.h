@@ -203,6 +203,7 @@ struct UsageState {
   int creditsPercent = -1;
   uint32_t lastFetchOkMs = 0;
   double btcPrice = -1;      // BTC/USDT (from the Mac via /api/usage); -1 = unknown
+  double btcChangePct = NAN; // rolling 24h change in %; NAN = unknown
   int aqi = -1;              // Bangkok AQI, aqicn.org (from the Mac via /api/usage); -1 = unknown
   float weatherTempC = -999; // Bangkok temp (from the Mac via /api/usage); -999 = unknown
   int weatherCode = -1;      // WMO weather_code (from the Mac); -1 = unknown
@@ -404,6 +405,7 @@ extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
 String fmtTokens(int64_t t);
 String fmtCost(float c);
 String fmtBtc(double p);
+String fmtChangePct(double pct);  // "+5%" / "-3%" (whole percent, sign always)
 String fmtCountdown(long sec);     // "4h 03m" / "42m"
 String fmtCountdownDHM(long sec);  // "6d 16h" / "4h 03m"
 String fmtKB(uint32_t bytes);

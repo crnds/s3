@@ -26,6 +26,11 @@ String fmtBtc(double p) {
   return out;
 }
 
+String fmtChangePct(double pct) {
+  long whole = (long)(fabs(pct) + 0.5);
+  return String(pct < 0 ? "-" : "+") + String(whole) + "%";
+}
+
 String fmtCountdown(long sec) {
   if (sec < 0) return "";
   long m = (sec + 30) / 60;  // round to nearest minute

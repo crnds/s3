@@ -470,6 +470,7 @@ Emphasis within a size comes from weight (headline vs body), never from colour.
    | Large counts | `fmtTokens` | `1.2M` |
    | Money | `fmtCost` | `$12.40` |
    | BTC | `fmtBtc` | `84,194` |
+   | BTC 24h change | `fmtChangePct` | `+5%` / `-3%` |
    | Temperature | integer + ring glyph (or `C` in caption on compact tiles) | `27` |
 
    Countdowns change from today's `4h:03m` / `6d:16h`, where the colon wrongly
@@ -663,7 +664,7 @@ the firmware glyph advances and the §5.2 tracking in the table below.)
 |---|---|---|
 | 5H limit | 172 × 112, pad 8 / 12 (compact) | **Width:** 148 inner. Worst-case top row `99%  WK  ! 167h` = 142 px ✓. At 100% the flag has no duration (`formatPaceDur` returns ""), so `100%  WK  !` = 113 ✓. The label-to-flag gap is `space.xs`. **Vertical:** 96 inner = numeral.lg 33 + 4 + usage meter 8 + 4 + pace meter 6 + 4 + caption `Resets 16:30` / `Resets Thu 05:00` (≤113 px) 17 + caption `in 4h 03m` / `in 6d 16h` (≤63 px) 17 = 93 ✓, with 3 px of slack at the bottom (§7.2 rule 5). |
 | Week limit | 172 × 112, pad 8 / 12 | Same as 5H. The label stays `WK`: `WEEK` would push `99% WEEK ! 86h` to 149 px, over the 148 available. |
-| BTC (compact) | 172 × 32, pad 8 / 12 | caption `BTC` 26 + 8 + headline `123,456` 76 = 110 ≤ 148 ✓. Headline 23 is vertically centred. |
+| BTC (compact) | 172 × 32, pad 8 / 12 | caption `BTC` 26 + 8 + headline `123,456` 76 = 110, then the 24h change in `numeral.sm` right-aligned to the content edge (`+5%` 29, green / `-5%` red via `status.success` / `status.error`; the sign carries it without colour), at least `space.xs` clear of the price: 110 + 4 + 29 = 143 ≤ 148 ✓. Headline 23 is vertically centred. |
 | Clock (hero) | 284 × 192, pad 8 | **Side by side**, because the extra width lets the clock grow. Clock ⌀ 153 (r 76, up from today's 68) + 12 + readout column 103 = 268 ✓. The readout is numeral.lg `12:27` 75 px, 4, body `Thu 24 Sep` 92 px, 8, then the AQI badge (48 × 24) = 92 px tall, vertically centred (y 58..149). That keeps it clear of the corner slots, which end at y 31 plus 8 px of clearance. |
 | Weather (compact) | 284 × 72, pad 8 / 12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 260 inner = H/L 20 + now 40 + **4** × 44 hourly (one more hour than before) + 24 disclosure column ✓. |
 

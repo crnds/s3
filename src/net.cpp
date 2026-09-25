@@ -279,6 +279,8 @@ static bool applyUsageDoc(const JsonDocument& doc, bool fromNetwork) {
   if (!doc["btc"].isNull()) {
     double p = doc["btc"]["price"] | -1.0;
     if (p > 0) STATE.btcPrice = p;
+    JsonVariantConst chg = doc["btc"]["changePct"];
+    if (chg.is<double>()) STATE.btcChangePct = chg.as<double>();
   }
   if (!doc["weather"].isNull()) {
     applyWeatherDoc(doc["weather"].as<JsonObjectConst>());
@@ -345,6 +347,7 @@ static void saveEnvCache() {
   if (!STATE.sdOk) return;
   lockState();
   double btc = STATE.btcPrice;
+  double btcChg = STATE.btcChangePct;
   float tempC = STATE.weatherTempC;
   int code = STATE.weatherCode;
   int aqi = STATE.aqi;
@@ -352,7 +355,9 @@ static void saveEnvCache() {
   SD_MMC.remove(ENV_CACHE_PATH);  // FILE_WRITE appends here; remove for a clean overwrite
   File f = SD_MMC.open(ENV_CACHE_PATH, FILE_WRITE);
   if (f) {
-    f.printf("{\"btc\":%.2f,\"tempC\":%.1f,\"code\":%d,\"aqi\":%d}", btc, tempC, code, aqi);
+    f.printf("{\"btc\":%.2f,\"tempC\":%.1f,\"code\":%d,\"aqi\":%d", btc, tempC, code, aqi);
+    if (!isnan(btcChg)) f.printf(",\"btcChg\":%.2f", btcChg);  // "nan" would void the whole file
+    f.print("}");
     f.close();
   }
 }
@@ -366,6 +371,7 @@ void loadEnvCache() {
   if (deserializeJson(doc, payload)) return;
   lockState();
   STATE.btcPrice = doc["btc"] | STATE.btcPrice;
+  if (doc["btcChg"].is<double>()) STATE.btcChangePct = doc["btcChg"].as<double>();
   STATE.weatherTempC = doc["tempC"] | STATE.weatherTempC;
   STATE.weatherCode = doc["code"] | STATE.weatherCode;
   STATE.aqi = doc["aqi"] | STATE.aqi;

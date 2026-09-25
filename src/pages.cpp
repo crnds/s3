@@ -788,18 +788,28 @@ static void drawLimitsColumn() {
                 weekRem >= 0 ? "in " + fmtCountdownDHM(weekRem) : String(""));
 }
 
-// BTC (compact card): caption "BTC", then the price in headline, on one
-// baseline; the headline's line box is centred in the 32px card.
+// BTC (compact card): caption "BTC", the price in headline, then the 24h
+// change in numeral.sm, all on one baseline; the headline's line box is
+// centred in the 32px card. The change is right-aligned to the content edge
+// (green up, red down; the sign carries it without colour), kept at least
+// space.xs clear of the price.
 static void drawBtcCard() {
   drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
   const int top = BTC_Y + (BTC_CARD_H - fontLineH(TOK_TYPE_HEADLINE)) / 2;
   const int baseline = top + fontAscent(TOK_TYPE_HEADLINE);
   int x = drawText(TOK_TYPE_CAPTION, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_CAPTION), "BTC",
                    TOK_COLOR_TEXT_SECONDARY);
-  if (STATE.btcPrice >= 0)
-    drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
-  else
+  if (STATE.btcPrice < 0) {
     drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, "--", TOK_COLOR_TEXT_TERTIARY);
+    return;
+  }
+  int xe = drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
+  if (isnan(STATE.btcChangePct)) return;
+  String chg = fmtChangePct(STATE.btcChangePct);
+  int cx = SHINE_BAR_X + SHINE_BAR_W - textW(TOK_TYPE_NUMERAL_SM, chg);
+  if (cx < xe + TOK_SPACE_XS) cx = xe + TOK_SPACE_XS;
+  drawText(TOK_TYPE_NUMERAL_SM, cx, baseline - fontAscent(TOK_TYPE_NUMERAL_SM), chg,
+           STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
 }
 
 // ── NOTE PAGE (NOTE_PAGE) ──────────────────────────────────

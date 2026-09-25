@@ -431,7 +431,7 @@ const STATE = {
   weekModelPercent: -1, weekModelName: '', weekModelResets: '',
   creditsUsed: -1, creditsLimit: -1, creditsPercent: -1,
   lastFetchOkMs: 0,
-  btcPrice: -1, aqi: -1,
+  btcPrice: -1, btcChangePct: null, aqi: -1,
   weatherTempC: -999, weatherCode: -1, weatherHigh: -999, weatherLow: -999,
   weatherCondition: '', weatherHourly: [], weatherDaily: [],
   note: '', noteSize: 1,
@@ -807,6 +807,7 @@ function fmtTokens(t) {
 }
 function fmtCost(c) { return '$' + c.toFixed(2); }
 function fmtBtc(p) { return p < 0 ? '--' : Math.round(p).toLocaleString('en-US'); }
+function fmtChangePct(pct) { return (pct < 0 ? '-' : '+') + Math.trunc(Math.abs(pct) + 0.5) + '%'; }
 function fmtCountdown(sec) {
   if (sec < 0) return '';
   let m = Math.floor((sec + 30) / 60);
@@ -1280,8 +1281,13 @@ function drawBtcCard() {
   const top = BTC_Y + Math.trunc((BTC_CARD_H - fontLineH(TOK_TYPE_HEADLINE)) / 2);
   const baseline = top + fontAscent(TOK_TYPE_HEADLINE);
   const x = drawText(TOK_TYPE_CAPTION, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_CAPTION), 'BTC', TOK_COLOR_TEXT_SECONDARY);
-  if (STATE.btcPrice >= 0) drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
-  else drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, '--', TOK_COLOR_TEXT_TERTIARY);
+  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  const xe = drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
+  if (STATE.btcChangePct === null) return;
+  const chg = fmtChangePct(STATE.btcChangePct);
+  const cx = Math.max(SHINE_BAR_X + SHINE_BAR_W - textW(TOK_TYPE_NUMERAL_SM, chg), xe + TOK_SPACE_XS);
+  drawText(TOK_TYPE_NUMERAL_SM, cx, baseline - fontAscent(TOK_TYPE_NUMERAL_SM), chg,
+           STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
 }
 
 // ── NOTE PAGE (pages.cpp twin) ────────────────────────────────
@@ -2485,7 +2491,7 @@ const MOCK = {
     credits: { used: 0.41, limit: 10.0, percent: 4 },
   },
   context: { tokens: 80000, percent: 40 },
-  btc: { price: 109432 },
+  btc: { price: 109432, changePct: 2.31 },
   aqi: { aqi: 81 },
   // Exercises every tokenizer rule at once (same sample as ~/cyd's simulator).
   note: {
@@ -2541,7 +2547,10 @@ function applyData(doc, fromNetwork = true) {
   }
   STATE.ctxTokens = doc.context?.tokens ?? -1;
   STATE.ctxPercent = doc.context?.percent ?? -1;
-  if (doc.btc && doc.btc.price > 0) STATE.btcPrice = doc.btc.price;
+  if (doc.btc && doc.btc.price > 0) {
+    STATE.btcPrice = doc.btc.price;
+    if (typeof doc.btc.changePct === 'number') STATE.btcChangePct = doc.btc.changePct;
+  }
   if (doc.weather) applyWeatherData(doc.weather);
   if (doc.aqi && doc.aqi.aqi >= 0) STATE.aqi = doc.aqi.aqi;
   if (doc.note) {
