@@ -528,315 +528,63 @@ static void drawProjectsPage() {
 // ── WEATHER GLYPHS (content family, design.md 10) ──────────
 // Filled vector shapes mapped from Open-Meteo's WMO weather_code, CENTRED on
 // (cx, cy) and scaled by k from the CYD's ~18px geometry.
-// ── WEATHER GLYPH HELPERS ──────────────────────────────────
-static inline uint16_t lerp565(uint16_t c0, uint16_t c1, float t) {
-  if (t <= 0.0f) return c0;
-  if (t >= 1.0f) return c1;
-  uint32_t r0 = (c0 >> 11) & 31, g0 = (c0 >> 5) & 63, b0 = c0 & 31;
-  uint32_t r1 = (c1 >> 11) & 31, g1 = (c1 >> 5) & 63, b1 = c1 & 31;
-  uint32_t it = (uint32_t)(t * 256.0f);
-  uint32_t inv = 256 - it;
-  uint32_t r = (r0 * inv + r1 * it) >> 8;
-  uint32_t g = (g0 * inv + g1 * it) >> 8;
-  uint32_t b = (b0 * inv + b1 * it) >> 8;
-  return (uint16_t)((r << 11) | (g << 5) | b);
-}
-
-static void drawSunDisc(int cx, int cy, int r) {
-  int r2 = r * r;
-  float invR = 1.0f / (float)(r > 0 ? r : 1);
-  for (int dy = -r; dy <= r; dy++) {
-    int dy2 = dy * dy;
-    if (dy2 > r2) continue;
-    int maxDx = (int)sqrtf((float)(r2 - dy2));
-    for (int dx = -maxDx; dx <= maxDx; dx++) {
-      float dist = sqrtf((float)(dx * dx + dy * dy));
-      if (dist > (float)r) continue;
-      float ox = (float)dx + (float)r * 0.25f;
-      float oy = (float)dy + (float)r * 0.25f;
-      float odist = sqrtf(ox * ox + oy * oy);
-      float t = odist * invR;
-      if (t > 1.0f) t = 1.0f;
-      uint16_t col;
-      if (t < 0.5f) col = lerp565(TOK_SUN_CORE, TOK_SUN_MID, t * 2.0f);
-      else          col = lerp565(TOK_SUN_MID, TOK_SUN_EDGE, (t - 0.5f) * 2.0f);
-      float edgeDist = (float)r - dist;
-      if (edgeDist < 1.0f && edgeDist > 0.0f) {
-        blendPx(cx + dx, cy + dy, col, (uint8_t)(edgeDist * 255.0f));
-      } else {
-        blendPx(cx + dx, cy + dy, col, 255);
-      }
-    }
-  }
-  if (r >= 4) {
-    int hx = cx - (int)lroundf((float)r * 0.3f);
-    int hy = cy - (int)lroundf((float)r * 0.3f);
-    int hr = (int)lroundf((float)r * 0.35f);
-    if (hr < 1) hr = 1;
-    int hr2 = hr * hr;
-    for (int dy = -hr; dy <= hr; dy++) {
-      for (int dx = -hr; dx <= hr; dx++) {
-        if (dx * dx + dy * dy <= hr2) {
-          blendPx(hx + dx, hy + dy, 0xFFFF, 115);
-        }
-      }
-    }
-  }
-}
-
-static void drawSunRays(int cx, int cy, float rIn, float rOut, float lw) {
-  for (int i = 0; i < 8; i++) {
-    float a = (float)i * 0.78539816f;
-    bool isDiag = (i % 2 == 1);
-    float rO = isDiag ? rOut * 0.94f : rOut;
-    float rI = isDiag ? rIn * 1.02f : rIn;
-    g->drawWideLine(cx + lroundf(cosf(a) * rI), cy + lroundf(sinf(a) * rI),
-                    cx + lroundf(cosf(a) * rO), cy + lroundf(sinf(a) * rO),
-                    lw, TOK_SUN_RAY);
-  }
-}
-
-static void drawCloud(int cx, int cy, float k, uint16_t cTop, uint16_t cMid, uint16_t cBot, bool highlight = true, float puffScale = 1.0f) {
-  auto S = [k](float v) { return (int)lroundf(v * k); };
-  int c1x = cx - S(4.5f), c1y = cy + S(0.8f), r1 = S(3.6f * puffScale);
-  int c2x = cx - S(0.8f), c2y = cy - S(2.0f), r2 = S(5.2f * puffScale);
-  int c3x = cx + S(3.5f), c3y = cy + S(0.8f), r3 = S(3.4f * puffScale);
-  int bw = S(14.5f * puffScale), bh = S(5.5f * puffScale), br = S(2.7f * puffScale);
-  int bx = cx - bw / 2, by = cy + S(1.8f) - bh / 2;
-
-  int yTop = cy - S(7.2f * puffScale);
-  int yBot = cy + S(4.5f * puffScale);
-  int spanH = yBot - yTop;
-  if (spanH <= 0) spanH = 1;
-
-  for (int y = yTop; y <= yBot; y++) {
-    int x0 = 10000, x1 = -10000;
-    int dy1 = y - c1y;
-    if (abs(dy1) <= r1) {
-      int dx = (int)sqrtf((float)(r1 * r1 - dy1 * dy1));
-      if (c1x - dx < x0) x0 = c1x - dx;
-      if (c1x + dx > x1) x1 = c1x + dx;
-    }
-    int dy2 = y - c2y;
-    if (abs(dy2) <= r2) {
-      int dx = (int)sqrtf((float)(r2 * r2 - dy2 * dy2));
-      if (c2x - dx < x0) x0 = c2x - dx;
-      if (c2x + dx > x1) x1 = c2x + dx;
-    }
-    int dy3 = y - c3y;
-    if (abs(dy3) <= r3) {
-      int dx = (int)sqrtf((float)(r3 * r3 - dy3 * dy3));
-      if (c3x - dx < x0) x0 = c3x - dx;
-      if (c3x + dx > x1) x1 = c3x + dx;
-    }
-    if (y >= by && y < by + bh) {
-      int rin = 0;
-      if (y < by + br) {
-        int cdy = by + br - y;
-        rin = br - (int)sqrtf((float)(br * br - cdy * cdy));
-      } else if (y >= by + bh - br) {
-        int cdy = y - (by + bh - 1 - br);
-        rin = br - (int)sqrtf((float)(br * br - cdy * cdy));
-      }
-      if (bx + rin < x0) x0 = bx + rin;
-      if (bx + bw - 1 - rin > x1) x1 = bx + bw - 1 - rin;
-    }
-
-    if (x0 <= x1) {
-      float t = (float)(y - yTop) / (float)spanH;
-      uint16_t col;
-      if (t < 0.45f) col = lerp565(cTop, cMid, t / 0.45f);
-      else           col = lerp565(cMid, cBot, (t - 0.45f) / 0.55f);
-
-      g->drawFastHLine(x0, y, x1 - x0 + 1, col);
-      blendPx(x0 - 1, y, col, 128);
-      blendPx(x1 + 1, y, col, 128);
-    }
-  }
-
-  if (highlight && k >= 1.2f) {
-    for (float a = 3.3f; a <= 5.8f; a += 0.1f) {
-      int hx = c2x + lroundf(cosf(a) * ((float)r2 - 0.5f));
-      int hy = c2y + lroundf(sinf(a) * ((float)r2 - 0.5f));
-      blendPx(hx, hy, 0xFFFF, 160);
-    }
-  }
-}
-
-// ── WEATHER GLYPHS (content family, design.md 10) ──────────
-// High quality filled vector shapes with depth gradients mapped from Open-Meteo's WMO weather_code,
-// CENTRED on (cx, cy) and scaled by k.
 static void drawWeatherIcon(int cx, int cy, int code, float k) {
+  auto S = [k](float v) { return (int)lroundf(v * k); };
+  float lw = 1.0f * k;
   if (code < 0) {
     drawTextC(TOK_TYPE_CAPTION, cx, cy - fontLineH(TOK_TYPE_CAPTION) / 2, "--", TOK_COLOR_TEXT_TERTIARY);
     return;
   }
-  auto S = [k](float v) { return (int)lroundf(v * k); };
-  float lw = fmaxf(1.2f, 1.3f * k);
-
-  if (code == 0) {
-    // 0: CLEAR SKY (SUNNY)
-    int r = S(4.5f);
-    drawSunDisc(cx, cy, r);
-    drawSunRays(cx, cy, (float)(r + S(2.2f)), (float)(r + S(5.2f)), lw);
+  const uint16_t sun = TOK_COLOR_CONTENT_SUN;
+  if (code == 0 || code == 1) {
+    // clear: sun disc + 8 short rounded rays with a gap between disc and rays.
+    aaFillCircle(cx, cy, S(4), sun);
+    g->drawWideLine(cx, cy - S(9), cx, cy - S(7), lw, sun);
+    g->drawWideLine(cx, cy + S(7), cx, cy + S(9), lw, sun);
+    g->drawWideLine(cx - S(9), cy, cx - S(7), cy, lw, sun);
+    g->drawWideLine(cx + S(7), cy, cx + S(9), cy, lw, sun);
+    g->drawWideLine(cx - S(7), cy - S(7), cx - S(5), cy - S(5), lw, sun);
+    g->drawWideLine(cx + S(5), cy + S(5), cx + S(7), cy + S(7), lw, sun);
+    g->drawWideLine(cx - S(7), cy + S(7), cx - S(5), cy + S(5), lw, sun);
+    g->drawWideLine(cx + S(5), cy - S(5), cx + S(7), cy - S(7), lw, sun);
     return;
   }
-
-  if (code == 1 || code == 2) {
-    // 1, 2: MAINLY CLEAR / PARTLY CLOUDY (SUN + CLOUD)
-    int sx = cx + S(3.8f);
-    int sy = cy - S(3.8f);
-    int sr = S(4.2f);
-
-    float angles[5] = {-2.199f, -1.414f, -0.628f, 0.0f, 0.628f};
-    float rIn = (float)(sr + S(1.8f));
-    float rOut = (float)(sr + S(4.4f));
-    float rlw = fmaxf(1.1f, 1.2f * k);
-    for (int i = 0; i < 5; i++) {
-      g->drawWideLine(sx + lroundf(cosf(angles[i]) * rIn), sy + lroundf(sinf(angles[i]) * rIn),
-                      sx + lroundf(cosf(angles[i]) * rOut), sy + lroundf(sinf(angles[i]) * rOut),
-                      rlw, TOK_SUN_RAY);
-    }
-    drawSunDisc(sx, sy, sr);
-
-    // Dark separator halo behind cloud
-    drawCloud(cx - S(1.5f), cy + S(1.5f), k, TOK_COLOR_SURFACE_CARD, TOK_COLOR_SURFACE_CARD, TOK_COLOR_SURFACE_CARD, false, 1.08f);
-
-    // Foreground volumetric cloud
-    drawCloud(cx - S(1.5f), cy + S(1.5f), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_LIGHT_BOT, true);
-    return;
-  }
-
-  if (code == 3) {
-    // 3: OVERCAST / CLOUDY (DUAL-LAYER CLOUD)
-    int bx = cx + S(3.2f), by = cy - S(2.5f), br = S(4.6f);
-    for (int dy = -br; dy <= br; dy++) {
-      int dx = (int)sqrtf((float)(br * br - dy * dy));
-      float t = (float)(dy + br) / (float)(2 * br);
-      uint16_t col = lerp565(TOK_CLOUD_BACK_TOP, TOK_CLOUD_BACK_BOT, t);
-      g->drawFastHLine(bx - dx, by + dy, 2 * dx + 1, col);
-      blendPx(bx - dx - 1, by + dy, col, 128);
-      blendPx(bx + dx + 1, by + dy, col, 128);
-    }
-    int b2x = bx + S(2.5f), b2y = by + S(2.0f), b2r = S(3.2f);
-    for (int dy = -b2r; dy <= b2r; dy++) {
-      int dx = (int)sqrtf((float)(b2r * b2r - dy * dy));
-      float t = (float)(dy + b2r) / (float)(2 * b2r);
-      uint16_t col = lerp565(TOK_CLOUD_BACK_TOP, TOK_CLOUD_BACK_BOT, t);
-      g->drawFastHLine(b2x - dx, b2y + dy, 2 * dx + 1, col);
-      blendPx(b2x - dx - 1, b2y + dy, col, 128);
-      blendPx(b2x + dx + 1, b2y + dy, col, 128);
-    }
-
-    drawCloud(cx - S(1.2f), cy + S(1.0f), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_BACK_BOT, true);
-    return;
-  }
-
-  if (code == 45 || code == 48) {
-    // 45, 48: FOG / MIST
-    drawCloud(cx, cy - S(3.0f), k * 0.88f, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_LIGHT_BOT, false);
-    int bh = lroundf(fmaxf(1.4f, 1.7f * k));
-    if (bh < 1) bh = 1;
-    aaFillRoundRect(cx - S(7.5f), cy + S(3.2f) - bh / 2, S(15.0f), bh, bh / 2, TOK_FOG_BAR1);
-    aaFillRoundRect(cx - S(5.5f), cy + S(5.8f) - bh / 2, S(11.5f), bh, bh / 2, TOK_FOG_BAR2);
-    int bh3 = lroundf(fmaxf(1.2f, 1.4f * k));
-    if (bh3 < 1) bh3 = 1;
-    aaFillRoundRect(cx - S(3.5f), cy + S(8.2f) - bh3 / 2, S(7.5f),  bh3, bh3 / 2, TOK_FOG_BAR3);
-    return;
-  }
-
-  if (code >= 51 && code <= 57) {
-    // 51..57: DRIZZLE / LIGHT RAIN
-    drawCloud(cx, cy - S(2.6f), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_RAIN_TOP, TOK_CLOUD_RAIN_BOT, false);
-
-    auto drawDrop = [&](int dx, int dy) {
-      int x = cx + dx, y = cy + dy;
-      float r = fmaxf(1.1f, 1.2f * k);
-      float len = fmaxf(2.5f, 3.2f * k);
-      float angle = 1.194f;
-      float gx = cosf(angle), gy = sinf(angle);
-      int x0 = x - lroundf(gx * len * 0.5f), y0 = y - lroundf(gy * len * 0.5f);
-      int x1 = x + lroundf(gx * len * 0.5f), y1 = y + lroundf(gy * len * 0.5f);
-      int xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
-      g->drawWideLine(x0, y0, xm, ym, r * 2.0f, TOK_RAIN_TOP);
-      g->drawWideLine(xm, ym, x1, y1, r * 2.0f, TOK_RAIN_BOT);
-    };
-    drawDrop(-S(4.5f), S(4.0f));
-    drawDrop(-S(0.5f), S(5.5f));
-    drawDrop(S(3.5f), S(4.0f));
-    return;
-  }
-
-  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) {
-    // 61..67, 80..82: RAIN / SHOWERS / HEAVY RAIN
-    drawCloud(cx, cy - S(2.6f), k, TOK_CLOUD_RAIN_TOP, TOK_CLOUD_RAIN_BOT, TOK_CLOUD_STORM_BOT, false);
-
-    auto drawStreak = [&](int x0, int y0, float len) {
-      float angle = 1.134f;
-      int x1 = x0 + lroundf(cosf(angle) * len);
-      int y1 = y0 + lroundf(sinf(angle) * len);
-      int xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
-      float w = fmaxf(1.6f, 1.8f * k);
-      g->drawWideLine(x0, y0, xm, ym, w, TOK_RAIN_TOP);
-      g->drawWideLine(xm, ym, x1, y1, w, TOK_RAIN_BOT);
-    };
-    float slen = (float)S(6.0f);
-    drawStreak(cx - S(4.2f), cy + S(3.0f), slen);
-    drawStreak(cx - S(0.2f), cy + S(4.2f), slen);
-    drawStreak(cx + S(3.8f), cy + S(3.0f), slen);
-    return;
-  }
-
-  if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
-    // 71..77, 85, 86: SNOW / FLURRIES
-    drawCloud(cx, cy - S(2.6f), k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_BACK_BOT, false);
-
-    int sfx = cx, sfy = cy + S(5.0f);
-    float slw = fmaxf(1.1f, 1.1f * k);
-    float r = (float)S(3.5f);
-    for (int i = 0; i < 3; i++) {
-      float a = (float)i * 1.04719755f;
-      g->drawWideLine(sfx - lroundf(cosf(a) * r), sfy - lroundf(sinf(a) * r),
-                      sfx + lroundf(cosf(a) * r), sfy + lroundf(sinf(a) * r), slw, TOK_SNOW_WHITE);
-    }
-    int dotR = S(1.0f);
-    if (dotR < 1) dotR = 1;
-    aaFillCircle(sfx, sfy, dotR, TOK_SNOW_ICE);
-    aaFillCircle(cx - S(4.8f), cy + S(4.2f), dotR, TOK_SNOW_ICE);
-    aaFillCircle(cx + S(4.5f), cy + S(4.2f), dotR, TOK_SNOW_ICE);
-    return;
-  }
-
+  // Rain/snow/lightning are drawn standalone (no cloud underneath) so the
+  // condition itself reads clearly at small sizes.
   if (code >= 95) {
-    // 95+: THUNDERSTORM
-    drawCloud(cx, cy - S(3.2f), k, TOK_CLOUD_RAIN_BOT, TOK_CLOUD_STORM_TOP, TOK_CLOUD_STORM_BOT, false);
-
-    int p0x = cx + S(1.5f), p0y = cy - S(1.5f);
-    int p1x = cx + S(4.2f), p1y = cy + S(2.5f);
-    int p2x = cx + S(0.8f), p2y = cy + S(2.8f);
-    int p3x = cx - S(1.8f), p3y = cy + S(9.6f);
-    int p4x = cx - S(0.2f), p4y = cy + S(4.2f);
-    int p5x = cx - S(2.8f), p5y = cy + S(3.8f);
-
-    g->fillTriangle(p0x, p0y, p1x, p1y, p2x, p2y, TOK_BOLT_CORE);
-    g->fillTriangle(p0x, p0y, p2x, p2y, p5x, p5y, TOK_BOLT_CORE);
-    g->fillTriangle(p2x, p2y, p5x, p5y, p4x, p4y, TOK_BOLT_MID);
-    g->fillTriangle(p2x, p2y, p4x, p4y, p3x, p3y, TOK_BOLT_TIP);
-
-    if (k >= 1.5f) {
-      float lw = fmaxf(1.0f, 0.8f * k);
-      g->drawWideLine(p0x, p0y, p1x, p1y, lw, TOK_BOLT_MID);
-      g->drawWideLine(p1x, p1y, p2x, p2y, lw, TOK_BOLT_MID);
-      g->drawWideLine(p2x, p2y, p3x, p3y, lw, TOK_BOLT_TIP);
-      g->drawWideLine(p3x, p3y, p4x, p4y, lw, TOK_BOLT_TIP);
-      g->drawWideLine(p4x, p4y, p5x, p5y, lw, TOK_BOLT_MID);
-      g->drawWideLine(p5x, p5y, p0x, p0y, lw, TOK_BOLT_CORE);
-    }
+    // thunderstorm: zigzag bolt as 4 triangles. Vertices:
+    // A(-1,+8) B(-1,+2) C(-5,+2) D(+1,-8) E(+1,-2) F(+5,-2).
+    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(8), cx + S(1), cy - S(2), sun);
+    g->fillTriangle(cx - S(5), cy + S(2), cx + S(1), cy - S(2), cx - S(1), cy + S(2), sun);
+    g->fillTriangle(cx - S(1), cy + S(2), cx + S(1), cy - S(2), cx + S(5), cy - S(2), sun);
+    g->fillTriangle(cx - S(1), cy + S(2), cx + S(5), cy - S(2), cx - S(1), cy + S(8), sun);
     return;
   }
-
-  // Fallback: generic overcast cloud
-  drawCloud(cx, cy, k, TOK_CLOUD_LIGHT_TOP, TOK_CLOUD_LIGHT_MID, TOK_CLOUD_LIGHT_BOT, true);
+  if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
+    // snow: six-armed snowflake = three rounded lines crossing at 60deg
+    const uint16_t c = TOK_COLOR_CONTENT_SNOW;
+    g->drawWideLine(cx, cy - S(7), cx, cy + S(7), lw, c);
+    g->drawWideLine(cx - S(6), cy - S(4), cx + S(6), cy + S(4), lw, c);
+    g->drawWideLine(cx - S(6), cy + S(4), cx + S(6), cy - S(4), lw, c);
+    return;
+  }
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
+    // rain: three staggered teardrops, two small on top, one large below.
+    const uint16_t c = TOK_COLOR_CONTENT_RAIN;
+    g->fillTriangle(cx - S(6), cy - S(8), cx - S(8), cy - S(3), cx - S(4), cy - S(3), c);
+    aaFillCircle(cx - S(6), cy - S(3), S(2), c);
+    g->fillTriangle(cx + S(5), cy - S(6), cx + S(3), cy - S(1), cx + S(7), cy - S(1), c);
+    aaFillCircle(cx + S(5), cy - S(1), S(2), c);
+    g->fillTriangle(cx - S(1), cy + S(1), cx - S(4), cy + S(6), cx + S(2), cy + S(6), c);
+    aaFillCircle(cx - S(1), cy + S(6), S(3), c);
+    return;
+  }
+  // Everything else shares a plain cloud (2/3/45/48 = cloudy/fog, or any
+  // unmapped code): two overlapping puffs on a fully-rounded pill base.
+  const uint16_t c = TOK_COLOR_CONTENT_CLOUD;
+  aaFillCircle(cx - S(4), cy - S(2), S(4), c);
+  aaFillCircle(cx + S(3), cy - S(3), S(5), c);
+  aaFillRoundRect(cx - S(9), cy - S(2), S(19), S(9), S(4), c);
 }
 
 // Degree ring (design.md 10.3): r 4 / r 3, text.secondary, top-aligned to

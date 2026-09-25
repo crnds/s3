@@ -64,31 +64,6 @@ const uint16_t TOK_COLOR_CONTENT_RAIN = TOK_BLUE_500;
 const uint16_t TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
 const uint16_t TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
 const uint16_t TOK_COLOR_PLATE = TOK_BLACK;
-
-// Weather icon depth & gradient tokens
-const uint16_t TOK_SUN_CORE = 0xFF4A;          // rgb(255,232,83) - warm gold core
-const uint16_t TOK_SUN_MID = 0xFDA0;           // rgb(255,183,3) - amber mid
-const uint16_t TOK_SUN_EDGE = 0xFC20;          // rgb(251,133,0) - warm orange rim
-const uint16_t TOK_SUN_RAY = 0xFD80;           // rgb(255,176,0) - golden rays
-const uint16_t TOK_CLOUD_LIGHT_TOP = 0xFFFF;   // rgb(255,255,255) - white crest
-const uint16_t TOK_CLOUD_LIGHT_MID = 0xE75E;   // rgb(226,232,240) - silver belly
-const uint16_t TOK_CLOUD_LIGHT_BOT = 0x9517;   // rgb(148,163,184) - ambient shadow
-const uint16_t TOK_CLOUD_BACK_TOP = 0x9517;    // rgb(148,163,184) - back puff top
-const uint16_t TOK_CLOUD_BACK_BOT = 0x63B1;    // rgb(100,116,139) - back puff base
-const uint16_t TOK_CLOUD_RAIN_TOP = 0x9517;    // rgb(148,163,184) - rain cloud crest
-const uint16_t TOK_CLOUD_RAIN_BOT = 0x42AD;    // rgb(71,85,105) - rain cloud base
-const uint16_t TOK_CLOUD_STORM_TOP = 0x63B1;   // rgb(100,116,139) - storm cloud crest
-const uint16_t TOK_CLOUD_STORM_BOT = 0x1947;   // rgb(30,41,59) - storm cloud base
-const uint16_t TOK_RAIN_TOP = 0x3DFF;          // rgb(56,189,248) - sky cyan gleam
-const uint16_t TOK_RAIN_BOT = 0x1A7B;          // rgb(29,78,216) - azure blue base
-const uint16_t TOK_BOLT_CORE = 0xFFDD;         // rgb(255,251,235) - white-hot arc
-const uint16_t TOK_BOLT_MID = 0xFE62;          // rgb(250,204,21) - electric gold
-const uint16_t TOK_BOLT_TIP = 0xF4E1;          // rgb(245,158,11) - amber spark
-const uint16_t TOK_SNOW_WHITE = 0xFFFF;        // rgb(255,255,255) - pure white
-const uint16_t TOK_SNOW_ICE = 0xBF3F;          // rgb(186,230,253) - ice blue
-const uint16_t TOK_FOG_BAR1 = 0xE75E;          // rgb(226,232,240) - mist top
-const uint16_t TOK_FOG_BAR2 = 0x9517;          // rgb(148,163,184) - mist mid
-const uint16_t TOK_FOG_BAR3 = 0x63B1;          // rgb(100,116,139) - mist base
 // Increase Contrast (design.md 12.9) swaps these at runtime: text.secondary
 // -> 0xBDF7, fill.track -> gray.4, and cards gain a 1px gray.4 outline
 // (TOK_CARD_OUTLINE). Set by applyContrast() in settings.cpp.
