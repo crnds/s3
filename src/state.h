@@ -65,7 +65,7 @@ bool shineTick(uint32_t nowMs);
 bool progressTick(uint32_t nowMs);
 bool pulseTick(uint32_t nowMs);
 // Bumped by networkTask on every successful poll; the render side starts one
-// pace sweep and one status-dot pulse per new value (design.md 12.7).
+// pace sweep per new value (design.md 12.7).
 extern volatile uint32_t pollOkSeq;
 
 // Non-const: overridable from flash (see sd_store.cpp's
@@ -115,18 +115,18 @@ const int DST_OFFSET_SEC = 0;
 // settings.cpp and gif_player.cpp all need. simulator-s3.html carries the
 // same numbers. Colours, type, spacing and component sizes are tokens
 // (tokens.h) -- no COL_* literals any more.
-//   - 8px screen margin and card gutter; content x 8..471, y 8..279
+//   - 8px screen margin and card gutter; content x 8..471, y 8..291
 //   - left column x 8..179 (fixed reservation), right column x 188..471
-//   - status strip y 288..318, progress hairline y 319
+//   - status strip y 300..318, progress hairline y 319
 // Page navigation splits at the screen half, independent of the grid.
 const int SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
 
 // Status page cards (design.md 7.4).
-const int LIMIT_CARD_H = 112, BTC_CARD_H = 32;
+const int LIMIT_CARD_H = 118, BTC_CARD_H = 32;
 const int LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;                              // 8
-const int LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;       // 128
-const int BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;           // 248
-const int CLOCK_CARD_H = 192, WEATHER_CARD_H = 72;
+const int LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;       // 134
+const int BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;           // 260
+const int CLOCK_CARD_H = 192, WEATHER_CARD_H = 84;
 const int CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;                           // 8
 const int WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;  // 208
 
@@ -138,11 +138,11 @@ const int WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y
 
 // Status strip targets (design.md 11.12): 56x40 each, reaching up into the
 // 8px gap above the strip (touch.edge.min for a bottom-edge target).
-const int STRIP_HIT_Y0 = TOK_LAYOUT_CONTENT_Y1;                           // 280
+const int STRIP_HIT_Y0 = TOK_LAYOUT_STRIP_Y0;                             // 300: 20px targets -- a deliberate exception to touch.edge.min
 const int HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;                          // -> Device Stats
 const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;              // -> Settings
-const int STRIP_CY = 303;                                                 // glyph centre line
-const int STRIP_CAPTION_Y = 295;                                          // caption text top (design.md 11.12)
+const int STRIP_CY = 309;                                                 // glyph centre line
+const int STRIP_CAPTION_Y = 301;                                          // caption text top (design.md 11.12)
 
 // Media control (design.md 11.20): a shuffle icon button, only while Cat
 // Shuffle is Fixed, bottom-right of the media area, 8px in from its edges.

@@ -177,7 +177,7 @@ void networkTask(void* param) {
       if (connected) {
         STATE.haveData = true;
         lastFetchSuccessMs = now;
-        pollOkSeq++;  // one pace sweep + one status-dot pulse on the render side
+        pollOkSeq++;  // one pace sweep on the render side
       } else if (now - lastFetchSuccessMs >= OFFLINE_AFTER_MS) {
         STATE.haveData = false;
       } else if (!STATE.haveData && STATE.sdOk) {

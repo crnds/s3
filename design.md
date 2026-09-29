@@ -532,13 +532,13 @@ x = 0   8                                                 471 479
     |  margin 8                                              |
     |   +------------------------------------------------+   |  y = 8     content top
     |   |                                                |   |
-    |   |          CONTENT AREA  464 x 272               |   |
-    |   |          x 8..471, y 8..279                    |   |
+    |   |          CONTENT AREA  464 x 284               |   |
+    |   |          x 8..471, y 8..291                    |   |
     |   |                                                |   |
-    |   +------------------------------------------------+   |  y = 279   content bottom
+    |   +------------------------------------------------+   |  y = 291   content bottom
     |      gap 8                                             |
-    +--------------------------------------------------------+  y = 288   status strip top
-    |  STATUS STRIP 480 x 31, y 288..318                     |
+    +--------------------------------------------------------+  y = 300   status strip top
+    |  STATUS STRIP 480 x 19, y 300..318                     |
     +========================================================+  y = 319   progress hairline
 ```
 
@@ -546,12 +546,12 @@ x = 0   8                                                 471 479
 |---|---|
 | `layout.screen` | 480 × 320 |
 | `layout.content.x0` / `x1` | 8 / 472 (exclusive) → 464 wide |
-| `layout.content.y0` / `y1` | 8 / 280 (exclusive) → 272 tall |
-| `layout.strip.y0` / `h` | 288 / 32 (the last row, y 319, is the progress hairline) |
+| `layout.content.y0` / `y1` | 8 / 292 (exclusive) → 284 tall |
+| `layout.strip.y0` / `h` | 300 / 20 (the last row, y 319, is the progress hairline) |
 | `layout.overlay.content.y1` | 312 (exclusive). Overlays and sheets have no status strip, so their content runs to 304 px tall. |
 | `layout.header.h` | 44. The modal header band is y 0..43, with content from y 52. |
 
-The sums: 8 + 272 + 8 + 32 = 320 ✓, and 8 + 464 + 8 = 480 ✓.
+The sums: 8 + 284 + 8 + 20 = 320 ✓, and 8 + 464 + 8 = 480 ✓.
 
 ### 7.2 Grid
 
@@ -563,11 +563,11 @@ right (clock, weather, note, cats).
 | Token | Value |
 |---|---|
 | `layout.col.left.x` | 8 |
-| `layout.col.left.w` | 172 (x 8..179; content ends at x 180) |
+| `layout.col.left.w` | 128 (x 8..135; content ends at x 136); 8px side pads, 112 inner. Pace flag drops its projection, the week "Resets" drops the word, and the BTC card drops its label when they would not fit |
 | `layout.col.right.x` | 188 |
-| `layout.col.right.w` | 284 (x 188..471) |
+| `layout.col.right.w` | 328 (x 144..471). Usage and the Weather sheet keep their own alignment line at x 188 (`layout.align.x`) |
 
-8 + 172 + 8 + 284 + 8 = 480 ✓. The left column's width is a **fixed reservation**. It
+8 + 128 + 8 + 328 + 8 = 480 ✓. The left column's width is a **fixed reservation**. It
 doesn't grow for longer text; content that doesn't fit gets shorter labels or wraps
 onto a second caption line (§7.4).
 
@@ -668,7 +668,7 @@ the firmware glyph advances and the §5.2 tracking in the table below.)
 | Clock (hero) | 284 × 192, pad 8 | **Side by side**, because the extra width lets the clock grow. Clock ⌀ 153 (r 76, up from today's 68) + 12 + readout column 103 = 268 ✓. The readout is numeral.lg `12:27` 75 px, 4, body `Thu 24 Sep` 92 px, 8, then the AQI badge (48 × 24) = 92 px tall, vertically centred (y 58..149). That keeps it clear of the corner slots, which end at y 31 plus 8 px of clearance. |
 | Weather (compact) | 284 × 72, pad 8 / 12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 260 inner = H/L 20 + now 40 + **4** × 44 hourly (one more hour than before) + 24 disclosure column ✓. |
 
-Left column: 112 + 8 + 112 + 8 + 32 = 272 ✓. Right column: 192 + 8 + 72 = 272 ✓.
+Left column: 118 + 8 + 118 + 8 + 32 = 284 ✓. Right column: 192 + 8 + 84 = 284 ✓.
 
 What the migration does to page 0:
 - The left column narrows from today's 236 px to its fixed 172 px reservation, and the
@@ -908,17 +908,18 @@ x: 0                        240 (screen-half split)               436     479
    |                           |                                         |
    |                           |   [tappable card -> its overlay]        |
    |                           |   e.g. Weather, with chevron            |
-   +--------+------------------------------------------------+-----------+  y 280
+   +--------+------------------------------------------------+-----------+  y 300
    | HEALTH |                                                | SETTINGS  |
-   | ->Dev. |  (page halves continue; dots are not a target) | 56 x 40   |
-   | 56 x 40|                                                |           |
+   | ->Dev. |  (page halves continue; dots are not a target) | 56 x 20   |
+   | 56 x 20|                                                |           |
    +--------+------------------------------------------------+-----------+  y 319
            x 56                                             x 424
 ```
 
-The strip's targets begin at y 280, so their hit boxes reach up into the
-8 px gap above the strip. That makes them 40 px tall, which meets
-`touch.edge.min` for a bottom-edge target.
+The strip's targets are the strip itself, y 300..319, so they are 20 px
+tall. That is **below `touch.edge.min` (40 px)**, on purpose: the strip is
+20 px to give the cards room, and it is the one exception to the touch
+guideline. Nothing reaches up into the content area.
 
 ---
 
@@ -1199,16 +1200,16 @@ excluded on purpose are listed in §11.23.
 ### 11.12 Status strip (footer)
 
 - **Purpose:** persistent system status and the entry points to Settings and Device Stats.
-- **Box:** y 288..318 (31 px) plus the progress hairline at y 319. Canvas background. It appears only on
+- **Box:** y 296..318 (23 px) plus the progress hairline at y 319. Canvas background. It appears only on
   the dashboard pages, never on overlays, sheets or full-screen media.
 - **Anatomy, left to right:**
 
   | Zone | Contents | Target |
   |---|---|---|
-  | **Health cluster** (glyphs x 8..39) | Status dot (x 8..15), then 8 px, then the Wi-Fi glyph (x 24..39) | Hit x 0..55, y 280..319 (56 × 40) → opens **Device Stats**. Pressed state: a `fill.pressed` pill behind both glyphs. |
+  | **Health cluster** (glyphs x 8..39) | Status dot (x 8..15), then 8 px, then the Wi-Fi glyph (x 24..39) | Hit x 0..55, y 300..319 (56 × 20) → opens **Device Stats**. Pressed state: a `fill.pressed` pill behind both glyphs. |
   | **CPU** (x 47) | `type.caption`: "CPU" in `text.secondary`, then the render-loop duty-cycle percentage in `text.primary` (e.g. "CPU10%") -- no space, no bracket | none |
   | **Centre** | Page indicator | none |
-  | **Settings** (x 452, centred) | Gear glyph | Hit x 424..479, y 280..319 (56 × 40) → opens **Settings** |
+  | **Settings** (x 452, centred) | Gear glyph | Hit x 424..479, y 300..319 (56 × 20) → opens **Settings** |
 
 - **Vertical:** glyph centres at y 303. Any caption text in the strip uses top y 295.
 - **ROM/RAM stay out** of the strip; both remain developer telemetry available in Device Stats.
@@ -1412,8 +1413,8 @@ Why springs rather than today's 180 ms ease-out cubic:
 |---|---|---|
 | `motion.instant` | The next present (≤33 ms, plus the present) | Every state change: pressed, selected, toggled, value updates. **These are cuts.** |
 | `motion.lean` | 8 px, `motion.spring.standard` | The page-navigation pressed hint (§12.5) |
-| `motion.sweep` | 600 ms, linear | The per-poll pace highlight. It moves at constant speed because it's light passing over, not an object settling. |
-| `motion.pulse` | 3 frames | The status-dot pulse on each successful poll |
+| `motion.sweep` | 600 ms, linear | The pace highlight, repeating every `motion.sweep.period` (3000 ms, start to start). It moves at constant speed because it's light passing over, not an object settling. |
+| `motion.pulse` | 2000 ms period, 1% floor | The status-dot breath while the server is reachable: opacity 100% → 1% → 100% on a cosine |
 | `motion.fade` | 3 frames (25 / 50 / 75%) | The reduced-motion replacement for springs (§12.9) |
 | `motion.ambient.maxHz` | 1 Hz | Continuous motion that isn't content (the second hand) |
 | `motion.progress.maxHz` | ~30 Hz (floor only) | The hairline re-presents on every 1 px of growth; this only caps how often, for a poll interval short enough that 1 px would arrive faster than the loop can present |
@@ -1495,8 +1496,8 @@ Why springs rather than today's 180 ms ease-out cubic:
 | Clock second hand | 1 Hz, as today. This is the status page's one ambient motion. |
 | Cat GIFs | Content, so exempt. They play at their own frame delays. |
 | Progress hairline | Re-presents on every 1 px step -- ~24 Hz at the default 20 s poll (§15.1) -- floored at `motion.progress.maxHz` (~30 Hz) so a 5 s poll (96 px/s) can't out-pace the loop. A fixed low-Hz cap (4, then 8 Hz) made the fill visibly jump several px at once; matching the step to what the loop can actually deliver removes the jump instead of just slowing it. |
-| Status dot | **Steady**, with one `motion.pulse` (r 4 → 5 → 4) on each successful poll. That confirms data arrived; today's 1 Hz blink says nothing. |
-| Pace-bar highlight (the "shine") | **One `motion.sweep` per successful poll**, across the pace fills, then still. It means "fresh data". Never the perpetual 2.6 s loop, which at about 0.4 Hz is close to the slow oscillations Apple's accessibility guidance tells you to avoid. |
+| Status dot | **Breathes every 2 seconds** while the server is reachable (`motion.pulse`): its opacity follows a cosine 100% → 1% → 100%, free-running so it never jumps. Offline and Reduce Motion hold it steady. |
+| Pace-bar highlight (the "shine") | **One `motion.sweep` every 3 s** (`motion.sweep.period`), across the pace fills, then still. (Was once per successful poll; changed by request.) Never the perpetual 2.6 s loop, which at about 0.4 Hz is close to the slow oscillations Apple's accessibility guidance tells you to avoid. |
 | Hourly signal | Replace the 6 s full-screen inversion with a **backlight breath** (§12.10). An inversion is an abrupt jump in brightness across the whole screen. Until it's migrated, the inversion is an exception for alerts only, and no other feature may flash the screen. |
 
 ### 12.8 Press feedback

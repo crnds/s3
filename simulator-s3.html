@@ -264,6 +264,7 @@ const TOK_GRAY_5 = 'rgb(156,154,156)';  // 0x9CD3
 const TOK_GRAY_6 = 'rgb(255,255,255)';  // 0xFFFF
 const TOK_GRAY_5_HC = 'rgb(189,190,189)';  // 0xBDF7
 const TOK_CORAL_500 = 'rgb(255,97,66)';  // 0xFB08
+const TOK_BTC_ORANGE = 'rgb(247,146,24)';  // 0xF483
 const TOK_CORAL_600 = 'rgb(206,77,49)';  // 0xCA66
 const TOK_GREEN_500 = 'rgb(33,206,66)';  // 0x2668
 const TOK_GREEN_WEDGE = 'rgb(25,109,41)';     // 0x1B65
@@ -321,6 +322,8 @@ const TOK_NOTE_TEXT = TOK_COLOR_TEXT_PRIMARY;
 const TOK_TYPE_DISPLAY = 'XL', TOK_TYPE_TITLE = 'LG', TOK_TYPE_HEADLINE = 'MDB', TOK_TYPE_BODY = 'MD';
 const TOK_TYPE_LABEL = 'SMB', TOK_TYPE_CAPTION = 'SM';
 const TOK_TYPE_MONO_S = 'MONO1', TOK_TYPE_MONO_M = 'MONO2', TOK_TYPE_MONO_L = 'MONO3';
+const TOK_TYPE_CALENDAR = 'CAL';   // 11/500 (month grid)
+const TOK_TYPE_CLOCK = 'CLK';   // 50/650, tracking -1
 const TOK_TYPE_NUMERAL_HERO = TOK_TYPE_DISPLAY, TOK_TYPE_NUMERAL_LG = TOK_TYPE_TITLE;
 const TOK_TYPE_NUMERAL_MD = TOK_TYPE_HEADLINE, TOK_TYPE_NUMERAL_SM = TOK_TYPE_CAPTION;
 
@@ -332,17 +335,19 @@ const TOK_SPACE_CARD_PAD_HERO = TOK_SPACE_SM, TOK_SPACE_STACK_TIGHT = TOK_SPACE_
 const TOK_SPACE_LIST_GAP = TOK_SPACE_SM;
 
 const TOK_LAYOUT_CONTENT_X0 = 8, TOK_LAYOUT_CONTENT_X1 = 472;
-const TOK_LAYOUT_CONTENT_Y0 = 8, TOK_LAYOUT_CONTENT_Y1 = 280;
+const TOK_LAYOUT_CONTENT_Y0 = 8, TOK_LAYOUT_CONTENT_Y1 = 292;
 const TOK_LAYOUT_CONTENT_W = TOK_LAYOUT_CONTENT_X1 - TOK_LAYOUT_CONTENT_X0;
-const TOK_LAYOUT_STRIP_Y0 = 288, TOK_LAYOUT_STRIP_H = 32;
+const TOK_LAYOUT_STRIP_Y0 = 300, TOK_LAYOUT_STRIP_H = 20;
 const TOK_LAYOUT_OVERLAY_CONTENT_Y1 = 312;
 const TOK_LAYOUT_HEADER_H = 44, TOK_LAYOUT_HEADER_CONTENT_Y = 52;
-const TOK_LAYOUT_COL_LEFT_X = 8, TOK_LAYOUT_COL_LEFT_W = 172;
-const TOK_LAYOUT_COL_RIGHT_X = 188, TOK_LAYOUT_COL_RIGHT_W = 284;
+const TOK_LAYOUT_COL_LEFT_X = 8, TOK_LAYOUT_COL_LEFT_W = 128;
+const TOK_LAYOUT_COL_RIGHT_X = 144, TOK_LAYOUT_COL_RIGHT_W = 328;
+const TOK_LAYOUT_ALIGN_X = 188;   // full-width pages (Usage, Weather sheet) keep their old column line
 const TOK_LAYOUT_HALF_SPLIT_X = 240;
 const TOK_CORNER_SLOT_A_X = 448, TOK_CORNER_SLOT_B_X = 404, TOK_CORNER_SLOT_Y = 8, TOK_CORNER_SLOT_SIZE = 24;
 const TOK_CORNER_HIT_X0 = 436, TOK_CORNER_HIT_Y1 = 44;
 const TOK_CORNER_INK_X1 = TOK_CORNER_SLOT_B_X - TOK_SPACE_SM;
+const TOK_CORNER_INK_Y1 = TOK_CORNER_SLOT_Y + TOK_CORNER_SLOT_SIZE + TOK_SPACE_SM;
 const TOK_CLOSE_SLOT_X = 8, TOK_CLOSE_SLOT_Y = 8, TOK_CLOSE_HIT_X1 = 52, TOK_CLOSE_HIT_Y1 = 52;
 const TOK_HEADER_TITLE_X = 60, TOK_HEADER_TITLE_Y = 11;
 const TOK_RADIUS_SM = 4, TOK_RADIUS_MD = 8;
@@ -357,7 +362,7 @@ const TOK_LIST_ROW_H = 56, TOK_LIST_ROW_INSET = TOK_SPACE_LG;
 const TOK_TOGGLE_W = 52, TOK_TOGGLE_H = 28, TOK_TOAST_H = 36, TOK_PRESSED_DISC_R = 20;
 
 const TOK_MOTION_SPRING_STANDARD = [100, 250], TOK_MOTION_SPRING_SHEET = [100, 300], TOK_MOTION_SPRING_FLICK = [80, 300];
-const TOK_MOTION_LEAN_PX = 8, TOK_MOTION_SWEEP_MS = 600, TOK_MOTION_PULSE_FRAMES = 3, TOK_MOTION_FADE_FRAMES = 3;
+const TOK_MOTION_LEAN_PX = 8, TOK_MOTION_SWEEP_MS = 600, TOK_MOTION_SWEEP_PERIOD_MS = 3000, TOK_MOTION_PULSE_PERIOD_MS = 2000, TOK_MOTION_PULSE_MIN_PCT = 1, TOK_MOTION_FADE_FRAMES = 3;
 const TOK_MOTION_PROGRESS_FLOOR_MS = 33, TOK_MOTION_TOAST_MS = 2500;
 const TOK_MOTION_BACKLIGHT_SLEEP_MS = 200, TOK_MOTION_BACKLIGHT_WAKE_MS = 200, TOK_MOTION_BACKLIGHT_NIGHT_MS = 2000;
 const TOK_MOTION_BACKLIGHT_ADJUST_MS = 150, TOK_MOTION_BACKLIGHT_BREATH_MS = 1000;
@@ -365,20 +370,20 @@ const TOK_MOTION_BACKLIGHT_BREATH_PCT = 40, TOK_MOTION_BACKLIGHT_BREATH_COUNT = 
 
 // ── LAYOUT (state.h's LAYOUT block) ──────────────────────────
 const SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
-const LIMIT_CARD_H = 112, BTC_CARD_H = 32;
+const LIMIT_CARD_H = 118, BTC_CARD_H = 32;
 const LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;
 const LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;
 const BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;
-const CLOCK_CARD_H = 192, WEATHER_CARD_H = 72;
+const CLOCK_CARD_H = 192, WEATHER_CARD_H = 84;
 const CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;
 const WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;
 const WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
 const WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
-const STRIP_HIT_Y0 = TOK_LAYOUT_CONTENT_Y1;
+const STRIP_HIT_Y0 = TOK_LAYOUT_STRIP_Y0;
 const HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;
 const SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
-const STRIP_CY = 303;
-const STRIP_CAPTION_Y = 295;
+const STRIP_CY = 309;
+const STRIP_CAPTION_Y = 301;
 const SHUFFLE_DISC_R = 16, SHUFFLE_HIT = 48;
 const SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W, SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
 const MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
@@ -604,6 +609,21 @@ const gfx = {
       for (let dx = xi; dx <= xo; dx++) {
         const d = Math.sqrt(dx * dx + dy * dy);
         const cov = clamp(ro - d) - clamp(ri - d);
+        if (cov < 1 / 32) continue;
+        ctx.fillStyle = cov >= 1 ? c : rgbaOf(c, Math.floor(cov * 255) / 255);
+        ctx.fillRect(cx + dx, cy + dy, 1, 1);
+        if (dx) ctx.fillRect(cx - dx, cy + dy, 1, 1);
+      }
+    }
+  },
+  // pages.cpp's aaRingF: float edges ro > ri (ri <= 0 = disc), coverage x alpha.
+  aaRingF(cx, cy, ro, ri, c, alpha) {
+    const rMax = Math.ceil(ro);
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    for (let dy = -rMax; dy <= rMax; dy++) {
+      for (let dx = 0; dx <= rMax; dx++) {
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const cov = (clamp(ro - d) - clamp(ri - d)) * alpha / 255;
         if (cov < 1 / 32) continue;
         ctx.fillStyle = cov >= 1 ? c : rgbaOf(c, Math.floor(cov * 255) / 255);
         ctx.fillRect(cx + dx, cy + dy, 1, 1);
@@ -919,6 +939,7 @@ function drawModalHeader(back, title, pressed) {
 
 // ── STATUS STRIP ──────────────────────────────────────────────
 const PROGRESS_Y = SCREEN_H - 1, DOT_CX = 12, WIFI_X0 = 24, GEAR_CX = 452;
+const STRIP_PRESSED_R = 10;  // strip pressed states: 20px tall, the strip itself
 const DOTS_W = PAGE_COUNT * 6 + (PAGE_COUNT - 1) * 6;
 const CPU_X = 47;  // just past the Wi-Fi glyph (x 24..39) + an 8px gap
 function drawStatusDot(r) {
@@ -929,6 +950,21 @@ function drawStatusDot(r) {
     gfx.fillSmoothCircle(DOT_CX, STRIP_CY, r, STATE.wifiOk ? TOK_COLOR_STATUS_WARNING : TOK_COLOR_TEXT_TERTIARY);
     gfx.fillSmoothCircle(DOT_CX, STRIP_CY, r - 2, bg);
   }
+}
+// Status-dot pulse (pages.cpp twin): while reachable the dot's opacity
+// follows a cosine 100% -> 1% -> 100% once a period, free-running.
+const PULSE_BOX_R = 6;
+let pulseDrawnLive = false;
+function pulseLive() { return STATE.connected && !STATE.cfgReduceMotion; }
+function pulseAlpha(nowMs) {
+  const periodMs = Math.trunc(TOK_MOTION_PULSE_PERIOD_MS * motionTimeScale);
+  const t = (Math.floor(nowMs) % periodMs) / periodMs;
+  const lo = TOK_MOTION_PULSE_MIN_PCT / 100;
+  return Math.trunc(255 * (lo + (1 - lo) * (0.5 + 0.5 * Math.cos(2 * Math.PI * t))));
+}
+function drawLiveDot(nowMs) {
+  if (!pulseLive()) { drawStatusDot(4); return; }
+  gfx.aaRingF(DOT_CX, STRIP_CY, 4.5, 0, TOK_COLOR_STATUS_SUCCESS, pulseAlpha(nowMs));
 }
 function drawWifiGlyph() {
   const c = STATE.wifiOk ? TOK_COLOR_STATUS_SUCCESS : TOK_COLOR_STATUS_ERROR;
@@ -952,8 +988,8 @@ function progressStepMs() {
 }
 let progressDrawnW = 0, progressLastMs = 0;
 function drawStatusStrip() {
-  if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 12, 48, 24, 12, TOK_COLOR_FILL_PRESSED);
-  drawStatusDot(4);
+  if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 10, 48, 20, 10, TOK_COLOR_FILL_PRESSED);
+  drawLiveDot(performance.now());
   drawWifiGlyph();
   const cpuInt = Math.round(STATE.cpuPercentAvg);
   const cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, 'CPU', TOK_COLOR_TEXT_SECONDARY);
@@ -962,7 +998,7 @@ function drawStatusStrip() {
   for (let i = 0; i < PAGE_COUNT; i++, x += 12)
     gfx.fillSmoothRoundRect(x, STRIP_CY - 3, 6, 6, 3, i === STATE.currentPage ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_FILL_TRACK);
   const gp = NAV.pressedId === 'gear';
-  if (gp) drawIconButtonPressed(GEAR_CX, STRIP_CY);
+  if (gp) gfx.fillSmoothCircle(GEAR_CX, STRIP_CY, STRIP_PRESSED_R, TOK_COLOR_FILL_PRESSED);  // the 40px disc would not fit a 20px strip
   drawGearGlyph(GEAR_CX, STRIP_CY, gp ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_SECONDARY,
                 gp ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS);
   progressDrawnW = 0;
@@ -983,18 +1019,16 @@ function progressTick(nowMs) {
   progressDrawnW = w;
   return true;
 }
-const PULSE_R = [5, 5, 4];
-let pulseFrame = -1, pulseSeenSeq = 0;
-function pulseTick() {
-  if (STATE.pollOkSeq !== pulseSeenSeq) {
-    pulseSeenSeq = STATE.pollOkSeq;
-    if (!STATE.cfgReduceMotion) pulseFrame = 0;
-  }
-  if (pulseFrame < 0) return false;
-  const bg = NAV.pressedId === 'health' ? TOK_COLOR_FILL_PRESSED : TOK_COLOR_BG_CANVAS;
-  gfx.fillRect(DOT_CX - 6, STRIP_CY - 6, 13, 13, bg);
-  drawStatusDot(PULSE_R[pulseFrame]);
-  if (++pulseFrame >= TOK_MOTION_PULSE_FRAMES) pulseFrame = -1;
+function pulseTick(nowMs) {
+  const live = pulseLive();
+  if (!live && !pulseDrawnLive) return false;
+  pulseDrawnLive = live;
+  const b = 2 * PULSE_BOX_R + 1;
+  gfx.setClipRect(DOT_CX - PULSE_BOX_R, STRIP_CY - PULSE_BOX_R, b, b);
+  gfx.fillRect(DOT_CX - PULSE_BOX_R, STRIP_CY - PULSE_BOX_R, b, b, TOK_COLOR_BG_CANVAS);
+  if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 10, 48, 20, 10, TOK_COLOR_FILL_PRESSED);
+  drawLiveDot(nowMs);
+  gfx.clearClipRect();
   return true;
 }
 
@@ -1040,7 +1074,7 @@ function drawLimitsPage() {
 }
 
 // ── PROJECTS PAGE ─────────────────────────────────────────────
-const PROJ_CARD_H = 165, TREND_CARD_H = 99;
+const PROJ_CARD_H = 171, TREND_CARD_H = 105;
 const TREND_CARD_Y = TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H + TOK_SPACE_GUTTER;
 const PROJ_ROW_STEP = 23 + TOK_SPACE_STACK, PROJ_VALUE_W = 56;
 function drawEmptyState(cx, y0, h, title, desc, isError, titleFont = TOK_TYPE_HEADLINE, titleColor = TOK_COLOR_TEXT_PRIMARY) {
@@ -1064,7 +1098,7 @@ function drawProjectsPage() {
     const shown = Math.min(STATE.projects.length, 4);
     let maxTokens = 1;
     for (let i = 0; i < shown; i++) maxTokens = Math.max(maxTokens, STATE.projects[i].tokens);
-    const meterX = TOK_LAYOUT_COL_RIGHT_X;
+    const meterX = TOK_LAYOUT_ALIGN_X;
     const meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - meterX;
     const nameW = meterX - TOK_SPACE_SM - px;
     let y = top + 17 + TOK_SPACE_SM;
@@ -1090,7 +1124,7 @@ function drawProjectsPage() {
   const feet = axisY - TOK_SPACE_XS;
   const chartH = feet - ty;
   for (let i = 0; i < 7; i++) {
-    const bx = TOK_LAYOUT_COL_RIGHT_X + i * (barW + gap);
+    const bx = TOK_LAYOUT_ALIGN_X + i * (barW + gap);
     let bh = Math.trunc(STATE.trend[i] / maxTrend * chartH);
     if (bh < 4) bh = 4;
     gfx.fillSmoothRoundRect(bx, feet - bh, barW, bh, TOK_RADIUS_SM, TOK_COLOR_DATA_USAGE);
@@ -1241,11 +1275,11 @@ function drawTemp(f, cx, y, t, have) {
 
 // ── PACE SWEEP (one per successful poll) ──────────────────────
 const SHINE_BAND_R = 10;
-const SHINE_BAR_X = TOK_LAYOUT_COL_LEFT_X + TOK_SPACE_CARD_PAD_COMPACT_H;
-const SHINE_BAR_W = TOK_LAYOUT_COL_LEFT_W - 2 * TOK_SPACE_CARD_PAD_COMPACT_H;
+const SHINE_BAR_X = TOK_LAYOUT_COL_LEFT_X + TOK_SPACE_SM;
+const SHINE_BAR_W = TOK_LAYOUT_COL_LEFT_W - 2 * TOK_SPACE_SM;
 const SHINE_BAR_H = TOK_METER_SM;
 const shineBarY = [-1, -1], shineFillPx = [-1, -1], shinePrevCenter = [null, null];
-let sweepStartMs = 0, sweepActive = false, sweepSeenSeq = 0;
+let sweepStartMs = 0, sweepActive = false;
 function shineColor(i, center) {
   const d = Math.abs(i - center);
   return d <= 2 ? TOK_GREEN_SHINE_HI : d <= 6 ? TOK_GREEN_SHINE_MID : d <= SHINE_BAND_R ? TOK_GREEN_SHINE_LO : TOK_COLOR_DATA_PACE;
@@ -1271,12 +1305,11 @@ function sweepCenter(nowMs) {
   return -SHINE_BAND_R + Math.trunc(t * (SHINE_BAR_W + 2 * SHINE_BAND_R));
 }
 function shineTick(nowMs) {
-  if (STATE.pollOkSeq !== sweepSeenSeq) {
-    sweepSeenSeq = STATE.pollOkSeq;
-    if (!STATE.cfgReduceMotion && STATE.cfgShowCountdown && leftColumnPage()) {
-      sweepActive = true; sweepStartMs = nowMs;
-      shinePrevCenter[0] = shinePrevCenter[1] = null;
-    }
+  // One sweep every TOK_MOTION_SWEEP_PERIOD_MS, measured start to start.
+  if (!sweepActive && !STATE.cfgReduceMotion && STATE.cfgShowCountdown && leftColumnPage() &&
+      (sweepStartMs === 0 || nowMs - sweepStartMs >= TOK_MOTION_SWEEP_PERIOD_MS * motionTimeScale)) {
+    sweepActive = true; sweepStartMs = nowMs || 1;
+    shinePrevCenter[0] = shinePrevCenter[1] = null;
   }
   if (!sweepActive) return false;
   if (!leftColumnPage() || !STATE.cfgShowCountdown) { sweepActive = false; return false; }
@@ -1304,22 +1337,23 @@ function formatPaceDur(currentPct, elapsedSec, remainingSec) {
   if (secToExhaust < 3600) return Math.max(1, Math.floor(secToExhaust / 60 + 0.5)) + 'm';
   return Math.floor(secToExhaust / 3600 + 0.5) + 'h';
 }
-function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec) {
+function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec, xMax) {
   if (!ahead) return;
   const x2 = drawText(TOK_TYPE_HEADLINE, x, baseline - fontAscent(TOK_TYPE_HEADLINE), '!', TOK_COLOR_STATUS_ERROR);
   const dur = formatPaceDur(currentPct, elapsedSec, remainingSec);
-  if (dur) drawText(TOK_TYPE_BODY, x2 + TOK_SPACE_HAIR, baseline - fontAscent(TOK_TYPE_BODY), dur, TOK_COLOR_TEXT_SECONDARY);
+  if (dur && x2 + TOK_SPACE_HAIR + textW(TOK_TYPE_BODY, dur) <= xMax) drawText(TOK_TYPE_BODY, x2 + TOK_SPACE_HAIR, baseline - fontAscent(TOK_TYPE_BODY), dur, TOK_COLOR_TEXT_SECONDARY);
 }
 function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx, resets, inText) {
   drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
   const x = SHINE_BAR_X;
-  const top = cardY + TOK_SPACE_CARD_PAD_COMPACT_V;
+  const top = cardY + TOK_SPACE_CARD_PAD_COMPACT_V + 3;  // +3: the card is 6px taller than its content
   const baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
   const xe = percent >= 0 ? drawText(TOK_TYPE_NUMERAL_LG, x, top, percent + '%', TOK_COLOR_DATA_USAGE)
                           : drawText(TOK_TYPE_NUMERAL_LG, x, top, '--', TOK_COLOR_TEXT_TERTIARY);
   const lx = xe + TOK_SPACE_SM;
   drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);
-  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem);
+  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem,
+                SHINE_BAR_X + SHINE_BAR_W);
   let y = top + fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_STACK_TIGHT;
   drawMeter(x, y, SHINE_BAR_W, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
   y += TOK_METER_MD + TOK_SPACE_STACK_TIGHT;
@@ -1331,7 +1365,9 @@ function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx,
   } else {
     shineBarY[barIdx] = -1; shineFillPx[barIdx] = -1;
   }
-  const rx = drawText(TOK_TYPE_CAPTION, x, y, 'Resets ', TOK_COLOR_TEXT_SECONDARY);
+  // "Resets Thu 04:59" is 113px, 1 over the 112 inner: it drops the word.
+  const fitsWord = textW(TOK_TYPE_CAPTION, 'Resets ') + textW(TOK_TYPE_CAPTION, resets || '') <= SHINE_BAR_W;
+  const rx = fitsWord ? drawText(TOK_TYPE_CAPTION, x, y, 'Resets ', TOK_COLOR_TEXT_SECONDARY) : x;
   if (resets) drawText(TOK_TYPE_CAPTION, rx, y, resets, TOK_COLOR_TEXT_SECONDARY);
   else drawText(TOK_TYPE_CAPTION, rx, y, '--', TOK_COLOR_TEXT_TERTIARY);
   if (inText) drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
@@ -1357,18 +1393,35 @@ function drawLimitsColumn() {
   drawLimitCard(LIMITWK_Y, 'WK', STATE.weekPercent, weekAhead, weekElapsed, weekRem, weekPace, 1,
                 weekResetWeekdayLabel(weekRem, STATE.weekResets), weekRem >= 0 ? 'in ' + fmtCountdownDHM(weekRem) : '');
 }
+// Bitcoin logo (twin of pages.cpp's drawBtcLogo).
+const BTC_LOGO_R = 7, BTC_LOGO_W = 2 * BTC_LOGO_R + 1;
+function drawBtcLogo(cx, cy) {
+  const B = ['.X.X.', 'XXXX.', 'X...X', 'X...X', 'XXXX.', 'X...X', 'X...X', 'XXXX.', '.X.X.'];
+  gfx.fillSmoothCircle(cx, cy, BTC_LOGO_R, TOK_BTC_ORANGE);
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 5; c++)
+      if (B[r][c] === 'X') gfx.fillRect(cx - 2 + c, cy - 4 + r, 1, 1, TOK_COLOR_BG_CANVAS);
+}
 function drawBtcCard() {
   drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
-  const top = BTC_Y + Math.trunc((BTC_CARD_H - fontLineH(TOK_TYPE_HEADLINE)) / 2);
-  const baseline = top + fontAscent(TOK_TYPE_HEADLINE);
-  const x = drawText(TOK_TYPE_CAPTION, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_CAPTION), 'BTC', TOK_COLOR_TEXT_SECONDARY);
-  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, '--', TOK_COLOR_TEXT_TERTIARY); return; }
-  const xe = drawText(TOK_TYPE_NUMERAL_MD, x + TOK_SPACE_SM, top, fmtBtc(STATE.btcPrice), TOK_COLOR_TEXT_PRIMARY);
-  if (STATE.btcChangePct === null) return;
-  const chg = fmtChangePct(STATE.btcChangePct);
-  const cx = Math.max(SHINE_BAR_X + SHINE_BAR_W - textW(TOK_TYPE_NUMERAL_SM, chg), xe + TOK_SPACE_XS);
-  drawText(TOK_TYPE_NUMERAL_SM, cx, baseline - fontAscent(TOK_TYPE_NUMERAL_SM), chg,
-           STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
+  const cy = BTC_Y + Math.trunc(BTC_CARD_H / 2);
+  drawBtcLogo(SHINE_BAR_X + BTC_LOGO_R, cy);
+  const px = SHINE_BAR_X + BTC_LOGO_W + TOK_SPACE_XS;
+  const baseline = cy - Math.trunc(fontLineH(TOK_TYPE_HEADLINE) / 2) + fontAscent(TOK_TYPE_HEADLINE);
+  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_MD, px, baseline - fontAscent(TOK_TYPE_NUMERAL_MD), '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  const price = fmtBtc(STATE.btcPrice);
+  let pf = TOK_TYPE_NUMERAL_MD, showChg = false, chg = '';
+  if (STATE.btcChangePct !== null) {
+    chg = fmtChangePct(STATE.btcChangePct);
+    const wChg = textW(TOK_TYPE_NUMERAL_SM, chg) + TOK_SPACE_XS;
+    for (const f of [TOK_TYPE_NUMERAL_MD, TOK_TYPE_NUMERAL_SM]) {
+      if (!showChg && px + textW(f, price) + wChg <= SHINE_BAR_X + SHINE_BAR_W) { pf = f; showChg = true; }
+    }
+  }
+  drawText(pf, px, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
+  if (!showChg) return;
+  drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, baseline - fontAscent(TOK_TYPE_NUMERAL_SM), chg,
+            STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
 }
 
 // ── NOTE PAGE (pages.cpp twin) ────────────────────────────────
@@ -1543,12 +1596,46 @@ function drawAqiBadge(x, y, aqi) {
 // ── STATUS PAGE ───────────────────────────────────────────────
 const CLOCK_R = 76;
 const CLOCK_CX = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_HERO + CLOCK_R;
-const CLOCK_CY = CLOCK_CARD_Y + CLOCK_CARD_H / 2;
-const READOUT_X = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_HERO + 2 * CLOCK_R + 1 + TOK_SPACE_MD;
+// Dial + digital time stack: 4 top, dial 153, 3 gap, time 28, 4 bottom = 192.
+const CLOCK_CY = CLOCK_CARD_Y + 4 + CLOCK_R;
+const DIGITAL_Y = CLOCK_CY + CLOCK_R + 1 + 3;
+// Two cards: the clock (dial + digital time, 8px pads) and, 8px to its right,
+// the calendar (date + AQI row and the month grid, centred in the card).
+const CAL_COL = 20, CAL_ROW = 20, CAL_DISC_R = 8;
+const CLOCK_CARD_W = 2 * TOK_SPACE_CARD_PAD_HERO + 2 * CLOCK_R + 1;
+const CAL_CARD_X = TOK_LAYOUT_COL_RIGHT_X + CLOCK_CARD_W + TOK_SPACE_GUTTER;
+const CAL_CARD_W = TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - CAL_CARD_X;
+const CAL_GRID_X = CAL_CARD_X + Math.trunc((CAL_CARD_W - 7 * CAL_COL) / 2);
+const READOUT_X = CAL_GRID_X + Math.trunc((CAL_COL - 7) / 2);
+// Minimal month grid (twin of pages.cpp's drawMonthGrid).
+function drawMonthGrid(x, y, year, mon, mday, wday) {
+  const dimOf = (m, yr) => new Date(Date.UTC(yr, m + 1, 0)).getUTCDate();
+  const first = (((wday - (mday - 1)) % 7) + 7) % 7;
+  const dim = dimOf(mon, year);
+  const prevDim = mon === 0 ? dimOf(11, year - 1) : dimOf(mon - 1, year);
+  const rows = Math.trunc((first + dim + 6) / 7);
+  const lh = fontLineH(TOK_TYPE_CALENDAR);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < 7; c++) {
+      const d = r * 7 + c - first + 1;
+      const other = d < 1 || d > dim;
+      const shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
+      const cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * CAL_ROW + CAL_ROW / 2;
+      let col = other ? TOK_COLOR_TEXT_TERTIARY
+              : (c === 0 || c === 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
+      if (!other && d === mday) {
+        gfx.fillSmoothCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);
+        col = TOK_COLOR_TEXT_PRIMARY;
+      }
+      drawTextC(TOK_TYPE_CALENDAR, cx, cy - Math.trunc(lh / 2), String(shown), col);
+    }
+  }
+}
 function drawStatusPage() {
   drawLimitsColumn();
   drawBtcCard();
-  drawCard(TOK_LAYOUT_COL_RIGHT_X, CLOCK_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, CLOCK_CARD_H);
+  drawCard(TOK_LAYOUT_COL_RIGHT_X, CLOCK_CARD_Y, CLOCK_CARD_W, CLOCK_CARD_H);
+  drawCard(CAL_CARD_X, CLOCK_CARD_Y, CAL_CARD_W, CLOCK_CARD_H);
   const wxBg = NAV.pressedId === 'weather' ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD;
   drawCardSurface(TOK_LAYOUT_COL_RIGHT_X, WEATHER_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, WEATHER_CARD_H, wxBg);
 
@@ -1564,31 +1651,34 @@ function drawStatusPage() {
   }
   drawAnalogClock(CLOCK_CX, CLOCK_CY, CLOCK_R, hour, minute, second, haveReset, resetHour, resetMinute);
 
+  // Digital time (type.clock) centred under the dial.
+  drawTextC(TOK_TYPE_CLOCK, CLOCK_CX, DIGITAL_Y, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), TOK_COLOR_TEXT_PRIMARY);
+
+  // Date + AQI badge in one row at the top of the card, from y 40 (TOK_CORNER_INK_Y1).
   const haveAqi = STATE.cfgShowAqi && STATE.aqi >= 0;
-  const readH = fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_XS + fontLineH(TOK_TYPE_BODY) +
-                (haveAqi ? TOK_SPACE_SM + TOK_BADGE_H : 0);
-  let y = CLOCK_CARD_Y + TOK_SPACE_CARD_PAD_HERO + Math.trunc((CLOCK_CARD_H - 2 * TOK_SPACE_CARD_PAD_HERO - readH) / 2);
-  drawText(TOK_TYPE_NUMERAL_LG, READOUT_X, y, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), TOK_COLOR_TEXT_PRIMARY);
-  y += fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_XS;
-  drawText(TOK_TYPE_BODY, READOUT_X, y, `${bkk.weekday} ${parseInt(bkk.day, 10)} ${bkk.month}`, TOK_COLOR_TEXT_SECONDARY);
-  y += fontLineH(TOK_TYPE_BODY) + TOK_SPACE_SM;
-  if (haveAqi) drawAqiBadge(READOUT_X, y, STATE.aqi);
+  const rowY = TOK_CORNER_INK_Y1;
+  const dateY = rowY + Math.trunc((TOK_BADGE_H - fontLineH(TOK_TYPE_CAPTION)) / 2);
+  const dateEnd = drawText(TOK_TYPE_CAPTION, READOUT_X, dateY, `${bkk.weekday} ${parseInt(bkk.day, 10)} ${bkk.month}`, TOK_COLOR_TEXT_SECONDARY);
+  if (haveAqi) drawAqiBadge(dateEnd + TOK_SPACE_SM, rowY, STATE.aqi);
+  drawMonthGrid(CAL_GRID_X, rowY + TOK_BADGE_H + TOK_SPACE_SM, parseInt(bkk.year, 10),
+                ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(bkk.month),
+                parseInt(bkk.day, 10), WDAY_ABBR.indexOf(bkk.weekday));
 
   const ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;
   const iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
-  const glyphCy = iy + 17 + 11, lowY = iy + 17 + 22;
+  const glyphCy = iy + 17 + 6 + 11, lowY = iy + 17 + 12 + 22;
   drawText(TOK_TYPE_NUMERAL_SM, ix, iy, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--',
            STATE.weatherHigh > -900 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   drawText(TOK_TYPE_NUMERAL_SM, ix, lowY, STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--',
            STATE.weatherLow > -900 ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
-  const nowCx = ix + 20 + 20;
+  const nowCx = ix + 20 + 22;
   drawTextC(TOK_TYPE_CAPTION, nowCx, iy, 'Now', TOK_COLOR_ACCENT);
   drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2);
   drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, lowY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
-  gfx.fillRect(ix + 60, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_PRIMARY);
+  gfx.fillRect(ix + 64, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_TERTIARY);
   for (let i = 0; i < 5; i++) {
     const idx = i + 1;
-    const cx = ix + 60 + i * 40 + 20;
+    const cx = ix + 64 + i * 48 + 24;
     const have = STATE.weatherHourly.length > idx;
     const hr = have ? STATE.weatherHourly[idx] : null;
     drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? String(hr.h).padStart(2, '0') : '--',
@@ -1687,7 +1777,7 @@ function drawWeatherPage() {
   for (const d of STATE.weatherDaily) { minT = Math.min(minT, d.low); maxT = Math.max(maxT, d.high); }
   if (maxT <= minT) { minT = 20; maxT = 40; }
   const dayX = innerX, iconCx = innerX + 64, lowR = innerX + 120;
-  const barX = TOK_LAYOUT_COL_RIGHT_X - 36, barW = 260, highX = barX + barW + TOK_SPACE_SM;
+  const barX = TOK_LAYOUT_ALIGN_X - 36, barW = 260, highX = barX + barW + TOK_SPACE_SM;
   const rowH = fontLineH(TOK_TYPE_BODY);
   const dy0 = WX_DAILY_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
   for (let i = 0; i < WEATHER_DAILY_N; i++) {
@@ -2715,7 +2805,7 @@ async function fetchUsage() {
   const mock = document.getElementById('mock-data').checked;
   const ok = (detail) => {
     STATE.haveData = true;
-    STATE.pollOkSeq++;  // one pace sweep + one status-dot pulse (main.cpp's pollOkSeq)
+    STATE.pollOkSeq++;  // one pace sweep (main.cpp's pollOkSeq)
     STATE.lastFetchSuccessMs = performance.now();
     STATE.wifiOk = true;
     STATE.connected = true;

@@ -20,6 +20,7 @@ const uint16_t TOK_GRAY_5 = 0x9CD3;   // rgb(156,154,156)
 const uint16_t TOK_GRAY_6 = 0xFFFF;   // rgb(255,255,255)
 const uint16_t TOK_GRAY_5_HC = 0xBDF7;  // rgb(189,190,189) -- Increase Contrast's text.secondary
 const uint16_t TOK_CORAL_500 = 0xFB08;  // rgb(255,97,66)
+const uint16_t TOK_BTC_ORANGE = 0xF483;  // rgb(247,147,26) -- the Bitcoin logo disc
 const uint16_t TOK_CORAL_600 = 0xCA66;  // rgb(206,77,49)
 const uint16_t TOK_GREEN_500 = 0x2668;  // rgb(33,206,66)
 const uint16_t TOK_GREEN_WEDGE = 0x1B65;     // rgb(25,109,41) -- green.500 at 50% over gray.1
@@ -90,6 +91,8 @@ const FontId TOK_TYPE_HEADLINE = FONT_MDB;  // 17/650
 const FontId TOK_TYPE_BODY = FONT_MD;       // 17/500
 const FontId TOK_TYPE_LABEL = FONT_SMB;     // 13/650, tracking +1, UPPERCASE only
 const FontId TOK_TYPE_CAPTION = FONT_SM;    // 13/500
+const FontId TOK_TYPE_CLOCK = FONT_CLK;     // 50/650, tracking -1 (readout beside the analog dial)
+const FontId TOK_TYPE_CALENDAR = FONT_CAL;  // 11/500 (month grid)
 const FontId TOK_TYPE_MONO_S = FONT_MONO1;
 const FontId TOK_TYPE_MONO_M = FONT_MONO2;
 const FontId TOK_TYPE_MONO_L = FONT_MONO3;
@@ -123,14 +126,15 @@ const int TOK_SPACE_ICON_TEXT_INLINE = TOK_SPACE_XS;
 
 // ── LAYOUT (design.md 7) ───────────────────────────────────
 const int TOK_LAYOUT_CONTENT_X0 = 8, TOK_LAYOUT_CONTENT_X1 = 472;   // x1 exclusive -> 464 wide
-const int TOK_LAYOUT_CONTENT_Y0 = 8, TOK_LAYOUT_CONTENT_Y1 = 280;   // y1 exclusive -> 272 tall
+const int TOK_LAYOUT_CONTENT_Y0 = 8, TOK_LAYOUT_CONTENT_Y1 = 292;   // y1 exclusive -> 284 tall
 const int TOK_LAYOUT_CONTENT_W = TOK_LAYOUT_CONTENT_X1 - TOK_LAYOUT_CONTENT_X0;
-const int TOK_LAYOUT_STRIP_Y0 = 288, TOK_LAYOUT_STRIP_H = 32;       // y 319 is the progress hairline
+const int TOK_LAYOUT_STRIP_Y0 = 300, TOK_LAYOUT_STRIP_H = 20;       // y 319 is the progress hairline
 const int TOK_LAYOUT_OVERLAY_CONTENT_Y1 = 312;                       // sheets: no strip
 const int TOK_LAYOUT_HEADER_H = 44;                                  // modal header band y 0..43
 const int TOK_LAYOUT_HEADER_CONTENT_Y = 52;                          // first content row under it
-const int TOK_LAYOUT_COL_LEFT_X = 8, TOK_LAYOUT_COL_LEFT_W = 172;    // fixed reservation, ends at x 180
-const int TOK_LAYOUT_COL_RIGHT_X = 188, TOK_LAYOUT_COL_RIGHT_W = 284;
+const int TOK_LAYOUT_COL_LEFT_X = 8, TOK_LAYOUT_COL_LEFT_W = 128;    // fixed reservation, ends at x 136
+const int TOK_LAYOUT_COL_RIGHT_X = 144, TOK_LAYOUT_COL_RIGHT_W = 328;
+const int TOK_LAYOUT_ALIGN_X = 188;                                  // full-width pages (Usage, Weather sheet) keep their old column line
 const int TOK_LAYOUT_HALF_SPLIT_X = 240;                             // page-nav halves: screen halves, not the grid
 
 // System corner (design.md 7.3): glyph boxes + the sleep hit box.
@@ -187,7 +191,9 @@ const uint16_t TOK_MOTION_SPRING_SHEET_ZETA = 100, TOK_MOTION_SPRING_SHEET_RESPO
 const uint16_t TOK_MOTION_SPRING_FLICK_ZETA = 80, TOK_MOTION_SPRING_FLICK_RESPONSE_MS = 300;
 const int TOK_MOTION_LEAN_PX = 8;
 const uint32_t TOK_MOTION_SWEEP_MS = 600;
-const int TOK_MOTION_PULSE_FRAMES = 3;
+const uint32_t TOK_MOTION_SWEEP_PERIOD_MS = 3000;  // pace-bar shine repeats every 3s
+const uint32_t TOK_MOTION_PULSE_PERIOD_MS = 2000;  // status-dot breath: 100% -> 1% -> 100% opacity
+const int TOK_MOTION_PULSE_MIN_PCT = 1;
 const int TOK_MOTION_FADE_FRAMES = 3;
 // motion.progress.maxHz: not a fixed rate -- the hairline re-presents as soon
 // as it would grow by one physical pixel (POLL_INTERVAL_MS/SCREEN_W), floored

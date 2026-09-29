@@ -52,6 +52,8 @@ FONTS = [
     ("MONO1", MONO,  11, 450,  0),   # type.mono.s (note pane size 1)
     ("MONO2", MONO,  16, 450,  0),   # type.mono.m
     ("MONO3", MONO,  22, 450,  0),   # type.mono.l
+    ("CLK",   INTER, 22, 650, -1),   # type.clock (status-page digital readout, centred under the dial)
+    ("CAL",   INTER, 11, 500,  0),   # type.calendar (status-page month grid)
 ]
 
 FIRST, LAST = 0x20, 0x7E
