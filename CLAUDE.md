@@ -84,7 +84,8 @@ frame, so it can't show a one-frame glitch (flash, tear): those need eyes on
 the panel.
 
 Serial debug keys (main.cpp `serialCommand`): `n`/`p` next/prev page,
-`w`/`d`/`s` Weather/Device/Settings, `x` close sheets, `z` toggle screen
+`w`/`d`/`s` Weather/Device/Settings, `x` close sheets, `h` play the hourly
+signal now, `z` toggle screen
 sleep, `m` slow motion (every motion token x10, design.md 17), `g` dump the frame
 (`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`). The simulator
 canvas takes the same keys (plus arrows/Esc) when focused, and
@@ -139,10 +140,12 @@ are gitignored.
   RGB565 shift-and-mask scrim (`displayPresentSheet`) and the Reduce Motion
   cross-fade (`displayPresentFade`) -- each a two-frame composite with its own
   inner loop in `fillStrip`. Rotation NORMAL/FLIPPED = software 90°/270° in
-  the rotate copy and in `touch_axs.cpp`'s inverse map. There is no screen
-  inversion or border flash any more (design.md 12.7/12.8): the hourly signal
-  is a backlight breath (`motion.cpp`'s backlight animator, which also fades
-  sleep, wake, Night Mode edges and brightness changes).
+  the rotate copy and in `touch_axs.cpp`'s inverse map. There is no border
+  flash any more (design.md 12.8). The hourly signal is a panel inversion:
+  `displaySetInvert()` writes INVON/INVOFF straight from `loop()` (no present,
+  so sheets and static screens flash too) on the even seconds of hh:00:00..05;
+  serial `h` plays it now. `motion.cpp`'s backlight animator fades sleep, wake,
+  Night Mode edges and brightness changes (its breath is currently unused).
 - **Navigation (`nav.cpp`, twin: the simulator's NAV block).** The touch
   router, gesture recogniser and every transition, stepped once per `loop()`
   pass -- nothing blocks, so a touch during motion is always read. Commit on

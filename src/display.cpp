@@ -169,6 +169,16 @@ static void panelCommand(uint8_t cmd) {
   esp_lcd_panel_io_tx_param(ioHandle, (0x02 << 24) | ((int)cmd << 8), nullptr, 0);
 }
 
+// Panel-side colour inversion (INVON/INVOFF): a register write, not a frame,
+// so it needs no present and works on every screen (sheets, GIFs, settings).
+// Core 1 only, like every panel command; tx_param drains queued strip DMA.
+static bool invertApplied = false;
+void displaySetInvert(bool on) {
+  if (!panelHandle || on == invertApplied) return;
+  esp_lcd_panel_invert_color(panelHandle, on);
+  invertApplied = on;
+}
+
 void displaySetSleep(bool sleep) {
   if (!panelHandle) return;
   if (sleep) {

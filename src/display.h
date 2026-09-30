@@ -17,6 +17,8 @@ const int SCREEN_H = 320;
 bool displayBegin();
 // 0-255, LEDC PWM on the backlight MOSFET.
 void displaySetBrightness(uint8_t level);
+// Panel colour inversion (INVON/INVOFF), applied at once -- the hourly signal.
+void displaySetInvert(bool on);
 // Screen sleep: true = DISPOFF + SLPIN (panel GRAM is kept), false = SLPOUT
 // + DISPON. Blocks ~120ms on wake. The backlight is the caller's job.
 void displaySetSleep(bool sleep);

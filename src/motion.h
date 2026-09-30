@@ -40,7 +40,8 @@ float rubberband(float over, float dim);
 
 // ── BACKLIGHT ANIMATOR ───────────────────────────────────────
 // Fades the PWM level toward a target over a motion.backlight.* duration, and
-// plays the hourly breath (dip to 40% and back, three times). Stepped from
+// can play a breath (dip to 40% and back, three times; currently unused, the
+// hourly signal is the panel inversion). Stepped from
 // loop() every pass, including while nothing else presents.
 void backlightFadeTo(uint8_t target, uint32_t fadeMs);
 void backlightBreath();

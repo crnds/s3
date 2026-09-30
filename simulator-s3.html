@@ -2086,7 +2086,9 @@ function rubberband(over, dim) { return over * dim * TOK_TOUCH_RUBBERBAND / (dim
 
 // Backlight animator: the canvas brightness filter stands in for the PWM.
 const BL = { level: 0, from: 0, target: 0, start: 0, dur: 0, breathLeft: 0, breathStart: 0 };
-function blApply() { canvas.style.filter = 'brightness(' + (BL.level / 255 * 100).toFixed(1) + '%)'; }
+let panelInverted = false;  // INVON/INVOFF twin: same filter chain as the backlight
+function blApply() { canvas.style.filter = 'brightness(' + (BL.level / 255 * 100).toFixed(1) + '%)' + (panelInverted ? ' invert(1)' : ''); }
+function displaySetInvert(on) { if (on === panelInverted) return; panelInverted = on; blApply(); }
 function backlightFadeTo(target, fadeMs) {
   BL.from = BL.level; BL.target = target; BL.start = performance.now(); BL.dur = fadeMs * motionTimeScale;
   if (BL.dur === 0) { BL.level = target; blApply(); }
@@ -2627,6 +2629,7 @@ function navTick(now) {
 let swallowUntilUp = false;
 function enterScreenSleep() {
   if (STATE.screenSleeping) return;
+  displaySetInvert(false);  // never sleep with the panel mid-flash
   backlightFadeTo(0, TOK_MOTION_BACKLIGHT_SLEEP_MS);
   STATE.screenSleeping = true;
   STATE.sleepStartMs = performance.now();
@@ -2972,7 +2975,8 @@ canvas.addEventListener('keydown', (event) => {
     return;
   }
   if (STATE.screenSleeping) return;
-  if (k === 'n' || k === 'ArrowRight') { closeSheetNow(); navGoToPage((STATE.currentPage + 1) % PAGE_COUNT, true); }
+  if (k === 'h') hourlyTestStartMs = performance.now();
+  else if (k === 'n' || k === 'ArrowRight') { closeSheetNow(); navGoToPage((STATE.currentPage + 1) % PAGE_COUNT, true); }
   else if (k === 'p' || k === 'ArrowLeft') { closeSheetNow(); navGoToPage((STATE.currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, false); }
   else if (k === 'w') { closeSheetNow(); navOpenSheet(0); }
   else if (k === 'd') { closeSheetNow(); navOpenSheet(1); }
@@ -2988,10 +2992,11 @@ document.getElementById('poll-interval').addEventListener('change', restartPollT
 document.getElementById('sim-offline').addEventListener('change', fetchUsage);
 document.getElementById('mock-data').addEventListener('change', fetchUsage);
 document.getElementById('sim-sd-missing').addEventListener('change', () => { if (!navTransitionActive()) redrawScreen(); });
-document.getElementById('hourly-signal').addEventListener('click', backlightBreath);
+let hourlyTestStartMs = 0;  // serial 'h' twin
+document.getElementById('hourly-signal').addEventListener('click', () => { hourlyTestStartMs = performance.now(); });
 
 // ── LOOP (main.cpp's loop(), ~30 passes/sec) ──────────────────
-let lastRenderMs = 0, lastSheetRenderMs = 0, lastBreathHour = -1;
+let lastRenderMs = 0, lastSheetRenderMs = 0;
 function tick() {
   const start = performance.now(), now = start;
   backlightTick(now);
@@ -3013,11 +3018,20 @@ function tick() {
           applyEffectiveBrightness(TOK_MOTION_BACKLIGHT_NIGHT_MS);
         }
       }
-      const h = parseInt(bkk.hour, 10);
-      if (STATE.cfgHourlyFlash && parseInt(bkk.minute, 10) === 0 && parseInt(bkk.second, 10) < 5 && h !== lastBreathHour) {
-        lastBreathHour = h;
-        backlightBreath();
+    }
+    // Hourly signal (main.cpp twin): inverted on the even seconds of hh:00:00..05.
+    {
+      let invertNow = false;
+      if (STATE.cfgHourlyFlash) {
+        const bkk = bangkokParts();
+        invertNow = parseInt(bkk.minute, 10) === 0 && parseInt(bkk.second, 10) < 6 && parseInt(bkk.second, 10) % 2 === 0;
       }
+      if (hourlyTestStartMs) {
+        const el = now - hourlyTestStartMs;
+        if (el < 6000) invertNow = Math.floor(el / 1000) % 2 === 0;
+        else hourlyTestStartMs = 0;
+      }
+      displaySetInvert(invertNow);
     }
     let needPresent = STATE.shiftDirty;
     if (navSheetOpen()) {

@@ -222,6 +222,7 @@ static bool swallowUntilUp = false;  // the waking press never reaches the scree
 
 void enterScreenSleep() {
   if (screenSleeping) return;
+  displaySetInvert(false);  // never sleep (or wake) with the panel mid-flash
   // The fade is short and nothing on screen needs input during it.
   backlightFadeTo(0, TOK_MOTION_BACKLIGHT_SLEEP_MS);
   uint32_t t0 = millis();
@@ -270,8 +271,14 @@ static void closeSheetNow() {
   navFinishTransition();
 }
 
+static uint32_t hourlyTestStartMs = 0;  // serial 'h': play the hourly signal now
+
 static void serialCommand(char c) {
   switch (c) {
+    case 'h':
+      hourlyTestStartMs = millis() | 1;  // never 0, which means "not running"
+      Serial.println("[hourly] test signal");
+      break;
     case 'n': case 'p':
       closeSheetNow();
       navGoToPage(c == 'n' ? (currentPage + 1) % PAGE_COUNT : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, c == 'n');
@@ -435,19 +442,24 @@ void loop() {
     }
   }
 
-  // Hourly signal: one backlight breath at hh:00 (motion.backlight.breath) --
-  // costs no presents, and never flashes or inverts the screen.
-  if (cfgHourlyFlash) {
-    static int lastBreathHour = -1;
-    static uint32_t lastHourCheckMs = 0;
-    if (now - lastHourCheckMs >= 500) {
-      lastHourCheckMs = now;
+  // Hourly signal: the panel inverts on the even seconds of hh:00:00..05 (three
+  // flashes). INVON/INVOFF is a register write, so it costs no presents and
+  // flashes whatever is on screen. time() rather than getLocalTime(): the
+  // latter stalls 10ms per call while no clock is set.
+  {
+    bool invertNow = false;
+    time_t t = time(nullptr);
+    if (cfgHourlyFlash && t > 1700000000) {
       struct tm ti;
-      if (getLocalTime(&ti, 0) && ti.tm_min == 0 && ti.tm_sec < 5 && ti.tm_hour != lastBreathHour) {
-        lastBreathHour = ti.tm_hour;
-        backlightBreath();
-      }
+      localtime_r(&t, &ti);
+      invertNow = ti.tm_min == 0 && ti.tm_sec < 6 && ti.tm_sec % 2 == 0;
     }
+    if (hourlyTestStartMs) {
+      uint32_t el = now - hourlyTestStartMs;
+      if (el < 6000) invertNow = (el / 1000) % 2 == 0;
+      else hourlyTestStartMs = 0;
+    }
+    displaySetInvert(invertNow);
   }
 
   bool needPresent = shiftDirty;

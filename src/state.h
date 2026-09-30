@@ -361,8 +361,8 @@ extern bool cfgShowCountdown;
 // Status-page AQI badge next to the date (see aqiColors()/drawStatusPage in
 // pages.cpp). Default on; toggled from the Settings area like cfgShowCountdown.
 extern bool cfgShowAqi;
-// "Hourly signal" (flash key hourly_flash): a backlight breath on the hour
-// (motion.backlight.breath) -- it replaced the old 6s screen inversion.
+// "Hourly signal" (flash key hourly_flash): the panel inverts (INVON/INVOFF,
+// displaySetInvert) on the even seconds of hh:00:00..05 -- three flashes.
 extern bool cfgHourlyFlash;
 // "Poll progress": the 1px poll-countdown hairline along y 319. Off = none.
 extern bool cfgShowProgress;

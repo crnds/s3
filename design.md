@@ -144,7 +144,7 @@ to the section that specifies each one.
 | **Rubber-banding.** | The ends of a list, and a sheet pulled above its open position, resist more the further you pull (constant 0.55). | §9.4 |
 | **Frame-level smoothness.** | Each frame moves at most 150 px. Offsets are whole pixels, and every present is TE-synced. | §12.6 |
 | **Materials and depth.** | There's no alpha, so there's no glass. Depth comes from surface steps, plus a bit-shift dimming layer behind a rising sheet, a shade where a list scrolls under a header, and solid plates over media. | §8.4 |
-| **Multimodal feedback.** | The backlight is a feedback channel that costs no frames, used for sleep, wake, night and the hourly signal. Sound is reserved. Feedback follows Apple's causality, harmony and utility rules. | §12.10 |
+| **Multimodal feedback.** | The backlight is a feedback channel that costs no frames, used for sleep, wake and night. Sound is reserved. Feedback follows Apple's causality, harmony and utility rules. | §12.10 |
 | **Reduced motion.** | Springs become 3-frame cross-fades. Motion is never removed without something gentler taking its place. | §12.9 |
 | **Typography.** Tracking depends on size, leading shrinks as size grows, and weight builds hierarchy. | Tracking is baked in per size (display and title −1 px, the uppercase label +1 px). Leading tightens as size grows. | §5 |
 
@@ -1498,7 +1498,7 @@ Why springs rather than today's 180 ms ease-out cubic:
 | Progress hairline | Re-presents on every 1 px step -- ~24 Hz at the default 20 s poll (§15.1) -- floored at `motion.progress.maxHz` (~30 Hz) so a 5 s poll (96 px/s) can't out-pace the loop. A fixed low-Hz cap (4, then 8 Hz) made the fill visibly jump several px at once; matching the step to what the loop can actually deliver removes the jump instead of just slowing it. |
 | Status dot | **Breathes every 2 seconds** while the server is reachable (`motion.pulse`): its opacity follows a cosine 100% → 1% → 100%, free-running so it never jumps. Offline and Reduce Motion hold it steady. |
 | Pace-bar highlight (the "shine") | **One `motion.sweep` every 3 s** (`motion.sweep.period`), across the pace fills, then still. (Was once per successful poll; changed by request.) Never the perpetual 2.6 s loop, which at about 0.4 Hz is close to the slow oscillations Apple's accessibility guidance tells you to avoid. |
-| Hourly signal | Replace the 6 s full-screen inversion with a **backlight breath** (§12.10). An inversion is an abrupt jump in brightness across the whole screen. Until it's migrated, the inversion is an exception for alerts only, and no other feature may flash the screen. |
+| Hourly signal | **Full-screen inversion** on the even seconds of hh:00:00..05 (three flashes), by request. It is a panel register write (INVON/INVOFF, `displaySetInvert`): no presents, works on every screen. It was once replaced by a backlight breath (§12.10, the token is kept but unused). The inversion is the exception for this signal only; no other feature may flash the screen. |
 
 ### 12.8 Press feedback
 
@@ -1542,7 +1542,7 @@ brightness jumps are easiest to avoid.
 | `motion.backlight.wake` | DISPON, then 200 ms up to the target | Waking. The frame is still intact, so the screen is effectively there at once, and the fade starts on the touch itself. |
 | `motion.backlight.night` | 2 s | Night Mode starting and ending (today these are instant cuts) |
 | `motion.backlight.adjust` | 150 ms | Picking a new brightness, so you see the change you chose |
-| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | The hourly signal (replaces the inversion) |
+| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Currently unused; the hourly signal is the panel inversion (§12.7) |
 
 **Sound** is unused. If it's ever added, it follows Apple's three rules:
 - **Causality:** sound only for meaningful events, like a destructive action executing or the hourly signal.
@@ -1638,7 +1638,7 @@ required.
 | Scrim and scroll-edge shade | A shift and mask per pixel inside the rotate copy that already runs | Apple's "dim to focus" without alpha, at no measurable cost. |
 | Lean hint | One neighbour-page render into a PSRAM frame per navigation touch, plus one present | Gives page navigation a pressed state that points where it will go. The frame is reused by the slide and by a swipe. |
 | Three-buffer carousel strip | +900 KB PSRAM in total (of 8 MB) | Retargeting mid-slide with no jump. The two-buffer fallback is acceptable (§12.3). |
-| Backlight fades | None: PWM only, no presents | Smooth sleep, wake, night and hourly signals with no abrupt brightness jumps. |
+| Backlight fades | None: PWM only, no presents | Smooth sleep, wake and night changes with no abrupt brightness jumps. |
 | Reduce Motion cross-fade | About the same as a slide (blend inside the rotate copy) | A gentler equivalent, not the removal of feedback. |
 | Swipe paging | +300 KB PSRAM (the neighbour page, shared with the lean), about 30 presents a second while dragging | 1:1 direct manipulation. Tap halves stay primary. |
 | Momentum scroll and rubber band | Velocity ring buffer, plus about 30 presents a second while coasting (d = 0.995 keeps coasts short) | Settings is about 3.3 screens long; a hard stop at the ends reads as frozen. |
@@ -1832,7 +1832,7 @@ required.
 | No pressed state for page navigation | `motion.lean` |
 | "Tap to…" hint strings | Removed; only informative hints remain (§11.15) |
 | Labels "MIXED" / "SHOW COUNTDOWN" / "PROGRESS BAR" / "HOURLY FLASH" | "Status + cats" / "Pace bars" / "Poll progress" / "Hourly signal" |
-| Hourly full-screen inversion | `motion.backlight.breath` |
+| Hourly full-screen inversion | Kept, by request (§12.7); the backlight breath token is unused |
 | Instant backlight changes | `motion.backlight.*` fades |
 | Inter 3 without `opsz`; tracking 0 everywhere | Inter 4 with `opsz = size`; tracking per §5.2 |
 
