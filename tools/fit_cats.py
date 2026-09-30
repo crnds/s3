@@ -9,9 +9,9 @@ touches the box (aspect ratio kept), with gifsicle's Catmull-Rom filter, and
 re-applies the same palette/lossy settings. Files already touching the box
 are left alone, so it is safe to re-run after adding more cats.
 
-    cp -R ~/cyd/cats ~/s3/cats                 # the CYD's 120 cats (<=320x240)
+    cp ~/cyd/cats/cat_NNN.gif cats/            # pick a subset: all 120 won't fit in 16MB flash
     python3 tools/fit_cats.py                  # upscale in place (./cats)
-    COPYFILE_DISABLE=1 cp -r cats /Volumes/<SD>/cats
+    pio run -t upload                          # cats/ is embedded in the firmware
 
 Requires gifsicle (brew install gifsicle) and Pillow (to read sizes).
 """

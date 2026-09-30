@@ -1805,10 +1805,11 @@ function drawWeatherPage() {
 }
 
 // ── CAT PAGES (placeholder -- the firmware-only surface) ──────────────────
-// The device plays random GIFs from /cats/ (gif_player.cpp); the canvas
+// The device plays random GIFs embedded in the firmware (gif_player.cpp); the canvas
 // can't, so this shows the firmware's own placeholder layout plus the same
 // overlays (reset plate, shuffle button, corner plates).
-function catsAvailable() { return !document.getElementById('sim-sd-missing').checked; }
+// Cats are embedded in the firmware, so only the SD-backed movie page depends on the card.
+function moviesAvailable() { return !document.getElementById('sim-sd-missing').checked; }
 function drawResetPlate() {
   const percent = STATE.sessionPercent, resets = STATE.sessionResets;
   if (percent < 0 || !resets) return;
@@ -1824,7 +1825,8 @@ function drawResetPlate() {
 function drawMediaOverlays(offline) {
   const mixed = STATE.currentPage === MIXED_PAGE && !offline;
   if (!mixed) drawResetPlate();
-  if (STATE.catShuffleSec < 0 && catsAvailable()) {
+  const movie = STATE.currentPage === MOVIE_PAGE && !offline;
+  if (STATE.catShuffleSec < 0 && (!movie || moviesAvailable())) {
     const [cx, cy] = shuffleCentre(mixed);
     drawShuffleButton(cx, cy, NAV.pressedId === 'shuffle');
   }
@@ -1837,26 +1839,20 @@ function drawGifPage(offline) {
     gfx.fillScreen(TOK_COLOR_BG_CANVAS);
     drawMixedPageStatic();
     drawCardSurface(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_SURFACE_CARD);
-    if (catsAvailable())
-      drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'Cats play here', 'Cover-fit GIFs on the device', false);
-    else
-      drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'No SD card', 'Insert a card with /cats/ GIFs', true);
+    drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'Cats play here', 'Cover-fit GIFs on the device', false);
   } else if (movie) {
     // Deliberate non-twin, same as the cats placeholder below: no real MJPEG
     // decode in the browser either (CLAUDE.md's "Deliberate non-twins").
     gfx.fillScreen(TOK_COLOR_BG_CANVAS);
-    if (catsAvailable())
+    if (moviesAvailable())
       drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'Movies play here', 'Random .mjpeg files from /movies/ on the device', false,
                      TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
     else
       drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'No SD card', 'Insert an SD card with /movies/ .mjpeg files', true);
   } else {
     gfx.fillScreen(TOK_COLOR_BG_CANVAS);
-    if (catsAvailable())
-      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'Cats play here', 'Random GIFs from /cats/ on the device', false,
-                     TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
-    else
-      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'No SD card', 'Insert an SD card with /cats/ GIFs', true);
+    drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, 'Cats play here', 'Random embedded GIFs on the device', false,
+                   TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
   }
   drawMediaOverlays(offline);
 }

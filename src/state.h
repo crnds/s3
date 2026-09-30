@@ -504,7 +504,6 @@ void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, 
 void shuffleCentre(bool mixed, int& cx, int& cy);
 
 // ── GIF PLAYER (gif_player.cpp) ─────────────────────────────
-void scanCats();
 // Returns true when it changed `frame` -- loop() presents once per pass.
 bool gifTick(bool offline);
 // Encapsulate what used to be loop() reaching directly into gif/gifOpen/

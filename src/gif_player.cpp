@@ -1,9 +1,10 @@
-// CATS / GIF_PAGE and the MIXED_PAGE cat pane: random cat GIFs from /cats/ on
-// the SD card, played endlessly (and full-screen on any page while offline --
-// the cats ARE the offline screen, regardless of currentPage: see gifTick()'s
-// top). Decode + draw happen on the render core (core 1) in gifTick(); SD
-// reads there are guarded by sdMutex so they can't collide with the network
-// task's writes.
+// CATS / GIF_PAGE and the MIXED_PAGE cat pane: random cat GIFs, played
+// endlessly (and full-screen on any page while offline -- the cats ARE the
+// offline screen, regardless of currentPage: see gifTick()'s top). The GIFs
+// are linked into the firmware image (cats/*.gif -> cats_embed.h, built by
+// tools/embed_cats.py) and decoded straight from memory-mapped flash: no SD
+// card, no sdMutex, nothing shared with the network task. Decode + draw happen
+// on the render core (core 1) in gifTick().
 //
 // MOVIE_PAGE (random .mjpeg playback from /movies/) is a sibling module,
 // movie_player.cpp, with its own decoder/canvas -- but it shares this file's
@@ -30,6 +31,7 @@
 //
 // Everything below except the functions declared in state.h is file-local.
 #include "state.h"
+#include "cats_embed.h"
 
 uint32_t catShuffleMs = 0;  // 0 = let each GIF play to its natural end
 bool catShuffleFixed = false;  // FIXED preset: never auto-rotate, tap-only advance
@@ -37,11 +39,7 @@ bool catShuffleFixed = false;  // FIXED preset: never auto-rotate, tap-only adva
 // The decoder (and its ~24KB of work buffers) exists only while a cat page is
 // showing (gifPlayerEnterCatMode/ExitCatMode), same lifecycle as the CYD.
 static AnimatedGIF* gif = nullptr;
-static File gifFile;                 // handle the AnimatedGIF file callbacks read through
-static const char* CATS_DIR = "/cats";
-static const int MAX_CATS = 200;     // cap the in-RAM filename list
-static String catFiles[MAX_CATS];
-static int catCount = 0;
+static const int catCount = EMBEDDED_CAT_COUNT;
 static bool gifOpen = false;
 static bool gifPlaceholderDrawn = false;
 static uint32_t gifNextFrameMs = 0;
@@ -81,37 +79,7 @@ static inline void markDirty(int x0, int x1, int y) {
 }
 static inline void resetDirty() { dirtyX0 = dirtyY0 = INT_MAX; dirtyX1 = dirtyY1 = -1; }
 
-// ── ANIMATEDGIF CALLBACKS ──────────────────────────────────
-// The SD reads inside these run under sdMutex, which gifTick()/openCatAtIndex()
-// hold around every gif open/playFrame/close.
-static void* GIFOpenFile(const char* fname, int32_t* pSize) {
-  gifFile = SD_MMC.open(fname);
-  if (!gifFile) return nullptr;
-  *pSize = gifFile.size();
-  return (void*)&gifFile;
-}
-static void GIFCloseFile(void* pHandle) {
-  File* f = static_cast<File*>(pHandle);
-  if (f) f->close();
-}
-static int32_t GIFReadFile(GIFFILE* pFile, uint8_t* pBuf, int32_t iLen) {
-  File* f = static_cast<File*>(pFile->fHandle);
-  int32_t want = iLen;
-  // Reading to the very last byte broke a later seek() on the CYD's SD lib;
-  // kept, it costs nothing (the GIF trailer byte is never needed).
-  if ((pFile->iSize - pFile->iPos) < iLen) want = pFile->iSize - pFile->iPos - 1;
-  if (want <= 0) return 0;
-  int32_t got = (int32_t)f->read(pBuf, want);
-  pFile->iPos = f->position();
-  return got;
-}
-static int32_t GIFSeekFile(GIFFILE* pFile, int32_t iPosition) {
-  File* f = static_cast<File*>(pFile->fHandle);
-  f->seek(iPosition);
-  pFile->iPos = (int32_t)f->position();
-  return pFile->iPos;
-}
-
+// ── ANIMATEDGIF CALLBACK ───────────────────────────────────
 // One decoded image line into gifCanvas, honouring transparency (transparent
 // pixels leave the previous frame's canvas pixel alone) and disposal method 2
 // (restore-to-background paints them as the background colour).
@@ -199,34 +167,6 @@ static void blitDirty() {
   }
 }
 
-// Scan /cats/ for *.gif once at boot into catFiles[]. Names are normalized to a
-// full "/cats/<name>" path (openNextFile()'s name() is basename-only here).
-void scanCats() {
-  catCount = 0;
-  if (!STATE.sdOk) return;
-  lockSD();
-  File dir = SD_MMC.open(CATS_DIR);
-  if (dir && dir.isDirectory()) {
-    for (File f = dir.openNextFile(); f && catCount < MAX_CATS; f = dir.openNextFile()) {
-      if (!f.isDirectory()) {
-        String name = f.name();
-        int slash = name.lastIndexOf('/');
-        if (slash >= 0) name = name.substring(slash + 1);
-        String lower = name; lower.toLowerCase();
-        // Skip hidden files: macOS copies to a FAT card leave "._cat_NNN.gif"
-        // AppleDouble companions whose names also end in ".gif"; unfiltered
-        // they fill the list and then fail to open.
-        if (!name.startsWith(".") && lower.endsWith(".gif"))
-          catFiles[catCount++] = String(CATS_DIR) + "/" + name;
-      }
-      f.close();
-    }
-  }
-  if (dir) dir.close();
-  unlockSD();
-  Serial.printf("[cats] %d GIF(s) in %s\n", catCount, CATS_DIR);
-}
-
 // Everything drawn over the cat (or movie) after each frame: the reset plate
 // (the full-screen layout -- the cat/movie page, and the offline screen,
 // where it and the corner glyphs carry the status), the shuffle media
@@ -246,27 +186,22 @@ void drawMediaOverlays(bool offline) {
   drawSystemCorner(true);
 }
 
-// Empty / error state when there are no cats to show (no SD, or an empty
-// /cats/), design.md 13.4. Drawn once per page visit (gifPlaceholderDrawn).
-// Returns true when it drew.
+// Empty state for a build with no cats (design.md 13.4; tools/embed_cats.py
+// refuses to build without GIFs, so this is a safety net). Drawn once per page
+// visit (gifPlaceholderDrawn). Returns true when it drew.
 static bool drawGifPlaceholder(bool offline) {
   if (gifPlaceholderDrawn) return false;
   gifPlaceholderDrawn = true;
   bool mixedMode = (currentPage == MIXED_PAGE && !offline);
-  const bool noSd = !STATE.sdOk;
   if (mixedMode) {
     g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_BG_CANVAS);
     drawCardSurface(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_SURFACE_CARD);
     drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H,
-                   noSd ? "No SD card" : "No cats yet",
-                   noSd ? "Insert a card with /cats/ GIFs" : "Add GIFs to /cats/ on the card", noSd);
+                   "No cats yet", "Add GIFs to cats/ and rebuild", false);
   } else {
     g->fillScreen(TOK_COLOR_BG_CANVAS);
-    if (noSd)
-      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, "No SD card", "Insert an SD card with /cats/ GIFs", true);
-    else
-      drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, "No cats yet", "Add GIFs to /cats/ on the SD card", false,
-                     TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
+    drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, "No cats yet", "Add GIFs to cats/ and rebuild", false,
+                   TOK_TYPE_DISPLAY, TOK_COLOR_TEXT_SECONDARY);
   }
   drawMediaOverlays(offline);
   return true;
@@ -277,11 +212,8 @@ static bool drawGifPlaceholder(bool offline) {
 static bool openCatAtIndex(int index, bool resetOpenedTime) {
   if (catCount == 0 || !gif || !gifCanvas || index < 0 || index >= catCount) return false;
   gif->begin(GIF_PALETTE_RGB565_BE);  // big-endian RGB565 = the sprite's own byte order
-  lockSD();
-  int ok = gif->open(catFiles[index].c_str(), GIFOpenFile, GIFCloseFile,
-                     GIFReadFile, GIFSeekFile, GIFDraw);
-  unlockSD();
-  if (!ok) return false;
+  const EmbeddedCat& cat = EMBEDDED_CATS[index];
+  if (!gif->open((uint8_t*)cat.data, (int)cat.size, GIFDraw)) return false;
   canvasW = min(gif->getCanvasWidth(), SCREEN_W);
   canvasH = min(gif->getCanvasHeight(), SCREEN_H);
   memset(gifCanvas, 0, (size_t)canvasW * canvasH * 2);
@@ -319,7 +251,7 @@ static bool reopenCurrentCat() {
 }
 
 static void closeGif() {
-  if (gif && gifOpen) { lockSD(); gif->close(); unlockSD(); }
+  if (gif && gifOpen) gif->close();
   gifOpen = false;
 }
 
@@ -329,7 +261,7 @@ static void closeGif() {
 // true when it changed `frame` (loop() then presents).
 bool gifTick(bool offline) {
   if (currentPage == MOVIE_PAGE && !offline) return movieTick(offline);
-  if (!STATE.sdOk || catCount == 0 || !gif || !gifCanvas) return drawGifPlaceholder(offline);
+  if (catCount == 0 || !gif || !gifCanvas) return drawGifPlaceholder(offline);
   uint32_t now = millis();
 
   // Layout flipped under an open GIF (went offline / came back while on the
@@ -359,18 +291,10 @@ bool gifTick(bool offline) {
       return drew;
     }
   }
-  now = millis();  // opening performs slow SD I/O
+  now = millis();  // opening clears the canvas: take the time after it
   int delayMs = 0;
-  // Bounded wait: if networkTask (core 0) is mid-poll on the card, drop this
-  // frame rather than blocking the render core -- during an outage the cat
-  // player and the recovery poll compete for the card, and the poll must win.
-  if (!tryLockSD(20)) {
-    gifNextFrameMs = now + 20;
-    return false;
-  }
   resetDirty();
   int more = gif->playFrame(false, &delayMs);  // bSync=false: we handle timing ourselves
-  unlockSD();
   blitDirty();
   gifFrames++;
 

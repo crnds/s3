@@ -1620,7 +1620,7 @@ required.
 |---|---|
 | **Loading / not yet received** | Components render with their final layout and `--` placeholders in tertiary. The status dot shows a tertiary ring. No spinners on dashboard pages. |
 | **Empty** (valid, but nothing to show) | Centred in its container: a title (headline, primary), `space.sm`, a description (caption, secondary, telling you the next step). Example: "No note yet" / "Edit at :8787/note". A full-screen empty state may use `type.display` for its title, in `text.secondary`, **not accent**. |
-| **Error** (something is missing or failed) | The same structure as empty, with the title in `status.error` headline. Example: "No SD card" / "Insert an SD card with /cats/ GIFs". |
+| **Error** (something is missing or failed) | The same structure as empty, with the title in `status.error` headline. Example: "No SD card" / "Insert an SD card with /movies/ .mjpeg files". |
 | **Offline** (server unreachable for 60 s or more) | A *mode*, not an error: the media screen (cats) with the reset readout plate. The status strip isn't shown, so the corner glyphs and the reset plate carry the status. Returning online cuts back to the page you were on. |
 | **Boot** (firmware-only) | The splash BMP, then a spinner. The spinner uses `text.secondary` and is the only spinner in the system. |
 | **AP setup** (firmware-only) | A full-screen instruction layout: numbered steps in body; the values to type (SSID, IP) in `type.title` **primary**; waiting status in caption, secondary; `space.xxl` between steps. |

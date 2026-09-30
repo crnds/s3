@@ -10,6 +10,7 @@
 // ap_setup.cpp, display.cpp, touch_axs.cpp and fonts.cpp, all declared through
 // state.h.
 #include "state.h"
+#include "cats_embed.h"
 
 // ── FRAME ──────────────────────────────────────────────────
 // Off-screen frame (480x320 RGB565, 300KB in PSRAM): every page is composed
@@ -357,13 +358,13 @@ void setup() {
     loadEnvCache();     // show last-known BTC/weather immediately, before any live fetch
     loadWeatherCache(); // full Weather-page snapshot (hourly/daily) if present
     showBootSplash();   // optional /splash.bmp, briefly, before the WiFi spinner
-    scanCats();         // index /cats/*.gif for the cat GIF player page
     scanMovies();       // index /movies/*.mjpeg for the movie player page
   } else {
     Serial.println("[sd] card not found or failed to mount");
   }
   logDiag((String("boot reason=") + resetReasonStr()).c_str());
 
+  Serial.printf("[cats] %d GIF(s) embedded in firmware\n", EMBEDDED_CAT_COUNT);
   // First-boot config portal: only when no WiFi SSID has ever been configured
   // (WIFI_SSID blank in config.h and none saved to flash).
   if (cfgWifiSsid.length() == 0) {

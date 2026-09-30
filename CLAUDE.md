@@ -100,8 +100,8 @@ The `#screen` box is 486×326 = 480×320 canvas + 3px border; crop 3px to
 compare against a board grab pixel-for-pixel.
 
 A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
-Git is local only (no remote). `docs/`, `cats/`, `shots/` and `config.h`
-are gitignored.
+Git remote is `origin` (github.com/crnds/s3). `docs/`, `shots/` and `config.h`
+are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 
 ## Toolchain facts (verified)
 
@@ -182,7 +182,11 @@ are gitignored.
 - **Touch (`touch_axs.cpp`):** I2C 0x3B, 11-byte read command, 8-byte report,
   single point; 2 fingers = no touch (seller driver behaviour). Capacitive —
   **no calibration keys** exist (the CYD's `touch_*` NVS keys were dropped).
-- **Cats (`gif_player.cpp`):** RAW-mode decode composited into `gifCanvas`
+- **Cats (`gif_player.cpp`):** the GIFs are **linked into the firmware**, not read
+  from the SD card: `tools/embed_cats.py` (a `pre:` extra script) `.incbin`s
+  `cats/*.gif` into `src/cats_embed.gen.cpp` (gitignored) and AnimatedGIF decodes
+  straight from memory-mapped flash, so cats need no card and no `sdMutex`
+  (`cats_embed.h` is the interface). RAW-mode decode composited into `gifCanvas`
   (GIF-sized RGB565 in PSRAM), then blitted into `frame` — 1:1 centred on the
   full-screen cat page, or **cover-fit** (nearest-sampled, uniform scale
   computed once per GIF open, cropped to fill — never stretched) into the
@@ -203,7 +207,7 @@ are gitignored.
 - **SD is `SD_MMC` 1-bit** (CLK12/CMD11/D0 13), 40MHz with a 20MHz fallback.
   Same files as the CYD (`/last_usage.json`, `/last_env.json`,
   `/weather.json`, `/archive.csv`, `/diag_log.csv`, `/splash.bmp` now
-  480×320, `/cats/*.gif`).
+  480×320). `/movies/*.mjpeg` is still SD-only; cats are not.
 - **NVS namespace `s3cfg`** (separate board, separate settings). Same keys as
   the CYD minus touch calibration; no `/config.json` migration.
 - **Offline threshold / WiFi self-reboot are wall-clock** (60s / 15 min),
@@ -242,14 +246,16 @@ block and are copied at the top of `simulator-s3.html`.
 ## Cat library
 
 ```sh
-cp -R ~/cyd/cats ~/s3/cats                    # the CYD's 120 cats, same library
+cp ~/cyd/cats/cat_NNN.gif ~/s3/cats/           # pick cats from the CYD's library
 python3 tools/fit_cats.py                      # enlarge sources smaller than 480x320
-COPYFILE_DISABLE=1 cp -r cats /Volumes/<SD>/cats
+python3 tools/embed_cats.py                    # (optional) preview what gets embedded
 ```
-The S3 plays **the CYD's own 120 cats** (`~/cyd/cats`, built there by
-`prepare_cat_gifs.py` at <=320x240) -- one shared library, not a second
-download. `fit_cats.py` enlarges each until it touches 480x320 (Catmull-Rom,
-same palette/lossy settings); the result is ~83MB. Grow the library in
-`~/cyd` and re-copy + re-fit rather than downloading separately here.
-`COPYFILE_DISABLE=1` stops macOS AppleDouble `._*.gif` files (the scanner
-skips them anyway).
+Cats live in `~/s3/cats/*.gif` (tracked) and are **embedded in the firmware** at
+build time -- add or remove a GIF, then `pio run -t upload`. Flash is 16MB with a
+6.25MB app slot (~1.6MB is code+fonts), so `embed_cats.py` fails the build past
+4MB of GIFs; that is why the CYD's full 120-cat library (~83MB after fitting) does
+not go in -- pick a subset.
+
+`fit_cats.py` enlarges each until it touches 480x320 (Catmull-Rom, same
+palette/lossy settings; needs `gifsicle`). Hidden files (macOS `._*.gif`) are
+skipped.

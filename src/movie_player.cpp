@@ -86,8 +86,7 @@ static int JPEGDraw(JPEGDRAW* pDraw) {
   return 1;
 }
 
-// Scan /movies/ for *.mjpeg once at boot into movieFiles[]. Mirrors
-// gif_player.cpp's scanCats().
+// Scan /movies/ for *.mjpeg once at boot into movieFiles[].
 void scanMovies() {
   movieCount = 0;
   if (!STATE.sdOk) return;
@@ -100,7 +99,7 @@ void scanMovies() {
         int slash = name.lastIndexOf('/');
         if (slash >= 0) name = name.substring(slash + 1);
         String lower = name; lower.toLowerCase();
-        // Skip hidden files, same reason as scanCats(): macOS AppleDouble
+        // Skip hidden files: macOS AppleDouble
         // companions ("._movie.mjpeg") would otherwise fill the list and
         // then fail to open.
         if (!name.startsWith(".") && lower.endsWith(".mjpeg"))
