@@ -246,11 +246,13 @@ pre {
 // are design.md's tokens -- the TOKENS block mirrors src/tokens.h line for line.
 const SCREEN_W = 480, SCREEN_H = 320;
 const POLL_DEFAULT_MS = 20000;
-const PAGE_COUNT = 7;
-const GIF_PAGE = 3;    // cat GIFs on the device (placeholder here -- see drawGifPage)
-const MOVIE_PAGE = 4;  // movies on the device (placeholder here -- see drawGifPage)
-const MIXED_PAGE = 5;  // limits column + cats pane
-const NOTE_PAGE = 6;   // limits column + note pane (an ordinary render() page)
+const PAGE_COUNT = 6;
+// Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
+// 3 Movies, 4 Status + cats, 5 Note.
+const GIF_PAGE = 2;    // cat GIFs on the device (placeholder here -- see drawGifPage)
+const MOVIE_PAGE = 3;  // movies on the device (placeholder here -- see drawGifPage)
+const MIXED_PAGE = 4;  // limits column + cats pane
+const NOTE_PAGE = 5;   // limits column + note pane (an ordinary render() page)
 const OFFLINE_AFTER_MS = 60000;  // wall-clock, like main.cpp -- never a poll-cycle count
 const BOOT_PAGE_AUTO = -1;
 
@@ -416,6 +418,7 @@ const LAST_WEATHER_KEY = 's3dashboard_v1_weather';
 const BRIGHTNESS_KEY = 's3dashboard_v1_brightness';
 const BOOT_PAGE_KEY = 's3dashboard_v1_bootpage';
 const LAST_PAGE_KEY = 's3dashboard_v1_lastpage';
+const PAGES_V2_KEY = 's3dashboard_v1_pagesv2';
 const CAT_SHUFFLE_KEY = 's3dashboard_v1_catshuffle';
 const NIGHT_MODE_KEY = 's3dashboard_v1_nightmode';
 const ROTATION_KEY = 's3dashboard_v1_rotation';
@@ -898,8 +901,8 @@ const SETTINGS = [
   { label: 'Theme', subtitle: 'Dark or light appearance', hint: '', kind: ROW_NAV, cols: 2, count: 2,
     values: [0, 1], valueLabels: ['Dark', 'Light'], getCurrent: getCurrentTheme, apply: applyTheme },
   { label: 'Boot page', subtitle: 'Page shown after a restart', hint: 'Auto resumes the last page shown',
-    kind: ROW_NAV, cols: 4, count: 8, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5, 6],
-    valueLabels: ['Auto', 'Status', 'Projects', 'Limits', 'Cats', 'Movies', 'Status + cats', 'Note'],
+    kind: ROW_NAV, cols: 4, count: 7, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5],
+    valueLabels: ['Auto', 'Status', 'Usage', 'Cats', 'Movies', 'Status + cats', 'Note'],
     getCurrent: getCurrentBootPage, apply: applyBootPage },
   { label: 'Cat shuffle', subtitle: 'How long each cat plays', hint: 'Off plays each cat to its end; Fixed keeps one',
     kind: ROW_NAV, cols: 5, count: 5, values: [-1, 0, 5, 10, 30], valueLabels: ['Fixed', 'Off', '5s', '10s', '30s'],
@@ -1158,8 +1161,7 @@ function liveResetsInSec(baseSec) {
   return rem < 0 ? 0 : rem;
 }
 
-// ── LIMITS PAGE ───────────────────────────────────────────────
-const LIM_X = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD, LIM_R = TOK_LAYOUT_CONTENT_X1 - TOK_SPACE_CARD_PAD;
+// ── DATA ROWS (Usage page limits column, Device page) ────────
 const ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD, ROW_STEP = ROW_H + TOK_SPACE_STACK;
 function drawDataRow(x, r, y, label, detail, percent, meterColor) {
   drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
@@ -1169,34 +1171,28 @@ function drawDataRow(x, r, y, label, detail, percent, meterColor) {
   if (detail) drawTextR(TOK_TYPE_BODY, vx, y, detail, TOK_COLOR_TEXT_SECONDARY);
   drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, meterColor);
 }
-function resetsDetail(resets) { return resets ? 'Resets ' + resets : ''; }
-function drawLimitsPage() {
-  drawCard(TOK_LAYOUT_CONTENT_X0, TOK_LAYOUT_CONTENT_Y0, TOK_LAYOUT_CONTENT_W, TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0);
-  const top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
-  drawSectionLabel(LIM_X, top, 'USAGE LIMITS');
-  let y = top + 17 + TOK_SPACE_SM;
-  drawDataRow(LIM_X, LIM_R, y, 'Context window', STATE.ctxTokens >= 0 ? fmtTokens(STATE.ctxTokens) : '',
-              STATE.ctxTokens >= 0 ? STATE.ctxPercent : -1, TOK_COLOR_DATA_USAGE);
-  y += ROW_STEP;
-  drawDataRow(LIM_X, LIM_R, y, '5-hour limit', resetsDetail(STATE.sessionResets), STATE.sessionPercent, TOK_COLOR_DATA_USAGE);
-  y += ROW_STEP;
-  drawDataRow(LIM_X, LIM_R, y, 'Weekly (all models)', resetsDetail(STATE.weekResets), STATE.weekPercent, TOK_COLOR_DATA_USAGE);
-  y += ROW_STEP;
-  if (STATE.weekModelPercent >= 0) {
-    drawDataRow(LIM_X, LIM_R, y, 'Weekly (' + (STATE.weekModelName || 'model') + ')',
-                resetsDetail(STATE.weekModelResets), STATE.weekModelPercent, TOK_COLOR_DATA_USAGE);
-    y += ROW_STEP;
-  }
-  if (STATE.creditsUsed >= 0) {
-    drawDataRow(LIM_X, LIM_R, y, 'Usage credits', fmtCost(STATE.creditsUsed) + ' of ' + fmtCost(STATE.creditsLimit),
-                STATE.creditsPercent, TOK_COLOR_DATA_USAGE);
-  }
+// A limits-column row in 112 px: label (body) left, percent (numeral.sm, on the
+// label's baseline) right, meter.md under it. No detail text -- the Status
+// page's 5H / Week cards carry the "Resets ..." lines. numeral.sm, not .md,
+// because "Context" + "100%" at .md is wider than the column.
+function drawLimitRow(x, r, y, label, percent) {
+  const pct = percent >= 0 ? percent + '%' : '--';
+  const pw = textW(TOK_TYPE_NUMERAL_SM, pct);
+  drawText(TOK_TYPE_BODY, x, y, fitText(TOK_TYPE_BODY, label, r - x - pw - TOK_SPACE_XS), TOK_COLOR_TEXT_PRIMARY);
+  drawTextR(TOK_TYPE_NUMERAL_SM, r, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), pct,
+            percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
 }
 
-// ── PROJECTS PAGE ─────────────────────────────────────────────
+// ── USAGE PAGE (page 1) ───────────────────────────────────────
+// The old Projects and Limits pages on one page, in the Status page's grid:
+// a limits column (x 8..135) and, right (x 144..471), top projects over the
+// 7-day trend (pages.cpp's drawUsagePage).
 const PROJ_CARD_H = 171, TREND_CARD_H = 105;
 const TREND_CARD_Y = TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H + TOK_SPACE_GUTTER;
 const PROJ_ROW_STEP = 23 + TOK_SPACE_STACK, PROJ_VALUE_W = 56;
+const PROJ_NAME_W = 116;                    // project name column (fitText)
+const TREND_BAR_W = 20, TREND_BAR_GAP = 4;  // 7 bars = 164 px from the align line
 function drawEmptyState(cx, y0, h, title, desc, isError, titleFont = TOK_TYPE_HEADLINE, titleColor = TOK_COLOR_TEXT_PRIMARY) {
   const th = fontLineH(titleFont);
   const total = th + TOK_SPACE_SM + 17;
@@ -1204,51 +1200,72 @@ function drawEmptyState(cx, y0, h, title, desc, isError, titleFont = TOK_TYPE_HE
   drawTextC(titleFont, cx, y, title, isError ? TOK_COLOR_STATUS_ERROR : titleColor);
   drawTextC(TOK_TYPE_CAPTION, cx, y + th + TOK_SPACE_SM, desc, TOK_COLOR_TEXT_SECONDARY);
 }
-function drawProjectsPage() {
-  const x0 = TOK_LAYOUT_CONTENT_X0, w = TOK_LAYOUT_CONTENT_W;
+function drawUsagePage() {
+  // ── limits column ──
+  const lx0 = TOK_LAYOUT_COL_LEFT_X, lw = TOK_LAYOUT_COL_LEFT_W;
+  drawCard(lx0, TOK_LAYOUT_CONTENT_Y0, lw, TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0);
+  const ix = lx0 + TOK_SPACE_SM, ir = lx0 + lw - TOK_SPACE_SM;  // 16..128: 112 inner
+  const ltop = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
+  drawSectionLabel(ix, ltop, 'LIMITS');
+  let ly = ltop + 17 + TOK_SPACE_SM;
+  drawLimitRow(ix, ir, ly, 'Context', STATE.ctxTokens >= 0 ? STATE.ctxPercent : -1);
+  ly += ROW_STEP;
+  drawLimitRow(ix, ir, ly, '5-hour', STATE.sessionPercent);
+  ly += ROW_STEP;
+  drawLimitRow(ix, ir, ly, 'Weekly', STATE.weekPercent);
+  ly += ROW_STEP;
+  if (STATE.weekModelPercent >= 0) {
+    drawLimitRow(ix, ir, ly, STATE.weekModelName || 'Model', STATE.weekModelPercent);
+    ly += ROW_STEP;
+  }
+  if (STATE.creditsUsed >= 0) drawLimitRow(ix, ir, ly, 'Credits', STATE.creditsPercent);
+
+  // ── right column: top projects ──
+  const x0 = TOK_LAYOUT_COL_RIGHT_X, w = TOK_LAYOUT_COL_RIGHT_W;
   drawCard(x0, TOK_LAYOUT_CONTENT_Y0, w, PROJ_CARD_H);
-  const px = x0 + TOK_SPACE_CARD_PAD, pr = x0 + w - TOK_SPACE_CARD_PAD;
+  const px = x0 + TOK_SPACE_CARD_PAD, pr = x0 + w - TOK_SPACE_CARD_PAD;  // 156..460
+  const alignX = px + PROJ_NAME_W + TOK_SPACE_SM;  // meters and trend bars share this line
   const top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
   drawSectionLabel(px, top, 'TOP PROJECTS 7D');
   if (STATE.projects.length === 0) {
-    const ly = top + 17;
-    drawEmptyState(x0 + w / 2, ly, TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H - ly, 'No project data yet',
+    const ey = top + 17;
+    drawEmptyState(x0 + w / 2, ey, TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H - ey, 'No project data yet',
                    'Projects appear after the first poll', false);
   } else {
     const shown = Math.min(STATE.projects.length, 4);
     let maxTokens = 1;
     for (let i = 0; i < shown; i++) maxTokens = Math.max(maxTokens, STATE.projects[i].tokens);
-    const meterX = TOK_LAYOUT_ALIGN_X;
-    const meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - meterX;
-    const nameW = meterX - TOK_SPACE_SM - px;
+    const meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - alignX;
     let y = top + 17 + TOK_SPACE_SM;
     for (let i = 0; i < shown; i++, y += PROJ_ROW_STEP) {
       const p = STATE.projects[i];
-      drawText(TOK_TYPE_BODY, px, y, fitText(TOK_TYPE_BODY, p.name, nameW), TOK_COLOR_TEXT_PRIMARY);
+      drawText(TOK_TYPE_BODY, px, y, fitText(TOK_TYPE_BODY, p.name, PROJ_NAME_W), TOK_COLOR_TEXT_PRIMARY);
       const pct = Math.floor(p.tokens / maxTokens * 100 + 0.5);
-      drawMeter(meterX, y + 12 - TOK_METER_MD / 2, meterW, TOK_METER_MD, pct, TOK_COLOR_DATA_USAGE);
+      drawMeter(alignX, y + 12 - TOK_METER_MD / 2, meterW, TOK_METER_MD, pct, TOK_COLOR_DATA_USAGE);
       drawTextR(TOK_TYPE_NUMERAL_SM, pr, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION),
                 fmtTokens(p.tokens), TOK_COLOR_TEXT_SECONDARY);
     }
   }
+
+  // ── right column: 7-day trend (compact card): label column left, bars from alignX ──
   drawCard(x0, TREND_CARD_Y, w, TREND_CARD_H);
   const ty = TREND_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
   drawSectionLabel(px, ty, '7-DAY TREND');
   let total = 0, maxTrend = 1;
   for (let i = 0; i < 7; i++) { total += STATE.trend[i]; maxTrend = Math.max(maxTrend, STATE.trend[i]); }
   drawText(TOK_TYPE_BODY, px, ty + 17 + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
-  drawText(TOK_TYPE_CAPTION, px, ty + 17 + TOK_SPACE_SM + 23, 'tokens this week', TOK_COLOR_TEXT_SECONDARY);
-  const DAY_LABELS = ['-6', '-5', '-4', '-3', '-2', '-1', 'Today'];
-  const barW = 32, gap = TOK_SPACE_SM;
+  drawText(TOK_TYPE_CAPTION, px, ty + 17 + TOK_SPACE_SM + 23, 'this week', TOK_COLOR_TEXT_SECONDARY);
+  const DAY_LABELS = ['-6', '-5', '-4', '-3', '-2', '-1', 'Now'];
+  const barW = TREND_BAR_W, gap = TREND_BAR_GAP;
   const axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - 17;
-  const feet = axisY - TOK_SPACE_XS;
+  const feet = axisY - TOK_SPACE_XS;  // bars end above the axis labels
   const chartH = feet - ty;
   for (let i = 0; i < 7; i++) {
-    const bx = TOK_LAYOUT_ALIGN_X + i * (barW + gap);
+    const bx = alignX + i * (barW + gap);
     let bh = Math.trunc(STATE.trend[i] / maxTrend * chartH);
     if (bh < 4) bh = 4;
     gfx.fillSmoothRoundRect(bx, feet - bh, barW, bh, TOK_RADIUS_SM, TOK_COLOR_DATA_USAGE);
-    drawTextC(TOK_TYPE_CAPTION, bx + barW / 2, axisY, DAY_LABELS[i], i === 6 ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_TERTIARY);
+    drawTextC(TOK_TYPE_CAPTION, bx + Math.trunc(barW / 2), axisY, DAY_LABELS[i], i === 6 ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_TERTIARY);
   }
 }
 
@@ -1986,9 +2003,8 @@ function render() {
   else {
     switch (STATE.currentPage) {
       case 0: drawStatusPage(); break;
-      case 1: drawProjectsPage(); break;
-      case 2: drawLimitsPage(); break;
-      case 6: drawNotePage(); break;
+      case 1: drawUsagePage(); break;
+      case NOTE_PAGE: drawNotePage(); break;
     }
     drawStatusStrip();
   }
@@ -3062,7 +3078,19 @@ function loadInt(key, fn) {
   const v = parseInt(raw, 10);
   if (!Number.isNaN(v)) fn(v);
 }
+// Projects and Limits merged into one Usage page, so every later page moved
+// down one slot: saved boot / last page values of 2 and up lose one, once
+// (src/sd_store.cpp's migratePageIndices()).
+function migratePageIndices() {
+  if (lsGet(PAGES_V2_KEY) !== null) return;
+  for (const k of [BOOT_PAGE_KEY, LAST_PAGE_KEY]) {
+    const v = parseInt(lsGet(k), 10);
+    if (!Number.isNaN(v) && v >= 2) lsSet(k, String(v - 1));
+  }
+  lsSet(PAGES_V2_KEY, '1');
+}
 function loadSettings() {
+  migratePageIndices();
   loadInt(BRIGHTNESS_KEY, v => { STATE.cfgBrightness = v; });
   loadInt(LAST_PAGE_KEY, v => { STATE.cfgLastPage = v; });
   loadInt(BOOT_PAGE_KEY, v => {
@@ -3098,7 +3126,7 @@ function describeScreen() {
   if (STATE.weatherPageOpen) return 'WEATHER (tap to close)';
   if (STATE.devicePageOpen) return 'DEVICE STATS (tap to close)';
   if (!STATE.haveData) return 'OFFLINE (cat GIFs)';
-  const names = ['status', 'projects', 'limits', 'cats', 'movies', 'status + cats', 'note'];
+  const names = ['status', 'usage', 'cats', 'movies', 'status + cats', 'note'];
   let s = `page ${STATE.currentPage + 1}/${PAGE_COUNT} (${names[STATE.currentPage]})`;
   if (STATE.shiftX || STATE.shiftY) s += ` · shift (${STATE.shiftX},${STATE.shiftY})`;
   if (motionTimeScale > 1) s += ` · slow motion x${motionTimeScale}`;

@@ -24,10 +24,30 @@ void loadThemeEarly() {
   applyThemeTokens();
 }
 
+// The Projects and Limits pages merged into one Usage page (page 1), so every
+// later page moved down one slot. Saved boot_page / last_page values from
+// before that (0 Status, 1 Projects, 2 Limits, 3 Cats ... 6 Note) are shifted
+// once: 2 and up lose one, so Limits lands on Usage and Cats on 2. The marker
+// key stops it running again; -1 (Auto) and 0..1 are already right.
+static void migratePageIndices() {
+  Preferences p;
+  p.begin(CFG_NS, false);
+  if (!p.isKey("pages_v2")) {
+    const ConfigKeyId keys[2] = {CFGKEY_BOOT_PAGE, CFGKEY_LAST_PAGE};
+    for (ConfigKeyId k : keys) {
+      const char* name = CONFIG_KEY_NAMES[k];
+      if (p.isKey(name) && p.getInt(name) >= 2) p.putInt(name, p.getInt(name) - 1);
+    }
+    p.putUChar("pages_v2", 1);
+  }
+  p.end();
+}
+
 // Optional override for the compiled config.h defaults. A key simply absent
 // from flash (first boot, or never changed since) means "use the compiled
 // default" -- not an error worth surfacing.
 void loadRuntimeConfig() {
+  migratePageIndices();
   Preferences p;
   p.begin(CFG_NS, true);  // read-only
 

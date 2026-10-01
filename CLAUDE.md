@@ -77,7 +77,7 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 pio run                                  # build (first run downloads pioarduino)
 pio run -t upload                        # flash over native USB (/dev/cu.usbmodem1101)
 pio device monitor                       # serial log (baud is irrelevant on native USB)
-python3 tools/grab_screen.py "x 1 g:status n 1 g:projects w 1 g:weather x"
+python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
                                          # drive the board over serial, save shots/*.png
 python3 tools/make_vlw.py                # regenerate fonts (firmware + sim) after editing FONTS
 ```

@@ -217,9 +217,9 @@ static void applyPixelShift(int v) {
 // Boot page: which page currentPage starts on next boot, in carousel order.
 // Auto (BOOT_PAGE_AUTO) resumes cfgLastPage. Device Stats isn't here -- it's
 // a sheet, not a page.
-static const int PAGE_VALUES[8] = {BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5, 6};
-static const char* const PAGE_LABELS[8] = {
-  "Auto", "Status", "Projects", "Limits", "Cats", "Movies", "Status + cats", "Note"
+static const int PAGE_VALUES[7] = {BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5};
+static const char* const PAGE_LABELS[7] = {
+  "Auto", "Status", "Usage", "Cats", "Movies", "Status + cats", "Note"
 };
 static int getCurrentBootPage() { return cfgBootPage; }
 static void applyBootPage(int v) {
@@ -387,7 +387,7 @@ static const SettingDef SETTINGS[] = {
     ROTATION_VALUES, ROTATION_LABELS, getCurrentRotation, applyRotation, nullptr },
   { "Theme", "Dark or light appearance", "", ROW_NAV, 2, 2,
     THEME_VALUES, THEME_LABELS, getCurrentTheme, applyTheme, nullptr },
-  { "Boot page", "Page shown after a restart", "Auto resumes the last page shown", ROW_NAV, 4, 8,
+  { "Boot page", "Page shown after a restart", "Auto resumes the last page shown", ROW_NAV, 4, 7,
     PAGE_VALUES, PAGE_LABELS, getCurrentBootPage, applyBootPage, nullptr },
   { "Cat shuffle", "How long each cat plays", "Off plays each cat to its end; Fixed keeps one", ROW_NAV, 5, 5,
     CAT_SHUFFLE_VALUES, CAT_SHUFFLE_LABELS, getCurrentCatShuffle, applyCatShuffle, nullptr },

@@ -84,19 +84,21 @@ extern volatile uint32_t POLL_INTERVAL_MS;
 // ── SHARED CONSTANTS ───────────────────────────────────────
 // Internal linkage per TU (C++ global `const` default) — safe to define
 // identically in every file that includes this header; no ODR issue.
-const int PAGE_COUNT = 7;
+const int PAGE_COUNT = 6;
 // cfgBootPage sentinel: resume whichever page was on screen before the last
 // restart (cfgLastPage), rather than a fixed page. See the Boot Page setting.
 const int BOOT_PAGE_AUTO = -1;
-const int GIF_PAGE = 3;    // 4th page (0-indexed): random cat GIFs from /cats/ on SD
-const int MOVIE_PAGE = 4;  // 5th page: random movies from /movies/ on SD (see movie_player.cpp)
-const int MIXED_PAGE = 5;  // 6th page: status + cats split
-// 7th page: the same left column as MIXED_PAGE, but the right half shows the
+// Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
+// 3 Movies, 4 Status + cats, 5 Note.
+const int GIF_PAGE = 2;    // 3rd page: random cat GIFs from /cats/ on SD
+const int MOVIE_PAGE = 3;  // 4th page: random movies from /movies/ on SD (see movie_player.cpp)
+const int MIXED_PAGE = 4;  // 5th page: status + cats split
+// 6th page: the same left column as MIXED_PAGE, but the right half shows the
 // note text from note.html instead of cats. Unlike GIF_PAGE/MOVIE_PAGE/
 // MIXED_PAGE this is an ordinary render() page (a `case` in its switch) —
 // nothing here needs the per-frame decode loop or the partial-push path
 // those three require.
-const int NOTE_PAGE = 6;
+const int NOTE_PAGE = 5;
 // Note buffer. The server caps its copy at 480 chars (NOTE_MAX_CHARS); 512
 // leaves room for the NUL. The S3 pane (37 cols x 14 rows at size 1) could
 // show slightly more than that, but the server cap, not the pane, is the

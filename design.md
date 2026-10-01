@@ -296,7 +296,7 @@ part of the product palette. `0xFFE0` stays **only** here.
 5. **One accent per region.** A card has at most one accent-coloured element
    group. If two things in a card both want the accent, one of them is wrong.
 6. **Data series keep their colour everywhere.** Usage is coral on the status
-   page, the limits page, the projects page, and in the cat overlay text
+   page, the Usage page, and in the cat overlay text
    highlight. Pace is green on the bars and the clock.
 
 ### 4.4 Contrast
@@ -1166,9 +1166,9 @@ excluded on purpose are listed in §11.23.
 - **Spacing:** the bar gap is `space.sm` or larger. Horizontal (project) bars are
   `meter.md` height on `fill.track`, with the label above in body and the value
   right-aligned in caption.
-- **Dense single-line variant** (the Projects page, where four ranked rows and the
-  trend card must share 272 px): the name (body) sits in the left column, the meter
-  runs from the right column's edge (x 188) vertically centred on the name's cap
+- **Dense single-line variant** (the Usage page's projects card, where four ranked rows and the
+  trend card must share 284 px): the name (body) sits in the left column, the meter
+  runs from a shared align line (x 280) vertically centred on the name's cap
   height, and the value (caption) is right-aligned on the name's baseline. Rows step
   by line box + `space.stack` (31).
 - **Rules:** no gridlines or axis lines. The baseline is implied by aligned bar feet.
@@ -1624,7 +1624,7 @@ brightness jumps are easiest to avoid.
 
 ```
                 +-------------------- CAROUSEL (X axis, wraps) -----------------------------+
-                | Status | Projects | Limits | Cats | Movies | Mixed | Note |  (7 peers)     |
+                | Status | Usage | Cats | Movies | Mixed | Note |  (6 peers)                   |
                 +----------------------------------------------------------------------------+
                      |  tap card / strip target               |  gear
                      v  (Y axis: sheet up)                    v  (Y axis: sheet up)
@@ -1758,7 +1758,7 @@ Hourly chime, Claude ding, Alerts, Mute when asleep, Mute at night).
 **Typography**
 
 7. **Four header styles:**
-   - `USAGE LIMITS` / `TOP PROJECTS (7D)`: 13/650 white (`pages.cpp:258`, `293`)
+   - `LIMITS` / `TOP PROJECTS (7D)`: 13/650 white (`pages.cpp:258`, `293`)
    - `Device Stats`: 26/650 title case (`pages.cpp:998`)
    - `SETTINGS`: 13/650 accent, right-aligned (`settings.cpp:317`)
    - detail titles: 26/650 accent uppercase (`settings.cpp:353`)
@@ -1928,7 +1928,7 @@ shot compared pixel for pixel (`CLAUDE.md` → Commands).
    recogniser that runs candidates in parallel, the velocity ring buffer, and list momentum
    with rubber-banding.
 4. **Grid.** Move to the 8 / 8 margins and gutters, the 272 px content area and the new status
-   strip, one page at a time. Status page first (§7.4), then Limits, Projects, Note
+   strip, one page at a time. Status page first (§7.4), then Usage (limits + projects), Note
    and Mixed, then the overlays and Settings (modal header, toggle rows, reordering).
 5. **Motion.**
    - The spring integrator replaces `pageTransitionRun`'s blocking loop, and page slides become interruptible.
@@ -1941,8 +1941,13 @@ shot compared pixel for pixel (`CLAUDE.md` → Commands).
 
 ### 15.5 Where the implementation differs from the spec
 
-- **Projects rows** use the dense single-line variant (§11.6). With label-above rows,
-  four projects and a readable trend card don't both fit in 272 px.
+- **Usage page** (the old Projects and Limits pages merged; page 1): a 128 px limits column (Context,
+  5-hour, Weekly, the per-model weekly, Credits as label + numeral.sm percent + meter.md, no
+  "Resets ..." text -- the Status page's 5H / Week cards keep it) beside a 328 px right column of the
+  top-4 projects card over the 7-day trend card (7 bars of 20 px, last labelled "Now"). Project rows
+  use the dense single-line variant (§11.6): with label-above rows, four projects and a readable
+  trend card don't both fit in 284 px. Saved boot / last page values from the 7-page layout are
+  shifted once at boot (`migratePageIndices`, NVS marker `pages_v2`).
 - **Boot page grid** puts its second row (3 cells) on the 3-column width, so
   "Status + cats" (110 px of headline) fits its cell.
 - **Reduce Motion** also turns off the drags that would move a surface (page swipe,
