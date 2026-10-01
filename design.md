@@ -64,7 +64,7 @@ looks arbitrary, look for its reason here.
 | Flash | 6.25 MB app slot, build ~1.55 MB | `CLAUDE.md` | Flash size isn't a design constraint. The **parity cost** is: every asset exists twice, once in the firmware and once in the simulator. |
 | Panel type | IPS: wide viewing angles, a slightly lifted black, and some image retention | spec | Near-black (gray.0) and true black look the same. Pixel shift (≤2 px orbit, `SHIFT_ORBIT`) needs a margin at every edge. Avoid large, static, saturated blocks. |
 | Backlight | PWM, 0–255; Night Mode dims to 25% (`NIGHT_MODE_DIM_VALUE = 64`) | `state.h:365` | Dimming scales everything, so contrast ratios hold. Absolute luminance falls, though, and low-contrast non-text (tracks, separators) nearly disappears at 25%. So grouping must never depend on a separator alone. |
-| Audio | NS4168 I2S amp and speaker socket; currently unused | spec | Available as a future feedback channel (§12.10). Off by default: this is a quiet desk device. |
+| Audio | NS4168 I2S amp and speaker socket | spec | A feedback channel (§12.10), on at a quiet default level; Settings > Sound holds every control (§13.3). |
 
 ---
 
@@ -352,6 +352,66 @@ On filled controls:
   background it was computed for. Never draw it over media.
 - **Near-black is fine.** On IPS, gray.0 and `0x0000` look the same. gray.0 stays
   as the canvas for parity and for the pixel-shift margin fill.
+
+### 4.6 Light theme
+
+Settings has a **Theme** row (Dark / Light, NVS `light_mode`, default Dark). The
+light palette inverts the grays only; red, blue, the media plate and
+`text.onAccent` are shared by both themes. Hues that fail on a light surface get a
+darker twin instead of a new role. That includes the coral accent: `0xFB08` is
+2.3:1 on the light canvas.
+
+| Role | Dark | Light |
+| --- | --- | --- |
+| `color.bg.canvas` | gray.0 `0x0841` | `0xE71C` (230,227,230) |
+| `color.surface.card` | gray.1 `0x18C3` | `0xF79E` (247,243,247) |
+| `color.surface.raised` | gray.2 `0x2945` | `0xFFFF` |
+| `color.fill.pressed`, `color.separator` | gray.3 `0x39C7` | `0xD69A` (214,210,214) |
+| `color.fill.track` | gray.3 (HC: gray.4) | `0xD69A` (HC: `0xA514`) |
+| `color.text.primary` | gray.6 `0xFFFF` | gray.0 `0x0841` |
+| `color.text.secondary` | gray.5 (HC: `0xBDF7`) | `0x5ACB` (HC: `0x39C7`) |
+| `color.accent`, `color.data.usage` | coral.500 `0xFB08` | `0xD1E4` (214,61,33) |
+| `color.accent.pressed` | coral.600 `0xCA66` | `0xA964` (173,45,33) |
+| `color.status.success`, `color.data.pace` | green.500 | `0x1CA6` (25,150,49) |
+| `color.status.warning`, `color.content.sun` | amber.500 / sun.500 | `0xBB60` (189,109,0) |
+| `color.data.pace.wedge` | `green.wedge` | `0x8E12` (green at 50% over the light card) |
+| `color.data.pace.shine.*` | green.shine.lo/mid/hi | `0x5DED` / `0x96B4` / `0xD79B` |
+| `color.content.snow`, `color.content.cloud` | gray.6, gray.5 | gray.4, `0x8C51` |
+
+Rules:
+
+- **Runtime tokens.** Every role above is a runtime token (`extern uint16_t`,
+  assigned by `applyThemeTokens()`; the simulator's `applyThemeTokens()` is the twin).
+  Never capture one in a `static const` or a table initialised at load, or it
+  freezes the boot theme. `applyThemeTokens()` ends with `applyContrast()`, so
+  Increase Contrast composes with either theme.
+- **Fixed in both themes:** `color.status.error/info`,
+  `color.data.usage/system`, `color.content.rain`, `color.text.tertiary`,
+  `color.card.outline`, `text.onAccent`, `color.plate` (media stays on black), the AQI scale and its badge ink.
+- **Blends.** `green.wedge` and the shine ramp are precomputed against one background (§4.5), so the light theme has its own.
+- **Scrim.** The sheet scrim and the scroll-edge shade still darken toward black. In light mode
+  that reads as a dimming layer, not as a colour.
+- **Hourly signal.** It is a panel inversion (§12.7) and works in either theme.
+- **Cached pixels.** A theme change recomposes the page held behind an open sheet
+  (`navRefreshBehind()`), otherwise dragging the sheet down would reveal the old theme.
+
+Measured contrast (WCAG ratio) of the light palette, foreground on canvas / card:
+
+| Foreground | On canvas | On card |
+| --- | --- | --- |
+| text.primary | 15.7 | 18.2 |
+| text.secondary | 5.5 | 6.4 |
+| text.secondary (Increase Contrast) | 9.0 | 10.5 |
+| text.tertiary | 4.3 | 5.0 |
+| status.success / data.pace | 3.0 | 3.5 |
+| status.warning / content.sun | 3.1 | 3.6 |
+| status.error | 3.0 | 3.5 |
+| status.info / data.system | 2.9 | 3.3 |
+| accent / data.usage (coral) | 3.6 | 4.2 |
+| content.cloud | 2.7 | 3.1 |
+
+Text on the accent (`text.onAccent`, gray.0) is 4.3:1 on the light coral (6.7:1 on the dark one).
+`status.info` and `content.cloud` are the two roles still under 3:1 on the canvas.
 
 ---
 
@@ -1544,10 +1604,17 @@ brightness jumps are easiest to avoid.
 | `motion.backlight.adjust` | 150 ms | Picking a new brightness, so you see the change you chose |
 | `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Currently unused; the hourly signal is the panel inversion (§12.7) |
 
-**Sound** is unused. If it's ever added, it follows Apple's three rules:
-- **Causality:** sound only for meaningful events, like a destructive action executing or the hourly signal.
-- **Harmony:** it fires on the same frame as the visual or backlight change.
-- **Utility:** the default volume in Settings is Off, because this is a quiet desk device.
+**Sound** (NS4168 amp, `src/audio.cpp`) follows Apple's three rules:
+- **Causality:** sound only for meaningful events. A *committed* tap (touch-up on a target, never the
+  touch-down, a cancelled tap or the swallowed wake tap) gets a low-key "tock". The only unsolicited
+  sounds are the hourly chime, the Claude Code ding and alerts, each with its own switch.
+- **Harmony:** the tock fires after the tap's action, on the same present, so it already reflects the
+  change (turning Tap sound off is silent; a new volume applies to its own tock).
+- **Utility:** two independent volumes, each Off then levels 1-7 in ~4.5 dB steps: **Tap volume** (the
+  tock; default 2, deliberately faint, Off = no tap sound) and **Alert volume** (chime, Claude ding,
+  alerts; default 4). Both are muted while the screen sleeps and while Night Mode dims (each rule has a
+  switch). Picking an alert level plays the ding at it. Settings > Sound > Play test sound plays every
+  sound in turn at its own volume, ignoring the switches and mute rules, so each can be judged. Sound is firmware-only; the simulator keeps the settings and stays silent.
 
 ---
 
@@ -1609,10 +1676,17 @@ required.
   (`queueConfigSave` → `networkTask`). There's no Save or Cancel.
 - Destructive actions use the arm pattern only.
 - The list rows show current values (§11.7), so reading a setting takes zero taps.
-- Order the list by frequency of use: first display (Brightness, Night mode, Rotation), then content
+- Order the list by frequency of use: first display (Brightness, Night mode, Rotation, Theme), then content
   (Boot page, Cat shuffle, Pace bars, Show AQI, Hourly signal, Poll progress),
   then system (Poll interval, Battery save, Pixel shift), and **destructive actions last**
   (Forget Wi-Fi, Restart). Today, Restart and Forget Wi-Fi sit in the middle of the list.
+
+**Sections.** A row of kind *section* (chevron + a short summary of its state, like "Level 3") opens a
+child list that slides in from the right, scrolls on its own and keeps the main list's scroll
+position. Back is the back glyph or a swipe right; its rows are the same kinds as the main list's
+(toggle, nav -> option grid, and the *button* row: an accent label with a play glyph that acts in
+place). Sections do not nest. Today there is one: **Sound** (Tap volume, Alert volume, Play test sound,
+Hourly chime, Claude ding, Alerts, Mute when asleep, Mute at night).
 
 ### 13.4 Empty, loading, error and offline states
 
@@ -1910,7 +1984,7 @@ Before a screen is finished:
 - [ ] One obvious most-important element: the largest and brightest thing, placed top-left or as the hero.
 - [ ] The layout sums exactly to the grid (§7). No ink in the 8 px margin, and no ink within 8 px of occupied corner slots.
 - [ ] Text: ≥13 px (except the note's mono.s), ASCII only, sentence case (except labels), measured-width truncation, `--` in tertiary for unknown values.
-- [ ] Contrast meets §4.4 for every text and background pair.
+- [ ] Contrast meets §4.4 for every text and background pair, in both the Dark and the Light theme (§4.6).
 - [ ] The accent is used only for selection, the usage series or current-item markers. Status colours are used only for status. There is always a second, non-colour cue.
 - [ ] Every target is ≥44 × 44 (≥40 normal to an edge) with ≥8 px visual gap, has a visible affordance, shows a pressed state and commits on up.
 - [ ] Destructive actions use the arm pattern.

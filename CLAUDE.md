@@ -49,9 +49,15 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   Never swap the simulator to browser `fillText` — that breaks line-fit
   predictions, the whole point of the sim (the S3 version of the CYD's
   "6px per character" rule).
-- **Colours:** firmware RGB565 in `state.h`, simulator RGB888 with the
+- **Colours:** firmware RGB565 in `tokens.h`, simulator RGB888 with the
   `// 0x....` comment beside each. Change both together.
-- **Deliberate non-twins:** cat GIF and movie (`.mjpeg`) playback (sim shows
+- **Two themes (Settings > Theme, NVS `light_mode`).** Theme-dependent
+  colour roles are runtime tokens (`extern uint16_t` in `tokens.h`), assigned by
+  `applyThemeTokens()` in `settings.cpp` (twin: the simulator's function of the
+  same name); design.md 4.6 lists them. Never capture one in a `static const`, and check
+  new UI in both themes. `loadThemeEarly()` reads the key before the first boot frame.
+- **Deliberate non-twins:** speaker output (`src/audio.cpp`; the sim keeps the Settings > Sound
+  rows and stays silent), cat GIF and movie (`.mjpeg`) playback (sim shows
   the placeholder layout with the real overlays), the AP setup screen, boot
   splash/spinner, and TE sync — firmware-only. Slides, sheets, scrims, fades
   and the backlight animator ARE twinned (the sim quantises scrims/fades
@@ -245,17 +251,17 @@ block and are copied at the top of `simulator-s3.html`.
 
 ## Cat library
 
-```sh
-cp ~/cyd/cats/cat_NNN.gif ~/s3/cats/           # pick cats from the CYD's library
-python3 tools/fit_cats.py                      # enlarge sources smaller than 480x320
-python3 tools/embed_cats.py                    # (optional) preview what gets embedded
-```
 Cats live in `~/s3/cats/*.gif` (tracked) and are **embedded in the firmware** at
 build time -- add or remove a GIF, then `pio run -t upload`. Flash is 16MB with a
 6.25MB app slot (~1.6MB is code+fonts), so `embed_cats.py` fails the build past
 4MB of GIFs; that is why the CYD's full 120-cat library (~83MB after fitting) does
 not go in -- pick a subset.
 
+```sh
+cp ~/cyd/cats/cat_NNN.gif ~/s3/cats/           # pick cats from the CYD's library
+python3 tools/fit_cats.py                      # enlarge sources smaller than 480x320
+python3 tools/embed_cats.py                    # (optional) preview what gets embedded
+```
 `fit_cats.py` enlarges each until it touches 480x320 (Catmull-Rom, same
 palette/lossy settings; needs `gifsicle`). Hidden files (macOS `._*.gif`) are
 skipped.

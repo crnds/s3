@@ -760,8 +760,8 @@ static int shinePrevCenter[2] = {INT_MIN, INT_MIN};
 
 static inline uint16_t shineColor(int i, int center) {
   int d = abs(i - center);
-  return d <= 2 ? TOK_GREEN_SHINE_HI : d <= 6 ? TOK_GREEN_SHINE_MID
-       : d <= SHINE_BAND_R ? TOK_GREEN_SHINE_LO : TOK_COLOR_DATA_PACE;
+  return d <= 2 ? TOK_COLOR_DATA_PACE_SHINE_HI : d <= 6 ? TOK_COLOR_DATA_PACE_SHINE_MID
+       : d <= SHINE_BAND_R ? TOK_COLOR_DATA_PACE_SHINE_LO : TOK_COLOR_DATA_PACE;
 }
 
 // Paint the band over one pace meter's filled interior (columns 2..fillW-3,

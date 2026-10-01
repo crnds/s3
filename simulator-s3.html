@@ -276,6 +276,23 @@ const TOK_RED_500 = 'rgb(255,24,49)';    // 0xF8C6
 const TOK_BLUE_500 = 'rgb(58,130,247)';  // 0x3C1E
 const TOK_SUN_500 = 'rgb(255,206,0)';    // 0xFE60
 const TOK_BLACK = 'rgb(0,0,0)';          // 0x0000
+// Light theme primitives (design.md 4.6)
+const TOK_LIGHT_GRAY_CANVAS = 'rgb(230,227,230)';   // 0xE71C
+const TOK_LIGHT_GRAY_CARD = 'rgb(247,243,247)';     // 0xF79E
+const TOK_LIGHT_GRAY_RAISED = 'rgb(255,255,255)';   // 0xFFFF
+const TOK_LIGHT_GRAY_PRESSED = 'rgb(214,210,214)';  // 0xD69A
+const TOK_LIGHT_GRAY_TRACK_HC = 'rgb(165,162,165)'; // 0xA514
+const TOK_LIGHT_GRAY_TEXT_2 = 'rgb(90,89,90)';      // 0x5ACB
+const TOK_LIGHT_GRAY_TEXT_2_HC = 'rgb(58,57,58)';   // 0x39C7
+const TOK_LIGHT_GRAY_CLOUD = 'rgb(140,138,140)';    // 0x8C51
+const TOK_LIGHT_GREEN = 'rgb(25,150,49)';           // 0x1CA6
+const TOK_LIGHT_GREEN_WEDGE = 'rgb(140,194,148)';   // 0x8E12
+const TOK_LIGHT_GREEN_SHINE_LO = 'rgb(90,190,107)';   // 0x5DED
+const TOK_LIGHT_GREEN_SHINE_MID = 'rgb(148,215,165)'; // 0x96B4
+const TOK_LIGHT_GREEN_SHINE_HI = 'rgb(214,243,222)';  // 0xD79B
+const TOK_LIGHT_AMBER = 'rgb(189,109,0)';           // 0xBB60
+const TOK_LIGHT_CORAL = 'rgb(214,61,33)';           // 0xD1E4
+const TOK_LIGHT_CORAL_PRESSED = 'rgb(173,45,33)';   // 0xA964
 const TOK_AQI_GOOD = TOK_GREEN_500;
 const TOK_AQI_MODERATE = 'rgb(255,255,0)';        // 0xFFE0
 const TOK_AQI_USG = 'rgb(255,113,16)';            // 0xFB82
@@ -283,41 +300,40 @@ const TOK_AQI_UNHEALTHY = TOK_RED_500;
 const TOK_AQI_VERY_UNHEALTHY = 'rgb(173,85,247)'; // 0xAABE
 const TOK_AQI_HAZARDOUS = 'rgb(123,28,25)';       // 0x78E3
 
-const TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
-const TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
-const TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
-const TOK_COLOR_FILL_PRESSED = TOK_GRAY_3;
-const TOK_COLOR_SEPARATOR = TOK_GRAY_3;
-const TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
+// Theme roles are runtime (applyThemeTokens, mirroring settings.cpp); the rest are const.
+let TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
+let TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
+let TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
+let TOK_COLOR_FILL_PRESSED = TOK_GRAY_3;
+let TOK_COLOR_SEPARATOR = TOK_GRAY_3;
+let TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
 const TOK_COLOR_TEXT_TERTIARY = TOK_GRAY_4;
 const TOK_COLOR_TEXT_ON_ACCENT = TOK_GRAY_0;
-const TOK_COLOR_ACCENT = TOK_CORAL_500;
-const TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
-const TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
-const TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
+let TOK_COLOR_ACCENT = TOK_CORAL_500;
+let TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
+let TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
+let TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
 const TOK_COLOR_STATUS_ERROR = TOK_RED_500;
 const TOK_COLOR_STATUS_INFO = TOK_BLUE_500;
-const TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
-const TOK_COLOR_DATA_PACE = TOK_GREEN_500;
-const TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+let TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
+let TOK_COLOR_DATA_PACE = TOK_GREEN_500;
+let TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+let TOK_COLOR_DATA_PACE_SHINE_LO = TOK_GREEN_SHINE_LO, TOK_COLOR_DATA_PACE_SHINE_MID = TOK_GREEN_SHINE_MID, TOK_COLOR_DATA_PACE_SHINE_HI = TOK_GREEN_SHINE_HI;
 const TOK_COLOR_DATA_SYSTEM = TOK_BLUE_500;
-const TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
+let TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
 const TOK_COLOR_CONTENT_RAIN = TOK_BLUE_500;
-const TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
-const TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
+let TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
+let TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
 const TOK_COLOR_PLATE = TOK_BLACK;
-// Increase Contrast swaps these at runtime (applyContrast).
+// Increase Contrast swaps these at runtime (applyContrast); the theme swaps the rest.
 let TOK_COLOR_TEXT_SECONDARY = TOK_GRAY_5;
 let TOK_COLOR_FILL_TRACK = TOK_GRAY_3;
 let TOK_CARD_OUTLINE = false;
 const TOK_COLOR_CARD_OUTLINE = TOK_GRAY_4;
 const TOK_NOTE_CODE = TOK_COLOR_STATUS_INFO;
 const TOK_NOTE_KEYWORD_BAD = TOK_COLOR_STATUS_ERROR;
-const TOK_NOTE_KEYWORD_GOOD = TOK_COLOR_STATUS_SUCCESS;
-const TOK_NOTE_NUMBER = TOK_COLOR_CONTENT_SUN;
-const TOK_NOTE_HEADING = TOK_COLOR_ACCENT;
-const TOK_NOTE_MARKER = TOK_COLOR_ACCENT;
-const TOK_NOTE_TEXT = TOK_COLOR_TEXT_PRIMARY;
+// note.keyword.good / note.number / note.text are runtime roles: the firmware aliases them
+// (tokens.h macros); here the three draw sites read the semantic token directly.
 
 const TOK_TYPE_DISPLAY = 'XL', TOK_TYPE_TITLE = 'LG', TOK_TYPE_HEADLINE = 'MDB', TOK_TYPE_BODY = 'MD';
 const TOK_TYPE_LABEL = 'SMB', TOK_TYPE_CAPTION = 'SM';
@@ -408,8 +424,17 @@ const BATTERY_SAVE_KEY = 's3dashboard_v1_batterysave';
 const SHOW_AQI_KEY = 's3dashboard_v1_showaqi';
 const HOURLY_FLASH_KEY = 's3dashboard_v1_hourlyflash';
 const SHOW_PROGRESS_KEY = 's3dashboard_v1_showprogress';
+const ALERT_VOL_KEY = 's3dashboard_v1_soundlevel';
+const TAP_VOL_KEY = 's3dashboard_v1_taplevel';
+const HOURLY_CHIME_KEY = 's3dashboard_v1_hourlychime';
+const CLAUDE_DING_KEY = 's3dashboard_v1_claudeding';
+const SOUND_ALERTS_KEY = 's3dashboard_v1_soundalerts';
+const MUTE_SLEEP_KEY = 's3dashboard_v1_mutesleep';
+const MUTE_NIGHT_KEY = 's3dashboard_v1_mutenight';
+const SOUND_VOL_MAX = 7;
 const REDUCE_MOTION_KEY = 's3dashboard_v1_reducemotion';
 const HIGH_CONTRAST_KEY = 's3dashboard_v1_highcontrast';
+const LIGHT_MODE_KEY = 's3dashboard_v1_lightmode';
 const BATTERY_SAVE_POLL_SEC = 120;
 
 // localStorage can throw (private windows, blocked site data) -- every
@@ -455,7 +480,11 @@ const STATE = {
   cfgNightModeOn: false, nightDimActive: false,
   cfgBatterySaveMode: 2, serverBatterySave: false,
   cfgShowCountdown: true, cfgShowAqi: true, cfgHourlyFlash: true, cfgShowProgress: true,
-  cfgReduceMotion: false, cfgHighContrast: false,
+  cfgReduceMotion: false, cfgHighContrast: false, cfgLightMode: false,
+  // Speaker (firmware-only: the sim keeps the settings and stays silent).
+  cfgTapVol: 2, cfgAlertVol: 4, cfgHourlyChime: true, cfgClaudeDing: true, cfgSoundAlerts: true,
+  cfgMuteSleep: true, cfgMuteNight: true,
+  settingsSection: -1,  // -1 = main list, else the SETTINGS row whose children the list shows
   cfgScreenRotation: 1,
   pollOkSeq: 0,
 };
@@ -688,9 +717,54 @@ function applyEffectiveBrightness(fadeMs = 0) {
   backlightFadeTo(STATE.nightDimActive ? NIGHT_MODE_DIM_VALUE : STATE.cfgBrightness, fadeMs);
 }
 function applyContrast() {
-  TOK_COLOR_TEXT_SECONDARY = STATE.cfgHighContrast ? TOK_GRAY_5_HC : TOK_GRAY_5;
-  TOK_COLOR_FILL_TRACK = STATE.cfgHighContrast ? TOK_GRAY_4 : TOK_GRAY_3;
-  TOK_CARD_OUTLINE = STATE.cfgHighContrast;
+  const hc = STATE.cfgHighContrast;
+  if (STATE.cfgLightMode) {
+    TOK_COLOR_TEXT_SECONDARY = hc ? TOK_LIGHT_GRAY_TEXT_2_HC : TOK_LIGHT_GRAY_TEXT_2;
+    TOK_COLOR_FILL_TRACK = hc ? TOK_LIGHT_GRAY_TRACK_HC : TOK_LIGHT_GRAY_PRESSED;
+  } else {
+    TOK_COLOR_TEXT_SECONDARY = hc ? TOK_GRAY_5_HC : TOK_GRAY_5;
+    TOK_COLOR_FILL_TRACK = hc ? TOK_GRAY_4 : TOK_GRAY_3;
+  }
+  TOK_CARD_OUTLINE = hc;
+}
+// Dark / Light theme (settings.cpp applyThemeTokens twin). Colours are read at
+// draw time, so the next render shows the swap.
+function applyThemeTokens() {
+  if (STATE.cfgLightMode) {
+    TOK_COLOR_BG_CANVAS = TOK_LIGHT_GRAY_CANVAS;
+    TOK_COLOR_SURFACE_CARD = TOK_LIGHT_GRAY_CARD;
+    TOK_COLOR_SURFACE_RAISED = TOK_LIGHT_GRAY_RAISED;
+    TOK_COLOR_FILL_PRESSED = TOK_COLOR_SEPARATOR = TOK_LIGHT_GRAY_PRESSED;
+    TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_0;
+    TOK_COLOR_ACCENT = TOK_COLOR_DATA_USAGE = TOK_LIGHT_CORAL;
+    TOK_COLOR_ACCENT_PRESSED = TOK_LIGHT_CORAL_PRESSED;
+    TOK_COLOR_STATUS_SUCCESS = TOK_COLOR_DATA_PACE = TOK_LIGHT_GREEN;
+    TOK_COLOR_STATUS_WARNING = TOK_COLOR_CONTENT_SUN = TOK_LIGHT_AMBER;
+    TOK_COLOR_DATA_PACE_WEDGE = TOK_LIGHT_GREEN_WEDGE;
+    TOK_COLOR_DATA_PACE_SHINE_LO = TOK_LIGHT_GREEN_SHINE_LO;
+    TOK_COLOR_DATA_PACE_SHINE_MID = TOK_LIGHT_GREEN_SHINE_MID;
+    TOK_COLOR_DATA_PACE_SHINE_HI = TOK_LIGHT_GREEN_SHINE_HI;
+    TOK_COLOR_CONTENT_SNOW = TOK_GRAY_4;
+    TOK_COLOR_CONTENT_CLOUD = TOK_LIGHT_GRAY_CLOUD;
+  } else {
+    TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
+    TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
+    TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
+    TOK_COLOR_FILL_PRESSED = TOK_COLOR_SEPARATOR = TOK_GRAY_3;
+    TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
+    TOK_COLOR_ACCENT = TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
+    TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
+    TOK_COLOR_STATUS_SUCCESS = TOK_COLOR_DATA_PACE = TOK_GREEN_500;
+    TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
+    TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
+    TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+    TOK_COLOR_DATA_PACE_SHINE_LO = TOK_GREEN_SHINE_LO;
+    TOK_COLOR_DATA_PACE_SHINE_MID = TOK_GREEN_SHINE_MID;
+    TOK_COLOR_DATA_PACE_SHINE_HI = TOK_GREEN_SHINE_HI;
+    TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
+    TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
+  }
+  applyContrast();
 }
 
 const BATTERY_SAVE_OFF = 0, BATTERY_SAVE_ON = 1, BATTERY_SAVE_AUTO = 2;
@@ -760,17 +834,59 @@ function getCurrentShowAqi() { return STATE.cfgShowAqi ? 1 : 0; }
 function applyShowAqi(v) { STATE.cfgShowAqi = v !== 0; lsSet(SHOW_AQI_KEY, String(v)); }
 function getCurrentHourlyFlash() { return STATE.cfgHourlyFlash ? 1 : 0; }
 function applyHourlyFlash(v) { STATE.cfgHourlyFlash = v !== 0; lsSet(HOURLY_FLASH_KEY, String(v)); }
+// ── Sound section (settings.cpp twin) ──
+// Two volumes: Tap (the tock) and Alert (chime, Claude ding, alerts).
+const VOLUME_LABELS = ['Off', '1', '2', '3', '4', '5', '6', '7'];
+function getCurrentTapVol() { return STATE.cfgTapVol; }
+function applyTapVol(v) { STATE.cfgTapVol = Math.max(0, Math.min(SOUND_VOL_MAX, v)); lsSet(TAP_VOL_KEY, String(STATE.cfgTapVol)); }
+function getCurrentAlertVol() { return STATE.cfgAlertVol; }
+function applyAlertVol(v) { STATE.cfgAlertVol = Math.max(0, Math.min(SOUND_VOL_MAX, v)); lsSet(ALERT_VOL_KEY, String(STATE.cfgAlertVol)); }
+// Parent row text: "Tap 2, Alert 4", or "Off" when both are silent.
+function soundSummary() {
+  if (STATE.cfgTapVol === 0 && STATE.cfgAlertVol === 0) return 'Off';
+  return 'Tap ' + VOLUME_LABELS[STATE.cfgTapVol] + ', Alert ' + VOLUME_LABELS[STATE.cfgAlertVol];
+}
+let testSoundNext = 0;
+const TEST_LABELS = ['Tap', 'Done', 'Attention', 'Alert', 'Chime'];
+function getCurrentTestSound() { return testSoundNext; }
+function applyTestSound(v) { console.log('[sim] test sound: ' + TEST_LABELS[v] + ' (silent in the sim)'); testSoundNext = (v + 1) % TEST_LABELS.length; }
+// One get/apply pair per persisted On/Off switch.
+function boolSetting(field, key) {
+  return { getCurrent: () => (STATE[field] ? 1 : 0), apply: v => { STATE[field] = v !== 0; lsSet(key, String(v)); } };
+}
 function getCurrentShowProgress() { return STATE.cfgShowProgress ? 1 : 0; }
 function applyShowProgress(v) { STATE.cfgShowProgress = v !== 0; lsSet(SHOW_PROGRESS_KEY, String(v)); }
 function getCurrentReduceMotion() { return STATE.cfgReduceMotion ? 1 : 0; }
 function applyReduceMotion(v) { STATE.cfgReduceMotion = v !== 0; lsSet(REDUCE_MOTION_KEY, String(v)); }
+function getCurrentTheme() { return STATE.cfgLightMode ? 1 : 0; }
+function applyTheme(v) {
+  STATE.cfgLightMode = v !== 0;
+  applyThemeTokens();
+  navRefreshBehind();
+  lsSet(LIGHT_MODE_KEY, String(v));
+}
 function getCurrentHighContrast() { return STATE.cfgHighContrast ? 1 : 0; }
 function applyHighContrast(v) { STATE.cfgHighContrast = v !== 0; applyContrast(); lsSet(HIGH_CONTRAST_KEY, String(v)); }
 
-const ROW_NAV = 0, ROW_TOGGLE = 1, ROW_ACTION = 2;
+const ROW_NAV = 0, ROW_TOGGLE = 1, ROW_ACTION = 2, ROW_SECTION = 3, ROW_BUTTON = 4;
 const BRIGHTNESS_VALUES = [0, 64, 128, 191, 255];
 const POLL_VALUES = [5, 10, 20, 60, 300];
 const ONOFF = { cols: 2, count: 2, values: [0, 1], valueLabels: ['Off', 'On'] };
+const SOUND_ROWS = [
+  { label: 'Tap volume', subtitle: 'Volume of the tap tock', hint: '1 is faint, 7 is loud. Off silences taps',
+    kind: ROW_NAV, cols: 4, count: 8, values: [0, 1, 2, 3, 4, 5, 6, 7],
+    valueLabels: VOLUME_LABELS, getCurrent: getCurrentTapVol, apply: applyTapVol },
+  { label: 'Alert volume', subtitle: 'Volume of the chime, Claude ding and alerts', hint: '1 is faint, 7 is loud. Off silences them',
+    kind: ROW_NAV, cols: 4, count: 8, values: [0, 1, 2, 3, 4, 5, 6, 7],
+    valueLabels: VOLUME_LABELS, getCurrent: getCurrentAlertVol, apply: applyAlertVol },
+  { label: 'Play test sound', subtitle: '', hint: '', kind: ROW_BUTTON, cols: 5, count: 5, values: [0, 1, 2, 3, 4],
+    valueLabels: TEST_LABELS, getCurrent: getCurrentTestSound, apply: applyTestSound },
+  { label: 'Hourly chime', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgHourlyChime', HOURLY_CHIME_KEY) },
+  { label: 'Claude ding', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgClaudeDing', CLAUDE_DING_KEY) },
+  { label: 'Alerts', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgSoundAlerts', SOUND_ALERTS_KEY) },
+  { label: 'Mute when asleep', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgMuteSleep', MUTE_SLEEP_KEY) },
+  { label: 'Mute at night', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgMuteNight', MUTE_NIGHT_KEY) },
+];
 const SETTINGS = [
   { label: 'Brightness', subtitle: 'Backlight brightness', hint: '', kind: ROW_NAV, cols: 5, count: 5,
     values: BRIGHTNESS_VALUES, valueLabels: ['0%', '25%', '50%', '75%', '100%'],
@@ -779,6 +895,8 @@ const SETTINGS = [
     getCurrent: getCurrentNightMode, apply: applyNightMode },
   { label: 'Rotation', subtitle: 'For upside-down mounting', hint: '', kind: ROW_NAV, cols: 2, count: 2,
     values: [1, 3], valueLabels: ['Normal', 'Flipped'], getCurrent: getCurrentRotation, apply: applyRotation },
+  { label: 'Theme', subtitle: 'Dark or light appearance', hint: '', kind: ROW_NAV, cols: 2, count: 2,
+    values: [0, 1], valueLabels: ['Dark', 'Light'], getCurrent: getCurrentTheme, apply: applyTheme },
   { label: 'Boot page', subtitle: 'Page shown after a restart', hint: 'Auto resumes the last page shown',
     kind: ROW_NAV, cols: 4, count: 8, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5, 6],
     valueLabels: ['Auto', 'Status', 'Projects', 'Limits', 'Cats', 'Movies', 'Status + cats', 'Note'],
@@ -792,6 +910,8 @@ const SETTINGS = [
     getCurrent: getCurrentShowAqi, apply: applyShowAqi },
   { label: 'Hourly signal', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
     getCurrent: getCurrentHourlyFlash, apply: applyHourlyFlash },
+  { label: 'Sound', subtitle: '', hint: '', kind: ROW_SECTION, cols: 0, count: 0,
+    children: SOUND_ROWS, summary: soundSummary },
   { label: 'Poll progress', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
     getCurrent: getCurrentShowProgress, apply: applyShowProgress },
   { label: 'Poll interval', subtitle: 'How often to fetch /api/usage', hint: '', kind: ROW_NAV, cols: 5, count: 5,
@@ -1282,7 +1402,7 @@ const shineBarY = [-1, -1], shineFillPx = [-1, -1], shinePrevCenter = [null, nul
 let sweepStartMs = 0, sweepActive = false;
 function shineColor(i, center) {
   const d = Math.abs(i - center);
-  return d <= 2 ? TOK_GREEN_SHINE_HI : d <= 6 ? TOK_GREEN_SHINE_MID : d <= SHINE_BAND_R ? TOK_GREEN_SHINE_LO : TOK_COLOR_DATA_PACE;
+  return d <= 2 ? TOK_COLOR_DATA_PACE_SHINE_HI : d <= 6 ? TOK_COLOR_DATA_PACE_SHINE_MID : d <= SHINE_BAND_R ? TOK_COLOR_DATA_PACE_SHINE_LO : TOK_COLOR_DATA_PACE;
 }
 function drawShineStrip(barIdx, center, force) {
   const fillW = shineFillPx[barIdx], y = shineBarY[barIdx];
@@ -1461,13 +1581,13 @@ function noteWordColor(s, a, b) {
   if (b === a) return null;
   const w = s.slice(a, b);
   if (w === 'TODO' || w === 'FIXME' || w === 'BUG') return TOK_NOTE_KEYWORD_BAD;
-  if (w === 'DONE' || w === 'OK') return TOK_NOTE_KEYWORD_GOOD;
+  if (w === 'DONE' || w === 'OK') return TOK_COLOR_STATUS_SUCCESS;  // note.keyword.good
   let hasDigit = false;
   for (let i = a; i < b; i++) {
     if (!noteIsNumChar(s[i])) return null;
     if (noteIsDigit(s[i])) hasDigit = true;
   }
-  return hasDigit ? TOK_NOTE_NUMBER : null;
+  return hasDigit ? TOK_COLOR_CONTENT_SUN : null  /* note.number */;
 }
 
 function drawNotePane() {
@@ -1493,7 +1613,7 @@ function drawNotePane() {
     while (p < lineEnd && s[p] === ' ') p++;
     let lineColor = null, markerIdx = -1;
     if (p < lineEnd) {
-      if (s[p] === '#') lineColor = TOK_NOTE_HEADING;
+      if (s[p] === '#') lineColor = TOK_COLOR_ACCENT;  // note.heading
       else if (s[p] === '>') lineColor = TOK_COLOR_TEXT_SECONDARY;  // note.quote
       else if ((s[p] === '-' || s[p] === '*' || s[p] === '+') && (p + 1 === lineEnd || s[p + 1] === ' ')) markerIdx = p;
     }
@@ -1522,8 +1642,8 @@ function drawNotePane() {
         else if (inCode) c = TOK_NOTE_CODE;
         else if (wordColor) c = wordColor;
         else if (lineColor) c = lineColor;
-        else if (i === markerIdx) c = TOK_NOTE_MARKER;
-        else c = TOK_NOTE_TEXT;
+        else if (i === markerIdx) c = TOK_COLOR_ACCENT;  // note.marker
+        else c = TOK_COLOR_TEXT_PRIMARY;  // note.text
         drawChar(font, NOTE_TX + col * glyphW, y, s[i], c);
         col++; i++;
       }
@@ -1881,7 +2001,29 @@ const LIST_X = TOK_LAYOUT_CONTENT_X0, LIST_W = TOK_LAYOUT_CONTENT_W;
 const LIST_VIEW_Y0 = TOK_LAYOUT_HEADER_H, LIST_ROW0_Y = TOK_LAYOUT_HEADER_CONTENT_Y;
 const LIST_STEP = TOK_LIST_ROW_H + TOK_SPACE_LIST_GAP;
 const LIST_TRAIL_R = LIST_X + LIST_W - TOK_LIST_ROW_INSET;
-function settingsScrollMax() { return Math.max(0, LIST_ROW0_Y + SETTINGS_COUNT * LIST_STEP - SCREEN_H); }
+// The rows the list / leaf screens index into: the main list or the open
+// section's children (settings.cpp's rows()/rowCount()).
+let mainScroll = 0, leftSection = -1, leftScroll = 0;
+function rows() { return STATE.settingsSection < 0 ? SETTINGS : SETTINGS[STATE.settingsSection].children; }
+function rowCount() { return rows().length; }
+function settingsEnterSection() {
+  mainScroll = STATE.settingsScrollOffset;
+  STATE.settingsSection = STATE.settingsLeafIndex;
+  STATE.settingsScrollOffset = 0;
+  STATE.confirmArmedRow = -1;
+}
+function settingsLeaveSection() {
+  leftSection = STATE.settingsSection; leftScroll = STATE.settingsScrollOffset;
+  STATE.settingsSection = -1;
+  STATE.settingsScrollOffset = mainScroll;
+  STATE.confirmArmedRow = -1;
+}
+function settingsUndoLeaveSection() {
+  mainScroll = STATE.settingsScrollOffset;
+  STATE.settingsSection = leftSection;
+  STATE.settingsScrollOffset = leftScroll;
+}
+function settingsScrollMax() { return Math.max(0, LIST_ROW0_Y + rowCount() * LIST_STEP - SCREEN_H); }
 function rowY(idx) { return LIST_ROW0_Y + idx * LIST_STEP - STATE.settingsScrollOffset; }
 function currentValueText(d) {
   const cur = d.getCurrent();
@@ -1905,17 +2047,30 @@ function shadeRows(y0, y1) {
 function drawSettingsList() {
   gfx.fillScreen(TOK_COLOR_BG_CANVAS);
   gfx.setClipRect(0, LIST_VIEW_Y0, SCREEN_W, SCREEN_H - LIST_VIEW_Y0);
-  for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
-    const d = SETTINGS[idx];
+  for (let idx = 0; idx < rowCount(); idx++) {
+    const d = rows()[idx];
     const y = rowY(idx);
     if (y + TOK_LIST_ROW_H < LIST_VIEW_Y0 || y >= SCREEN_H) continue;
     const pressed = NAV.pressedId === 'row' && NAV.pressedIndex === idx;
     drawCardSurface(LIST_X, y, LIST_W, TOK_LIST_ROW_H, pressed ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD);
     const cy = y + TOK_LIST_ROW_H / 2;
     drawText(TOK_TYPE_HEADLINE, LIST_X + TOK_LIST_ROW_INSET, cy - Math.trunc(fontLineH(TOK_TYPE_HEADLINE) / 2), d.label,
-             d.kind === ROW_ACTION ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_TEXT_PRIMARY);
+             d.kind === ROW_ACTION ? TOK_COLOR_STATUS_ERROR
+             : d.kind === ROW_BUTTON ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_PRIMARY);
     if (d.kind === ROW_TOGGLE) {
       drawTogglePill(LIST_TRAIL_R, cy, d.getCurrent() !== 0);
+    } else if (d.kind === ROW_BUTTON) {
+      // Play glyph (accent) with the sound that plays next beside it.
+      const gx = LIST_TRAIL_R - 8;
+      gfx.fillTriangle(gx - 5, cy - 7, gx - 5, cy + 7, gx + 6, cy, TOK_COLOR_ACCENT);
+      drawTextR(TOK_TYPE_BODY, gx - 5 - TOK_SPACE_MD, cy - Math.trunc(fontLineH(TOK_TYPE_BODY) / 2),
+                currentValueText(d), TOK_COLOR_TEXT_SECONDARY);
+    } else if (d.kind === ROW_SECTION) {
+      const chevCx = LIST_TRAIL_R - 4;
+      drawChevron(chevCx, cy, TOK_COLOR_TEXT_TERTIARY);
+      if (d.summary)
+        drawTextR(TOK_TYPE_BODY, chevCx - 2 - TOK_SPACE_SM, cy - Math.trunc(fontLineH(TOK_TYPE_BODY) / 2),
+                  d.summary(), TOK_COLOR_TEXT_SECONDARY);
     } else {
       const chevCx = LIST_TRAIL_R - 4;
       drawChevron(chevCx, cy, TOK_COLOR_TEXT_TERTIARY);
@@ -1929,13 +2084,14 @@ function drawSettingsList() {
   const maxS = settingsScrollMax();
   if (maxS > 0) {
     const trackY = LIST_ROW0_Y, trackH = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - LIST_ROW0_Y;
-    const contentH = SETTINGS_COUNT * LIST_STEP;
+    const contentH = rowCount() * LIST_STEP;
     const thumbH = Math.max(24, Math.trunc(trackH * trackH / contentH));
     const off = Math.max(0, Math.min(maxS, STATE.settingsScrollOffset));
     const thumbY = trackY + Math.trunc((trackH - thumbH) * off / maxS);
     gfx.fillSmoothRoundRect(LIST_X + LIST_W - 6, thumbY, 4, thumbH, 2, TOK_COLOR_TEXT_TERTIARY);
   }
-  drawModalHeader(false, 'Settings', NAV.pressedId === 'close');
+  drawModalHeader(STATE.settingsSection >= 0, STATE.settingsSection < 0 ? 'Settings' : SETTINGS[STATE.settingsSection].label,
+                  NAV.pressedId === 'close');
 }
 const CELL_W_BY_COLS = [0, 464, 228, 149, 110, 86];
 function gridTop(d) {
@@ -1965,7 +2121,7 @@ function drawToast() {
   drawText(TOK_TYPE_BODY, x + padX, y + Math.trunc((TOK_TOAST_H - fontLineH(TOK_TYPE_BODY)) / 2), toastText, TOK_COLOR_TEXT_PRIMARY);
 }
 function drawSettingsLeaf() {
-  const d = SETTINGS[STATE.settingsLeafIndex];
+  const d = rows()[STATE.settingsLeafIndex];
   gfx.fillScreen(TOK_COLOR_BG_CANVAS);
   drawModalHeader(true, d.label, NAV.pressedId === 'close');
   if (d.subtitle) drawText(TOK_TYPE_BODY, TOK_LAYOUT_CONTENT_X0, TOK_LAYOUT_HEADER_CONTENT_Y, d.subtitle, TOK_COLOR_TEXT_SECONDARY);
@@ -1999,23 +2155,25 @@ function drawSettingsScreen() {
 function renderSettings() { drawSettingsScreen(); presentFrame(); }
 function settingsListHit(x, y) {
   if (y < LIST_VIEW_Y0 || x < LIST_X || x >= LIST_X + LIST_W) return -1;
-  for (let idx = 0; idx < SETTINGS_COUNT; idx++) {
+  for (let idx = 0; idx < rowCount(); idx++) {
     const ry = rowY(idx);
     if (y >= ry && y < ry + TOK_LIST_ROW_H) return idx;
   }
   return -1;
 }
+// 'none' | 'leaf' | 'section' (settings.cpp's SettingsGo).
 function settingsListActivate(idx) {
-  const d = SETTINGS[idx];
-  if (!d) return false;
-  if (d.kind === ROW_TOGGLE) { d.apply(d.getCurrent() ? 0 : 1); return false; }
+  const d = rows()[idx];
+  if (!d) return 'none';
+  if (d.kind === ROW_TOGGLE) { d.apply(d.getCurrent() ? 0 : 1); return 'none'; }
+  if (d.kind === ROW_BUTTON) { d.apply(d.getCurrent()); return 'none'; }
   STATE.settingsLeafIndex = idx;
   STATE.confirmArmedRow = -1;
-  return true;
+  return d.kind === ROW_SECTION ? 'section' : 'leaf';
 }
 function settingsLeafHit(x, y) {
   if (STATE.settingsLeafIndex < 0) return -1;
-  const d = SETTINGS[STATE.settingsLeafIndex];
+  const d = rows()[STATE.settingsLeafIndex];
   for (let i = 0; i < d.count; i++) {
     const r = cellRect(d, i);
     if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i;
@@ -2023,7 +2181,7 @@ function settingsLeafHit(x, y) {
   return -1;
 }
 function settingsLeafActivate(i, now) {
-  const d = SETTINGS[STATE.settingsLeafIndex];
+  const d = rows()[STATE.settingsLeafIndex];
   if (d.kind === ROW_ACTION) {
     if (armedNow(now)) {
       STATE.confirmArmedRow = -1;
@@ -2249,13 +2407,26 @@ function navOpenSheet(which) {
   copyFrame(behindFrame, frameCanvas);
   STATE.weatherPageOpen = which === 0;
   STATE.devicePageOpen = which === 1;
-  if (which === 2) { STATE.settingsScreen = 'list'; STATE.settingsScrollOffset = 0; }
+  if (which === 2) { STATE.settingsScreen = 'list'; STATE.settingsSection = -1; STATE.settingsScrollOffset = 0; }
   drawSheetInto();
   if (STATE.cfgReduceMotion) { startFade(behindFrame); return; }
   NAV.tKind = 'sheet'; NAV.sheetClosing = false;
   Object.assign(NAV.spring, { x: 0, v: 0 });
   springTo(NAV.spring, SCREEN_H, TOK_MOTION_SPRING_SHEET);
   transitionDirty = true;
+}
+// Theme change under an open sheet: recompose the page into behindFrame (the
+// firmware's navRefreshBehind); the sheet's own pixels are parked in prevFrame.
+function navRefreshBehind() {
+  if (navTransitionActive() || !navSheetOpen()) return;
+  copyFrame(prevFrame, frameCanvas);
+  const w = STATE.weatherPageOpen, d = STATE.devicePageOpen, s = STATE.settingsScreen;
+  STATE.weatherPageOpen = STATE.devicePageOpen = false;
+  STATE.settingsScreen = 'off';
+  withHold(render);
+  copyFrame(behindFrame, frameCanvas);
+  copyFrame(frameCanvas, prevFrame);
+  STATE.weatherPageOpen = w; STATE.devicePageOpen = d; STATE.settingsScreen = s;
 }
 function beginSheetDrop() {
   copyFrame(prevFrame, frameCanvas);
@@ -2286,9 +2457,10 @@ function navCloseSheet() {
   if (NAV.tKind !== 'sheet') navFinishTransition();
   closeSheetWith(0);
 }
-function pushDetail() {
+// Push the row just activated: a leaf detail, or (section) its child list.
+function pushDetail(section) {
   copyFrame(prevFrame, frameCanvas);
-  STATE.settingsScreen = 'leaf';
+  if (section) settingsEnterSection(); else STATE.settingsScreen = 'leaf';
   drawSheetInto();
   if (STATE.cfgReduceMotion) { startFade(prevFrame); return; }
   NAV.tKind = 'push'; NAV.tForward = true;
@@ -2296,8 +2468,11 @@ function pushDetail() {
   springTo(NAV.spring, SCREEN_W, TOK_MOTION_SPRING_STANDARD);
   transitionDirty = true;
 }
+let popFromSection = false;  // the pop leaves a section's list (else a leaf)
 function beginPop() {
   copyFrame(prevFrame, frameCanvas);
+  popFromSection = STATE.settingsScreen === 'list';
+  if (popFromSection) settingsLeaveSection();
   STATE.settingsScreen = 'list';
   STATE.confirmArmedRow = -1;
   drawSheetInto();
@@ -2312,7 +2487,8 @@ function popDetail() {
 }
 function revertPop() {
   copyFrame(frameCanvas, prevFrame);
-  STATE.settingsScreen = 'leaf';
+  if (popFromSection) settingsUndoLeaveSection();
+  STATE.settingsScreen = popFromSection ? 'list' : 'leaf';
   NAV.tKind = null; NAV.tHeld = false;
   presentFrame();
 }
@@ -2437,7 +2613,11 @@ function onDown(x, y, now) {
 function dragFor(horizontal, dx) {
   const G = NAV.G;
   if (G.grabbedSheet) return horizontal ? 'dead' : 'sheet';
-  if (STATE.settingsScreen === 'list') return horizontal ? 'dead' : 'list';
+  if (STATE.settingsScreen === 'list') {
+    if (!horizontal) return 'list';
+    // A section's list swipes back to the main list like a detail does.
+    return (STATE.settingsSection >= 0 && dx > 0 && !STATE.cfgReduceMotion) ? 'back' : 'dead';
+  }
   if (STATE.settingsScreen === 'leaf') {
     if (STATE.cfgReduceMotion) return 'dead';
     if (horizontal) return dx > 0 ? 'back' : 'dead';
@@ -2551,9 +2731,13 @@ function commitTap(now) {
   NAV.pressedId = null; NAV.pressedIndex = -1;
   switch (target) {
     case 'sleep': redrawScreen(); enterScreenSleep(); break;
-    case 'close': if (STATE.settingsScreen === 'leaf') popDetail(); else navCloseSheet(); break;
+    case 'close': if (STATE.settingsScreen === 'leaf' || (STATE.settingsScreen === 'list' && STATE.settingsSection >= 0)) popDetail(); else navCloseSheet(); break;
     case 'sheetAny': navCloseSheet(); break;
-    case 'row': if (settingsListActivate(index)) pushDetail(); else renderSettings(); break;
+    case 'row': {
+      const go = settingsListActivate(index);
+      if (go === 'leaf') pushDetail(false); else if (go === 'section') pushDetail(true); else renderSettings();
+      break;
+    }
     case 'cell': settingsLeafActivate(index, now); renderSettings(); break;
     case 'weather': redrawScreen(); navOpenSheet(0); break;
     case 'health': redrawScreen(); navOpenSheet(1); break;
@@ -2892,17 +3076,25 @@ function loadSettings() {
   loadInt(SHOW_AQI_KEY, v => { STATE.cfgShowAqi = v !== 0; });
   loadInt(HOURLY_FLASH_KEY, v => { STATE.cfgHourlyFlash = v !== 0; });
   loadInt(SHOW_PROGRESS_KEY, v => { STATE.cfgShowProgress = v !== 0; });
+  loadInt(ALERT_VOL_KEY, v => { STATE.cfgAlertVol = Math.max(0, Math.min(SOUND_VOL_MAX, v)); });
+  loadInt(TAP_VOL_KEY, v => { STATE.cfgTapVol = Math.max(0, Math.min(SOUND_VOL_MAX, v)); });
+  loadInt(HOURLY_CHIME_KEY, v => { STATE.cfgHourlyChime = v !== 0; });
+  loadInt(CLAUDE_DING_KEY, v => { STATE.cfgClaudeDing = v !== 0; });
+  loadInt(SOUND_ALERTS_KEY, v => { STATE.cfgSoundAlerts = v !== 0; });
+  loadInt(MUTE_SLEEP_KEY, v => { STATE.cfgMuteSleep = v !== 0; });
+  loadInt(MUTE_NIGHT_KEY, v => { STATE.cfgMuteNight = v !== 0; });
   loadInt(BATTERY_SAVE_KEY, v => { STATE.cfgBatterySaveMode = Math.max(0, Math.min(2, v)); });
   loadInt(REDUCE_MOTION_KEY, v => { STATE.cfgReduceMotion = v !== 0; });
   loadInt(HIGH_CONTRAST_KEY, v => { STATE.cfgHighContrast = v !== 0; });
-  applyContrast();
+  loadInt(LIGHT_MODE_KEY, v => { STATE.cfgLightMode = v !== 0; });
+  applyThemeTokens();  // includes applyContrast()
 }
 
 function setPageStatus(t) { document.getElementById('page-status').textContent = t; }
 function describeScreen() {
   if (STATE.screenSleeping) return 'SLEEP (tap to wake)';
-  if (STATE.settingsScreen === 'leaf') return 'SETTINGS: ' + SETTINGS[STATE.settingsLeafIndex].label;
-  if (STATE.settingsScreen === 'list') return 'SETTINGS (list)';
+  if (STATE.settingsScreen === 'leaf') return 'SETTINGS: ' + rows()[STATE.settingsLeafIndex].label;
+  if (STATE.settingsScreen === 'list') return STATE.settingsSection >= 0 ? 'SETTINGS: ' + SETTINGS[STATE.settingsSection].label : 'SETTINGS (list)';
   if (STATE.weatherPageOpen) return 'WEATHER (tap to close)';
   if (STATE.devicePageOpen) return 'DEVICE STATS (tap to close)';
   if (!STATE.haveData) return 'OFFLINE (cat GIFs)';

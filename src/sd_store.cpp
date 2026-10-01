@@ -13,6 +13,17 @@
 // after boot and this file's one boot-time load never overlaps that.
 static const char* CFG_NS = "s3cfg";
 
+// Just the theme, before the first frame: painting the boot canvas in the
+// wrong theme would flash it until loadRuntimeConfig() catches up.
+void loadThemeEarly() {
+  Preferences p;
+  p.begin(CFG_NS, true);
+  cfgLightMode = p.isKey(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE]) &&
+                 p.getInt(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE]) != 0;
+  p.end();
+  applyThemeTokens();
+}
+
 // Optional override for the compiled config.h defaults. A key simply absent
 // from flash (first boot, or never changed since) means "use the compiled
 // default" -- not an error worth surfacing.
@@ -92,8 +103,24 @@ void loadRuntimeConfig() {
   if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_HIGH_CONTRAST])) {
     cfgHighContrast = p.getInt(CONFIG_KEY_NAMES[CFGKEY_HIGH_CONTRAST]) != 0;
   }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE])) {
+    cfgLightMode = p.getInt(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE]) != 0;
+  }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_ALERT_VOL])) {
+    cfgAlertVol = constrain(p.getInt(CONFIG_KEY_NAMES[CFGKEY_ALERT_VOL]), SOUND_VOL_OFF, SOUND_VOL_MAX);
+  }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_TAP_VOL])) {
+    cfgTapVol = constrain(p.getInt(CONFIG_KEY_NAMES[CFGKEY_TAP_VOL]), SOUND_VOL_OFF, SOUND_VOL_MAX);
+  }
+  const struct { int key; bool* var; } soundSwitches[] = {
+    {CFGKEY_HOURLY_CHIME, &cfgHourlyChime}, {CFGKEY_CLAUDE_DING, &cfgClaudeDing},
+    {CFGKEY_SOUND_ALERTS, &cfgSoundAlerts}, {CFGKEY_MUTE_SLEEP, &cfgMuteSleep},
+    {CFGKEY_MUTE_NIGHT, &cfgMuteNight},
+  };
+  for (const auto& sw : soundSwitches)
+    if (p.isKey(CONFIG_KEY_NAMES[sw.key])) *sw.var = p.getInt(CONFIG_KEY_NAMES[sw.key]) != 0;
   p.end();
-  applyContrast();
+  applyThemeTokens();  // includes applyContrast()
 
   // Apply after all related keys are loaded so Battery Save can floor the
   // poll interval against the user's poll_interval_sec preference. AUTO

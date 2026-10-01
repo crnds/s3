@@ -33,6 +33,26 @@ const uint16_t TOK_BLUE_500 = 0x3C1E;   // rgb(58,130,247)
 const uint16_t TOK_SUN_500 = 0xFE60;    // rgb(255,206,0)
 const uint16_t TOK_BLACK = 0x0000;      // rgb(0,0,0)
 
+// Light theme primitives (design.md 4.6): the grays flip, and the hues that
+// fail 3:1 on a light surface (green, amber/sun) get a darker twin. Everything
+// else (red, blue, the plate, text.onAccent) is shared by both themes.
+const uint16_t TOK_LIGHT_GRAY_CANVAS = 0xE71C;   // rgb(230,227,230)
+const uint16_t TOK_LIGHT_GRAY_CARD = 0xF79E;     // rgb(247,243,247)
+const uint16_t TOK_LIGHT_GRAY_RAISED = 0xFFFF;   // rgb(255,255,255)
+const uint16_t TOK_LIGHT_GRAY_PRESSED = 0xD69A;  // rgb(214,210,214) -- also the track
+const uint16_t TOK_LIGHT_GRAY_TRACK_HC = 0xA514; // rgb(165,162,165)
+const uint16_t TOK_LIGHT_GRAY_TEXT_2 = 0x5ACB;   // rgb(90,89,90)
+const uint16_t TOK_LIGHT_GRAY_TEXT_2_HC = 0x39C7; // rgb(58,57,58)
+const uint16_t TOK_LIGHT_GRAY_CLOUD = 0x8C51;    // rgb(140,138,140)
+const uint16_t TOK_LIGHT_GREEN = 0x1CA6;         // rgb(25,150,49)
+const uint16_t TOK_LIGHT_GREEN_WEDGE = 0x8E12;   // rgb(140,194,148) -- green at 50% over card
+const uint16_t TOK_LIGHT_GREEN_SHINE_LO = 0x5DED;  // rgb(90,190,107)
+const uint16_t TOK_LIGHT_GREEN_SHINE_MID = 0x96B4; // rgb(148,215,165)
+const uint16_t TOK_LIGHT_GREEN_SHINE_HI = 0xD79B;  // rgb(214,243,222)
+const uint16_t TOK_LIGHT_AMBER = 0xBB60;         // rgb(189,109,0) -- warning and sun
+const uint16_t TOK_LIGHT_CORAL = 0xD1E4;         // rgb(214,61,33) -- accent, 3.6:1 on the canvas
+const uint16_t TOK_LIGHT_CORAL_PRESSED = 0xA964; // rgb(173,45,33)
+
 // External scale (exempt from the palette): US EPA / aqicn.org AQI.
 const uint16_t TOK_AQI_GOOD = TOK_GREEN_500;
 const uint16_t TOK_AQI_MODERATE = 0xFFE0;   // rgb(255,255,0)
@@ -42,34 +62,41 @@ const uint16_t TOK_AQI_VERY_UNHEALTHY = 0xAABE;  // rgb(173,85,247)
 const uint16_t TOK_AQI_HAZARDOUS = 0x78E3;       // rgb(123,28,25)
 
 // ── COLOUR: SEMANTIC (design.md 4.2) ───────────────────────
-const uint16_t TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
-const uint16_t TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
-const uint16_t TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
-const uint16_t TOK_COLOR_FILL_PRESSED = TOK_GRAY_3;
-const uint16_t TOK_COLOR_SEPARATOR = TOK_GRAY_3;
-const uint16_t TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
+// Theme-dependent roles are runtime tokens (extern, defined in settings.cpp and
+// assigned by applyThemeTokens() from the Dark or Light palette). The rest are
+// the same in both themes and stay const. NOTE: never capture a runtime token
+// in a `static const` -- it would freeze the boot theme.
+extern uint16_t TOK_COLOR_BG_CANVAS;        // gray.0 | light canvas
+extern uint16_t TOK_COLOR_SURFACE_CARD;     // gray.1 | light card
+extern uint16_t TOK_COLOR_SURFACE_RAISED;   // gray.2 | light raised
+extern uint16_t TOK_COLOR_FILL_PRESSED;     // gray.3 | light pressed
+extern uint16_t TOK_COLOR_SEPARATOR;        // gray.3 | light pressed
+extern uint16_t TOK_COLOR_TEXT_PRIMARY;     // gray.6 | gray.0
 const uint16_t TOK_COLOR_TEXT_TERTIARY = TOK_GRAY_4;
 const uint16_t TOK_COLOR_TEXT_ON_ACCENT = TOK_GRAY_0;
-const uint16_t TOK_COLOR_ACCENT = TOK_CORAL_500;
-const uint16_t TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
-const uint16_t TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
-const uint16_t TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
+extern uint16_t TOK_COLOR_ACCENT;           // coral.500 | light coral
+extern uint16_t TOK_COLOR_ACCENT_PRESSED;   // coral.600 | light coral pressed
+extern uint16_t TOK_COLOR_STATUS_SUCCESS;   // green.500 | light green
+extern uint16_t TOK_COLOR_STATUS_WARNING;   // amber.500 | light amber
 const uint16_t TOK_COLOR_STATUS_ERROR = TOK_RED_500;
 const uint16_t TOK_COLOR_STATUS_INFO = TOK_BLUE_500;
-const uint16_t TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
-const uint16_t TOK_COLOR_DATA_PACE = TOK_GREEN_500;
-const uint16_t TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+extern uint16_t TOK_COLOR_DATA_USAGE;       // coral.500 | light coral
+extern uint16_t TOK_COLOR_DATA_PACE;        // green.500 | light green
+extern uint16_t TOK_COLOR_DATA_PACE_WEDGE;  // green.wedge | light wedge
+extern uint16_t TOK_COLOR_DATA_PACE_SHINE_LO;   // the pace-bar sweep ramp
+extern uint16_t TOK_COLOR_DATA_PACE_SHINE_MID;
+extern uint16_t TOK_COLOR_DATA_PACE_SHINE_HI;
 const uint16_t TOK_COLOR_DATA_SYSTEM = TOK_BLUE_500;
-const uint16_t TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
+extern uint16_t TOK_COLOR_CONTENT_SUN;      // sun.500 | light amber
 const uint16_t TOK_COLOR_CONTENT_RAIN = TOK_BLUE_500;
-const uint16_t TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
-const uint16_t TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
+extern uint16_t TOK_COLOR_CONTENT_SNOW;     // gray.6 | gray.4
+extern uint16_t TOK_COLOR_CONTENT_CLOUD;    // gray.5 | light cloud
 const uint16_t TOK_COLOR_PLATE = TOK_BLACK;
 // Increase Contrast (design.md 12.9) swaps these at runtime: text.secondary
-// -> 0xBDF7, fill.track -> gray.4, and cards gain a 1px gray.4 outline
-// (TOK_CARD_OUTLINE). Set by applyContrast() in settings.cpp.
-extern uint16_t TOK_COLOR_TEXT_SECONDARY;   // gray.5 (0xBDF7 under Increase Contrast)
-extern uint16_t TOK_COLOR_FILL_TRACK;       // gray.3 (gray.4 under Increase Contrast)
+// -> brighter (dark) / darker (light), fill.track -> stronger, and cards gain a
+// 1px gray.4 outline (TOK_CARD_OUTLINE). Set by applyContrast() in settings.cpp.
+extern uint16_t TOK_COLOR_TEXT_SECONDARY;   // gray.5 | light text 2 (each with an HC twin)
+extern uint16_t TOK_COLOR_FILL_TRACK;       // gray.3 | light pressed (each with an HC twin)
 extern bool TOK_CARD_OUTLINE;
 const uint16_t TOK_COLOR_CARD_OUTLINE = TOK_GRAY_4;
 
@@ -77,11 +104,11 @@ const uint16_t TOK_COLOR_CARD_OUTLINE = TOK_GRAY_4;
 // parity surface in CLAUDE.md; only the colours are tokens.
 const uint16_t TOK_NOTE_CODE = TOK_COLOR_STATUS_INFO;
 const uint16_t TOK_NOTE_KEYWORD_BAD = TOK_COLOR_STATUS_ERROR;
-const uint16_t TOK_NOTE_KEYWORD_GOOD = TOK_COLOR_STATUS_SUCCESS;
-const uint16_t TOK_NOTE_NUMBER = TOK_COLOR_CONTENT_SUN;
-const uint16_t TOK_NOTE_HEADING = TOK_COLOR_ACCENT;
-const uint16_t TOK_NOTE_MARKER = TOK_COLOR_ACCENT;
-const uint16_t TOK_NOTE_TEXT = TOK_COLOR_TEXT_PRIMARY;
+#define TOK_NOTE_KEYWORD_GOOD TOK_COLOR_STATUS_SUCCESS   /* runtime */
+#define TOK_NOTE_NUMBER TOK_COLOR_CONTENT_SUN            /* runtime */
+#define TOK_NOTE_HEADING TOK_COLOR_ACCENT                /* runtime */
+#define TOK_NOTE_MARKER TOK_COLOR_ACCENT                 /* runtime */
+#define TOK_NOTE_TEXT TOK_COLOR_TEXT_PRIMARY             /* runtime */
 // note.quote is text.secondary, a runtime token -- use TOK_COLOR_TEXT_SECONDARY.
 
 // ── TYPE (design.md 5.2) ───────────────────────────────────

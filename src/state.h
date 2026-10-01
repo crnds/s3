@@ -18,6 +18,7 @@
 #include <ArduinoJson.h>
 #include <SD_MMC.h>
 #include <AnimatedGIF.h>
+#include "audio.h"
 #include <esp_system.h>
 #include <esp_heap_caps.h>
 #include <time.h>
@@ -373,6 +374,17 @@ extern int cfgScreenRotation;
 // cards (applyContrast() in settings.cpp).
 extern bool cfgReduceMotion;
 extern bool cfgHighContrast;
+// Dark / Light theme ("light_mode" NVS key): false = Dark. Applied to the
+// runtime colour tokens by applyThemeTokens() (settings.cpp).
+extern bool cfgLightMode;
+// Speaker (audio.h), all under Settings > Sound. cfgTapVol ("tap_level") is the
+// tap tock's volume, cfgAlertVol ("sound_level") the chime / Claude ding /
+// alerts' -- each 0 (Off) to SOUND_VOL_MAX. The bools are per-category switches
+// and the two mute rules, all default on ("hourly_chime", "claude_ding",
+// "sound_alerts", "mute_sleep", "mute_night").
+extern int cfgTapVol, cfgAlertVol;
+extern bool cfgHourlyChime, cfgClaudeDing, cfgSoundAlerts;
+extern bool cfgMuteSleep, cfgMuteNight;
 
 // Generic Settings-page persistence queue: a leaf's apply() (loop(), core 1)
 // mutates its live global directly, then queues the flash key/value here;
@@ -397,6 +409,8 @@ enum ConfigKeyId {
   CFGKEY_CAT_SHUFFLE, CFGKEY_NIGHT_MODE, CFGKEY_ROTATION, CFGKEY_SHOW_COUNTDOWN,
   CFGKEY_BATTERY_SAVE, CFGKEY_SHOW_AQI, CFGKEY_HOURLY_FLASH, CFGKEY_SHOW_PROGRESS,
   CFGKEY_LAST_PAGE, CFGKEY_REDUCE_MOTION, CFGKEY_HIGH_CONTRAST,
+  CFGKEY_LIGHT_MODE, CFGKEY_ALERT_VOL, CFGKEY_TAP_VOL, CFGKEY_HOURLY_CHIME,
+  CFGKEY_CLAUDE_DING, CFGKEY_SOUND_ALERTS, CFGKEY_MUTE_SLEEP, CFGKEY_MUTE_NIGHT,
   CFGKEY_COUNT
 };
 extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
@@ -556,10 +570,22 @@ void queueConfigSave(uint8_t keyId, int32_t value);
 void applyEffectiveBrightness(uint32_t fadeMs = 0);
 void applyEffectivePoll();
 void applyContrast();
+void applyThemeTokens();
+// Reads only the theme key from NVS so the very first frame is painted in the
+// right theme (setup(), before loadRuntimeConfig()).
+void loadThemeEarly();
 int settingsListHit(int32_t x, int32_t y);        // row index, or -1
-// Tap on a list row (commit on up): toggles flip in place and return false;
-// navigation/action rows set settingsLeafIndex and return true (push it).
-bool settingsListActivate(int idx);
+// Tap on a list row (commit on up): toggles and buttons act in place and
+// return SG_NONE; navigation/action rows set settingsLeafIndex and return
+// SG_LEAF (push the detail); a section row returns SG_SECTION (push the child
+// list: nav.cpp snapshots the screen, then calls settingsEnterSection()).
+enum SettingsGo { SG_NONE, SG_LEAF, SG_SECTION };
+SettingsGo settingsListActivate(int idx);
+// -1 = the main list; else the SETTINGS row whose children the list shows.
+extern int settingsSection;
+void settingsEnterSection();
+void settingsLeaveSection();
+void settingsUndoLeaveSection();
 int settingsLeafHit(int32_t x, int32_t y);        // option cell / arm button, or -1
 void settingsLeafActivate(int idx, uint32_t now);
 int settingsScrollMax();
@@ -585,6 +611,7 @@ bool navTransitionActive();       // a composite (slide / sheet / fade) is on sc
 bool navSheetOpen();              // Weather, Device Stats or Settings is up
 void navGoToPage(int page, bool forward);   // serial keys; animated unless offline
 void navOpenSheet(int which);     // 0 weather, 1 device, 2 settings
+void navRefreshBehind();          // theme changed under an open sheet: recompose the page behind it
 void navCloseSheet();
 void navFinishTransition();       // snap any running transition to its end
 bool navCatLayout();              // the cat player owns the current page
