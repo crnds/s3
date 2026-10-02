@@ -1,6 +1,8 @@
 // Settings sheet (tap the status strip's gear). A generic two-screen system:
 // SET_LIST is a scrolling list of rows (design.md 11.7), SET_LEAF is a detail
-// screen (11.15) with an option grid (11.8) or an arm button (11.9). Every
+// screen (11.15) with an option grid (11.8) or an arm button (11.9). A
+// ROW_SECTION row opens a child SET_LIST (settingsSection >= 0) with its own
+// scroll position; its rows push SET_LEAF details like the main list's do. Every
 // setting is one SettingDef row -- a kind, a small set of {value,label}
 // options, and two plain function pointers -- so adding a setting is a data
 // row + a short apply()/getCurrent() pair, not a hand-copied page.
@@ -10,7 +12,27 @@
 // commits. Carried over from the CYD firmware, re-designed per design.md.
 #include "state.h"
 
-// Increase Contrast's runtime tokens (tokens.h), set by applyContrast().
+// Runtime colour tokens (tokens.h): the theme roles, set by applyThemeTokens(),
+// and Increase Contrast's, set by applyContrast(). Defaults are the Dark theme.
+uint16_t TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
+uint16_t TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
+uint16_t TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
+uint16_t TOK_COLOR_FILL_PRESSED = TOK_GRAY_3;
+uint16_t TOK_COLOR_SEPARATOR = TOK_GRAY_3;
+uint16_t TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
+uint16_t TOK_COLOR_ACCENT = TOK_CORAL_500;
+uint16_t TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
+uint16_t TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
+uint16_t TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
+uint16_t TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
+uint16_t TOK_COLOR_DATA_PACE = TOK_GREEN_500;
+uint16_t TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+uint16_t TOK_COLOR_DATA_PACE_SHINE_LO = TOK_GREEN_SHINE_LO;
+uint16_t TOK_COLOR_DATA_PACE_SHINE_MID = TOK_GREEN_SHINE_MID;
+uint16_t TOK_COLOR_DATA_PACE_SHINE_HI = TOK_GREEN_SHINE_HI;
+uint16_t TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
+uint16_t TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
+uint16_t TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
 uint16_t TOK_COLOR_TEXT_SECONDARY = TOK_GRAY_5;
 uint16_t TOK_COLOR_FILL_TRACK = TOK_GRAY_3;
 bool TOK_CARD_OUTLINE = false;
@@ -22,6 +44,8 @@ enum RowKind : uint8_t {
   ROW_NAV,     // current value + chevron; pushes a detail with an option grid
   ROW_TOGGLE,  // labelled On/Off pill; flips in place, no detail screen
   ROW_ACTION,  // status.error label; pushes a detail with the arm button
+  ROW_SECTION, // value summary + chevron; pushes a child list of rows (children)
+  ROW_BUTTON,  // accent label + play glyph; runs apply() on tap, no detail screen
 };
 
 struct SettingDef {
@@ -35,6 +59,9 @@ struct SettingDef {
   int (*getCurrent)();         // value to select (and show on the row)
   void (*apply)(int value);    // live mutation + queues flash persistence
   const char* doneToast;       // action rows: the toast shown when it executes
+  const SettingDef* children = nullptr;  // ROW_SECTION: the child list
+  uint8_t childCount = 0;
+  const char* (*summary)() = nullptr;    // ROW_SECTION: trailing text on the parent row
 };
 
 static const int BRIGHTNESS_VALUES[5] = {0, 64, 128, 191, 255};
@@ -50,7 +77,9 @@ static const char* const BRIGHTNESS_LABELS[5] = {"0%", "25%", "50%", "75%", "100
 const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT] = {
   "brightness", "poll_sec", "pixel_shift_min", "boot_page", "cat_shuffle_sec",
   "night_mode", "screen_rotation", "show_countdown", "battery_save", "show_aqi",
-  "hourly_flash", "show_progress", "last_page", "reduce_motion", "high_contrast"
+  "hourly_flash", "show_progress", "last_page", "reduce_motion", "high_contrast",
+  "light_mode", "sound_level", "tap_level", "hourly_chime", "claude_ding", "sound_alerts",
+  "mute_sleep", "mute_night"
 };
 
 void queueConfigSave(uint8_t keyId, int32_t value) {
@@ -82,12 +111,65 @@ void applyEffectivePoll() {
   POLL_INTERVAL_MS = sec * 1000;
 }
 
-// Increase Contrast (design.md 12.9): text.secondary -> 0xBDF7, fill.track ->
-// gray.4, cards gain a 1px gray.4 outline. Meaning unchanged, separation up.
+// Increase Contrast (design.md 12.9): text.secondary and fill.track step
+// further from the surface, and cards gain a 1px gray.4 outline. Meaning
+// unchanged, separation up. Theme-aware, so applyThemeTokens() ends with it.
 void applyContrast() {
-  TOK_COLOR_TEXT_SECONDARY = cfgHighContrast ? TOK_GRAY_5_HC : TOK_GRAY_5;
-  TOK_COLOR_FILL_TRACK = cfgHighContrast ? TOK_GRAY_4 : TOK_GRAY_3;
+  if (cfgLightMode) {
+    TOK_COLOR_TEXT_SECONDARY = cfgHighContrast ? TOK_LIGHT_GRAY_TEXT_2_HC : TOK_LIGHT_GRAY_TEXT_2;
+    TOK_COLOR_FILL_TRACK = cfgHighContrast ? TOK_LIGHT_GRAY_TRACK_HC : TOK_LIGHT_GRAY_PRESSED;
+  } else {
+    TOK_COLOR_TEXT_SECONDARY = cfgHighContrast ? TOK_GRAY_5_HC : TOK_GRAY_5;
+    TOK_COLOR_FILL_TRACK = cfgHighContrast ? TOK_GRAY_4 : TOK_GRAY_3;
+  }
   TOK_CARD_OUTLINE = cfgHighContrast;
+}
+
+// Dark / Light theme (design.md 4.6): assigns every theme role of tokens.h from
+// the active palette. Colours are read at draw time, so the next render()
+// shows the swap; buffers that already hold pixels (nav.cpp's behindFrame /
+// prevFrame) are the caller's to refresh.
+void applyThemeTokens() {
+  if (cfgLightMode) {
+    TOK_COLOR_BG_CANVAS = TOK_LIGHT_GRAY_CANVAS;
+    TOK_COLOR_SURFACE_CARD = TOK_LIGHT_GRAY_CARD;
+    TOK_COLOR_SURFACE_RAISED = TOK_LIGHT_GRAY_RAISED;
+    TOK_COLOR_FILL_PRESSED = TOK_LIGHT_GRAY_PRESSED;
+    TOK_COLOR_SEPARATOR = TOK_LIGHT_GRAY_PRESSED;
+    TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_0;
+    TOK_COLOR_ACCENT = TOK_COLOR_DATA_USAGE = TOK_LIGHT_CORAL;
+    TOK_COLOR_ACCENT_PRESSED = TOK_LIGHT_CORAL_PRESSED;
+    TOK_COLOR_STATUS_SUCCESS = TOK_LIGHT_GREEN;
+    TOK_COLOR_STATUS_WARNING = TOK_LIGHT_AMBER;
+    TOK_COLOR_DATA_PACE = TOK_LIGHT_GREEN;
+    TOK_COLOR_DATA_PACE_WEDGE = TOK_LIGHT_GREEN_WEDGE;
+    TOK_COLOR_DATA_PACE_SHINE_LO = TOK_LIGHT_GREEN_SHINE_LO;
+    TOK_COLOR_DATA_PACE_SHINE_MID = TOK_LIGHT_GREEN_SHINE_MID;
+    TOK_COLOR_DATA_PACE_SHINE_HI = TOK_LIGHT_GREEN_SHINE_HI;
+    TOK_COLOR_CONTENT_SUN = TOK_LIGHT_AMBER;
+    TOK_COLOR_CONTENT_SNOW = TOK_GRAY_4;
+    TOK_COLOR_CONTENT_CLOUD = TOK_LIGHT_GRAY_CLOUD;
+  } else {
+    TOK_COLOR_BG_CANVAS = TOK_GRAY_0;
+    TOK_COLOR_SURFACE_CARD = TOK_GRAY_1;
+    TOK_COLOR_SURFACE_RAISED = TOK_GRAY_2;
+    TOK_COLOR_FILL_PRESSED = TOK_GRAY_3;
+    TOK_COLOR_SEPARATOR = TOK_GRAY_3;
+    TOK_COLOR_TEXT_PRIMARY = TOK_GRAY_6;
+    TOK_COLOR_ACCENT = TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
+    TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
+    TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
+    TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
+    TOK_COLOR_DATA_PACE = TOK_GREEN_500;
+    TOK_COLOR_DATA_PACE_WEDGE = TOK_GREEN_WEDGE;
+    TOK_COLOR_DATA_PACE_SHINE_LO = TOK_GREEN_SHINE_LO;
+    TOK_COLOR_DATA_PACE_SHINE_MID = TOK_GREEN_SHINE_MID;
+    TOK_COLOR_DATA_PACE_SHINE_HI = TOK_GREEN_SHINE_HI;
+    TOK_COLOR_CONTENT_SUN = TOK_SUN_500;
+    TOK_COLOR_CONTENT_SNOW = TOK_GRAY_6;
+    TOK_COLOR_CONTENT_CLOUD = TOK_GRAY_5;
+  }
+  applyContrast();
 }
 
 static int getCurrentBrightness() { return cfgBrightness; }
@@ -135,9 +217,9 @@ static void applyPixelShift(int v) {
 // Boot page: which page currentPage starts on next boot, in carousel order.
 // Auto (BOOT_PAGE_AUTO) resumes cfgLastPage. Device Stats isn't here -- it's
 // a sheet, not a page.
-static const int PAGE_VALUES[8] = {BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5, 6};
-static const char* const PAGE_LABELS[8] = {
-  "Auto", "Status", "Projects", "Limits", "Cats", "Movies", "Status + cats", "Note"
+static const int PAGE_VALUES[7] = {BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5};
+static const char* const PAGE_LABELS[7] = {
+  "Auto", "Status", "Usage", "Cats", "Movies", "Status + cats", "Note"
 };
 static int getCurrentBootPage() { return cfgBootPage; }
 static void applyBootPage(int v) {
@@ -181,6 +263,19 @@ static void applyRotation(int v) {
   queueConfigSave(CFGKEY_ROTATION, v);
 }
 
+// Theme: 0 = Dark, 1 = Light (NVS "light_mode"). The swap is a token
+// reassignment; behindFrame is recomposed so a sheet drag doesn't reveal the
+// old theme (nav.cpp). The settings screen itself redraws right after apply().
+static const int THEME_VALUES[2] = {0, 1};
+static const char* const THEME_LABELS[2] = {"Dark", "Light"};
+static int getCurrentTheme() { return cfgLightMode ? 1 : 0; }
+static void applyTheme(int v) {
+  cfgLightMode = (v != 0);
+  applyThemeTokens();
+  navRefreshBehind();
+  queueConfigSave(CFGKEY_LIGHT_MODE, v);
+}
+
 // Toggle rows: getCurrent() is 0/1, apply() gets the new state.
 static const int ONOFF_VALUES[2] = {0, 1};
 static const char* const ONOFF_LABELS[2] = {"Off", "On"};
@@ -200,6 +295,55 @@ static int getCurrentShowAqi() { return cfgShowAqi ? 1 : 0; }
 static void applyShowAqi(int v) { cfgShowAqi = (v != 0); queueConfigSave(CFGKEY_SHOW_AQI, v); }
 static int getCurrentHourlyFlash() { return cfgHourlyFlash ? 1 : 0; }
 static void applyHourlyFlash(int v) { cfgHourlyFlash = (v != 0); queueConfigSave(CFGKEY_HOURLY_FLASH, v); }
+// ── SOUND SECTION (design.md 13.3) ─────────────────────────
+// Two volumes, each 0 (Off) .. SOUND_VOL_MAX, sharing one grid of two rows of
+// four: Tap volume (the tock) and Alert volume (chime, Claude ding, alerts).
+static const int VOLUME_VALUES[SOUND_VOL_MAX + 1] = {0, 1, 2, 3, 4, 5, 6, 7};
+static const char* const VOLUME_LABELS[SOUND_VOL_MAX + 1] = {"Off", "1", "2", "3", "4", "5", "6", "7"};
+static int getCurrentTapVol() { return cfgTapVol; }
+static void applyTapVol(int v) {
+  cfgTapVol = constrain(v, SOUND_VOL_OFF, SOUND_VOL_MAX);
+  // No preview call: commitTap() queues a tock after this returns, and the
+  // audio task reads the gain per chunk, so that tock plays at the new level.
+  queueConfigSave(CFGKEY_TAP_VOL, cfgTapVol);
+}
+static int getCurrentAlertVol() { return cfgAlertVol; }
+static void applyAlertVol(int v) {
+  cfgAlertVol = constrain(v, SOUND_VOL_OFF, SOUND_VOL_MAX);
+  queueConfigSave(CFGKEY_ALERT_VOL, cfgAlertVol);
+  // The tap's own tock follows at the tap volume, but it can't cut this
+  // (alerts outrank the tock), so the picked level is what the user hears.
+  audioTest(SND_DONE);
+}
+// Parent row text: "Tap 2, Alert 4", or "Off" when both are silent.
+static const char* soundSummary() {
+  static char buf[24];
+  if (cfgTapVol == SOUND_VOL_OFF && cfgAlertVol == SOUND_VOL_OFF) return "Off";
+  snprintf(buf, sizeof(buf), "Tap %s, Alert %s", VOLUME_LABELS[cfgTapVol], VOLUME_LABELS[cfgAlertVol]);
+  return buf;
+}
+
+// Test sound: each tap plays the next of the five sounds, bypassing the
+// category switches and mute rules; the row's trailing text names what plays
+// next. Not persisted.
+static int testSoundNext = 0;
+static const int TEST_VALUES[SND_COUNT] = {SND_TOCK, SND_DONE, SND_ATTN, SND_ALERT, SND_HOURLY};
+static const char* const TEST_LABELS[SND_COUNT] = {"Tap", "Done", "Attention", "Alert", "Chime"};
+static int getCurrentTestSound() { return testSoundNext; }
+static void applyTestSound(int v) {
+  audioTest((SoundId)v);
+  testSoundNext = (v + 1) % SND_COUNT;
+}
+
+// One get/apply pair per persisted On/Off switch.
+#define BOOL_SETTING(Name, var, KEY)                                       \
+  static int getCurrent##Name() { return var ? 1 : 0; }                    \
+  static void apply##Name(int v) { var = (v != 0); queueConfigSave(KEY, v); }
+BOOL_SETTING(HourlyChime, cfgHourlyChime, CFGKEY_HOURLY_CHIME)
+BOOL_SETTING(ClaudeDing, cfgClaudeDing, CFGKEY_CLAUDE_DING)
+BOOL_SETTING(SoundAlerts, cfgSoundAlerts, CFGKEY_SOUND_ALERTS)
+BOOL_SETTING(MuteSleep, cfgMuteSleep, CFGKEY_MUTE_SLEEP)
+BOOL_SETTING(MuteNight, cfgMuteNight, CFGKEY_MUTE_NIGHT)
 static int getCurrentShowProgress() { return cfgShowProgress ? 1 : 0; }
 static void applyShowProgress(int v) { cfgShowProgress = (v != 0); queueConfigSave(CFGKEY_SHOW_PROGRESS, v); }
 static int getCurrentReduceMotion() { return cfgReduceMotion ? 1 : 0; }
@@ -211,6 +355,27 @@ static void applyHighContrast(int v) {
   queueConfigSave(CFGKEY_HIGH_CONTRAST, v);
 }
 
+// Settings > Sound. Volume first, then what plays, then when it is muted.
+static const SettingDef SOUND_ROWS[] = {
+  { "Tap volume", "Volume of the tap tock", "1 is faint, 7 is loud. Off silences taps", ROW_NAV, 4, 8,
+    VOLUME_VALUES, VOLUME_LABELS, getCurrentTapVol, applyTapVol, nullptr },
+  { "Alert volume", "Volume of the chime, Claude ding and alerts", "1 is faint, 7 is loud. Off silences them", ROW_NAV, 4, 8,
+    VOLUME_VALUES, VOLUME_LABELS, getCurrentAlertVol, applyAlertVol, nullptr },
+  { "Play test sound", "", "", ROW_BUTTON, 5, SND_COUNT,
+    TEST_VALUES, TEST_LABELS, getCurrentTestSound, applyTestSound, nullptr },
+  { "Hourly chime", "", "", ROW_TOGGLE, 2, 2,
+    ONOFF_VALUES, ONOFF_LABELS, getCurrentHourlyChime, applyHourlyChime, nullptr },
+  { "Claude ding", "", "", ROW_TOGGLE, 2, 2,
+    ONOFF_VALUES, ONOFF_LABELS, getCurrentClaudeDing, applyClaudeDing, nullptr },
+  { "Alerts", "", "", ROW_TOGGLE, 2, 2,
+    ONOFF_VALUES, ONOFF_LABELS, getCurrentSoundAlerts, applySoundAlerts, nullptr },
+  { "Mute when asleep", "", "", ROW_TOGGLE, 2, 2,
+    ONOFF_VALUES, ONOFF_LABELS, getCurrentMuteSleep, applyMuteSleep, nullptr },
+  { "Mute at night", "", "", ROW_TOGGLE, 2, 2,
+    ONOFF_VALUES, ONOFF_LABELS, getCurrentMuteNight, applyMuteNight, nullptr },
+};
+static const int SOUND_ROW_COUNT = sizeof(SOUND_ROWS) / sizeof(SOUND_ROWS[0]);
+
 // Ordered by frequency of use (design.md 13.3): display, then content, then
 // system, then accessibility, and the destructive actions last.
 static const SettingDef SETTINGS[] = {
@@ -220,7 +385,9 @@ static const SettingDef SETTINGS[] = {
     ONOFF_VALUES, ONOFF_LABELS, getCurrentNightMode, applyNightMode, nullptr },
   { "Rotation", "For upside-down mounting", "", ROW_NAV, 2, 2,
     ROTATION_VALUES, ROTATION_LABELS, getCurrentRotation, applyRotation, nullptr },
-  { "Boot page", "Page shown after a restart", "Auto resumes the last page shown", ROW_NAV, 4, 8,
+  { "Theme", "Dark or light appearance", "", ROW_NAV, 2, 2,
+    THEME_VALUES, THEME_LABELS, getCurrentTheme, applyTheme, nullptr },
+  { "Boot page", "Page shown after a restart", "Auto resumes the last page shown", ROW_NAV, 4, 7,
     PAGE_VALUES, PAGE_LABELS, getCurrentBootPage, applyBootPage, nullptr },
   { "Cat shuffle", "How long each cat plays", "Off plays each cat to its end; Fixed keeps one", ROW_NAV, 5, 5,
     CAT_SHUFFLE_VALUES, CAT_SHUFFLE_LABELS, getCurrentCatShuffle, applyCatShuffle, nullptr },
@@ -230,6 +397,8 @@ static const SettingDef SETTINGS[] = {
     ONOFF_VALUES, ONOFF_LABELS, getCurrentShowAqi, applyShowAqi, nullptr },
   { "Hourly signal", "", "", ROW_TOGGLE, 2, 2,
     ONOFF_VALUES, ONOFF_LABELS, getCurrentHourlyFlash, applyHourlyFlash, nullptr },
+  { "Sound", "", "", ROW_SECTION, 0, 0,
+    nullptr, nullptr, nullptr, nullptr, nullptr, SOUND_ROWS, SOUND_ROW_COUNT, soundSummary },
   { "Poll progress", "", "", ROW_TOGGLE, 2, 2,
     ONOFF_VALUES, ONOFF_LABELS, getCurrentShowProgress, applyShowProgress, nullptr },
   { "Poll interval", "How often to fetch /api/usage", "", ROW_NAV, 5, 5,
@@ -249,6 +418,37 @@ static const SettingDef SETTINGS[] = {
 };
 static const int SETTINGS_COUNT = sizeof(SETTINGS) / sizeof(SETTINGS[0]);
 
+// The rows the SET_LIST / SET_LEAF screens currently index into: the main list,
+// or the open section's children. settingsLeafIndex and every row index are
+// relative to this.
+int settingsSection = -1;      // -1 = main list, else the SETTINGS row whose children are shown
+static int mainScroll = 0;     // the main list's offset while a section is open
+static int leftSection = -1, leftScroll = 0;  // what a swipe-back left, to undo it
+static const SettingDef* rows() { return settingsSection < 0 ? SETTINGS : SETTINGS[settingsSection].children; }
+static int rowCount() { return settingsSection < 0 ? SETTINGS_COUNT : SETTINGS[settingsSection].childCount; }
+
+// Open the section picked by settingsListActivate() (settingsLeafIndex).
+void settingsEnterSection() {
+  mainScroll = settingsScrollOffset;
+  settingsSection = settingsLeafIndex;
+  settingsScrollOffset = 0;
+  confirmArmedRow = -1;
+}
+// Back to the main list, scroll position restored.
+void settingsLeaveSection() {
+  leftSection = settingsSection;
+  leftScroll = settingsScrollOffset;
+  settingsSection = -1;
+  settingsScrollOffset = mainScroll;
+  confirmArmedRow = -1;
+}
+// A swipe back that was let go short: put the section back as it was.
+void settingsUndoLeaveSection() {
+  mainScroll = settingsScrollOffset;
+  settingsSection = leftSection;
+  settingsScrollOffset = leftScroll;
+}
+
 // ── LIST GEOMETRY (design.md 11.7 / 11.14) ─────────────────
 // Viewport y 44..319 under the modal header; the first row rests at y 52.
 static const int LIST_X = TOK_LAYOUT_CONTENT_X0, LIST_W = TOK_LAYOUT_CONTENT_W;
@@ -258,7 +458,7 @@ static const int LIST_STEP = TOK_LIST_ROW_H + TOK_SPACE_LIST_GAP;   // 64
 static const int LIST_TRAIL_R = LIST_X + LIST_W - TOK_LIST_ROW_INSET;  // 456 (exclusive right of the trailing element)
 
 int settingsScrollMax() {
-  int contentBottom = LIST_ROW0_Y + SETTINGS_COUNT * LIST_STEP;  // last row + the bottom margin
+  int contentBottom = LIST_ROW0_Y + rowCount() * LIST_STEP;  // last row + the bottom margin
   return max(0, contentBottom - SCREEN_H);
 }
 
@@ -305,17 +505,31 @@ static void shadeRows(int y0, int y1) {
 static void drawSettingsList() {
   g->fillScreen(TOK_COLOR_BG_CANVAS);
   g->setClipRect(0, LIST_VIEW_Y0, SCREEN_W, SCREEN_H - LIST_VIEW_Y0);
-  for (int idx = 0; idx < SETTINGS_COUNT; idx++) {
-    const SettingDef& d = SETTINGS[idx];
+  for (int idx = 0; idx < rowCount(); idx++) {
+    const SettingDef& d = rows()[idx];
     int y = rowY(idx);
     if (y + TOK_LIST_ROW_H < LIST_VIEW_Y0 || y >= SCREEN_H) continue;
     bool pressed = (pressedId == PRESS_ROW && pressedIndex == idx);
     drawCardSurface(LIST_X, y, LIST_W, TOK_LIST_ROW_H, pressed ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD);
     int cy = y + TOK_LIST_ROW_H / 2;
     drawText(TOK_TYPE_HEADLINE, LIST_X + TOK_LIST_ROW_INSET, cy - fontLineH(TOK_TYPE_HEADLINE) / 2, d.label,
-             d.kind == ROW_ACTION ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_TEXT_PRIMARY);
+             d.kind == ROW_ACTION ? TOK_COLOR_STATUS_ERROR
+             : d.kind == ROW_BUTTON ? TOK_COLOR_ACCENT : TOK_COLOR_TEXT_PRIMARY);
     if (d.kind == ROW_TOGGLE) {
       drawTogglePill(LIST_TRAIL_R, cy, d.getCurrent() != 0);
+    } else if (d.kind == ROW_BUTTON) {
+      // Play glyph (accent) with the sound that plays next beside it: colour
+      // is never the only cue, the label and the glyph say "play".
+      const int gx = LIST_TRAIL_R - 8;
+      g->fillTriangle(gx - 5, cy - 7, gx - 5, cy + 7, gx + 6, cy, TOK_COLOR_ACCENT);
+      drawTextR(TOK_TYPE_BODY, gx - 5 - TOK_SPACE_MD, cy - fontLineH(TOK_TYPE_BODY) / 2,
+                currentValueText(d), TOK_COLOR_TEXT_SECONDARY);
+    } else if (d.kind == ROW_SECTION) {
+      int chevCx = LIST_TRAIL_R - 4;
+      drawChevron(chevCx, cy, TOK_COLOR_TEXT_TERTIARY);
+      if (d.summary)
+        drawTextR(TOK_TYPE_BODY, chevCx - 2 - TOK_SPACE_SM, cy - fontLineH(TOK_TYPE_BODY) / 2,
+                  String(d.summary()), TOK_COLOR_TEXT_SECONDARY);
     } else {
       int chevCx = LIST_TRAIL_R - 4;
       drawChevron(chevCx, cy, TOK_COLOR_TEXT_TERTIARY);
@@ -331,13 +545,14 @@ static void drawSettingsList() {
   int maxS = settingsScrollMax();
   if (maxS > 0) {
     const int trackY = LIST_ROW0_Y, trackH = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - LIST_ROW0_Y;
-    const int contentH = SETTINGS_COUNT * LIST_STEP;
+    const int contentH = rowCount() * LIST_STEP;
     int thumbH = max(24, trackH * trackH / contentH);
     int off = constrain(settingsScrollOffset, 0, maxS);
     int thumbY = trackY + (trackH - thumbH) * off / maxS;
     aaFillRoundRect(LIST_X + LIST_W - 6, thumbY, 4, thumbH, 2, TOK_COLOR_TEXT_TERTIARY);
   }
-  drawModalHeader(false, "Settings", pressedId == PRESS_CLOSE);
+  drawModalHeader(settingsSection >= 0, settingsSection < 0 ? "Settings" : SETTINGS[settingsSection].label,
+                  pressedId == PRESS_CLOSE);
 }
 
 // ── DETAIL GEOMETRY (design.md 11.15 / 11.8) ───────────────
@@ -377,7 +592,7 @@ static void drawToast() {
 }
 
 static void drawSettingsLeaf() {
-  const SettingDef& d = SETTINGS[settingsLeafIndex];
+  const SettingDef& d = rows()[settingsLeafIndex];
   g->fillScreen(TOK_COLOR_BG_CANVAS);
   drawModalHeader(true, d.label, pressedId == PRESS_CLOSE);
   if (d.subtitle[0])
@@ -428,28 +643,32 @@ void renderSettings() {
 // ── HIT TESTING / COMMIT ───────────────────────────────────
 int settingsListHit(int32_t x, int32_t y) {
   if (y < LIST_VIEW_Y0 || x < LIST_X || x >= LIST_X + LIST_W) return -1;
-  for (int idx = 0; idx < SETTINGS_COUNT; idx++) {
+  for (int idx = 0; idx < rowCount(); idx++) {
     int ry = rowY(idx);
     if (y >= ry && y < ry + TOK_LIST_ROW_H) return idx;
   }
   return -1;
 }
 
-bool settingsListActivate(int idx) {
-  if (idx < 0 || idx >= SETTINGS_COUNT) return false;
-  const SettingDef& d = SETTINGS[idx];
+SettingsGo settingsListActivate(int idx) {
+  if (idx < 0 || idx >= rowCount()) return SG_NONE;
+  const SettingDef& d = rows()[idx];
   if (d.kind == ROW_TOGGLE) {
     d.apply(d.getCurrent() ? 0 : 1);  // flips in place on the commit present
-    return false;
+    return SG_NONE;
+  }
+  if (d.kind == ROW_BUTTON) {
+    d.apply(d.getCurrent());          // runs in place; the row names the next sound
+    return SG_NONE;
   }
   settingsLeafIndex = idx;
   confirmArmedRow = -1;
-  return true;
+  return d.kind == ROW_SECTION ? SG_SECTION : SG_LEAF;
 }
 
 int settingsLeafHit(int32_t x, int32_t y) {
   if (settingsLeafIndex < 0) return -1;
-  const SettingDef& d = SETTINGS[settingsLeafIndex];
+  const SettingDef& d = rows()[settingsLeafIndex];
   for (int i = 0; i < d.count; i++) {
     int cx, cy, w, h;
     cellRect(d, i, cx, cy, w, h);
@@ -461,7 +680,7 @@ int settingsLeafHit(int32_t x, int32_t y) {
 // Commit on up: option cells apply immediately and persist silently; the
 // arm button needs two taps within touch.armWindow (the only confirmation).
 void settingsLeafActivate(int i, uint32_t now) {
-  const SettingDef& d = SETTINGS[settingsLeafIndex];
+  const SettingDef& d = rows()[settingsLeafIndex];
   if (d.kind == ROW_ACTION) {
     if (armedNow(now)) {
       confirmArmedRow = -1;

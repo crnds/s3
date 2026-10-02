@@ -18,6 +18,7 @@
 #include <ArduinoJson.h>
 #include <SD_MMC.h>
 #include <AnimatedGIF.h>
+#include "audio.h"
 #include <esp_system.h>
 #include <esp_heap_caps.h>
 #include <time.h>
@@ -83,19 +84,21 @@ extern volatile uint32_t POLL_INTERVAL_MS;
 // ── SHARED CONSTANTS ───────────────────────────────────────
 // Internal linkage per TU (C++ global `const` default) — safe to define
 // identically in every file that includes this header; no ODR issue.
-const int PAGE_COUNT = 7;
+const int PAGE_COUNT = 6;
 // cfgBootPage sentinel: resume whichever page was on screen before the last
 // restart (cfgLastPage), rather than a fixed page. See the Boot Page setting.
 const int BOOT_PAGE_AUTO = -1;
-const int GIF_PAGE = 3;    // 4th page (0-indexed): random cat GIFs from /cats/ on SD
-const int MOVIE_PAGE = 4;  // 5th page: random movies from /movies/ on SD (see movie_player.cpp)
-const int MIXED_PAGE = 5;  // 6th page: status + cats split
-// 7th page: the same left column as MIXED_PAGE, but the right half shows the
+// Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
+// 3 Movies, 4 Status + cats, 5 Note.
+const int GIF_PAGE = 2;    // 3rd page: random cat GIFs from /cats/ on SD
+const int MOVIE_PAGE = 3;  // 4th page: random movies from /movies/ on SD (see movie_player.cpp)
+const int MIXED_PAGE = 4;  // 5th page: status + cats split
+// 6th page: the same left column as MIXED_PAGE, but the right half shows the
 // note text from note.html instead of cats. Unlike GIF_PAGE/MOVIE_PAGE/
 // MIXED_PAGE this is an ordinary render() page (a `case` in its switch) —
 // nothing here needs the per-frame decode loop or the partial-push path
 // those three require.
-const int NOTE_PAGE = 6;
+const int NOTE_PAGE = 5;
 // Note buffer. The server caps its copy at 480 chars (NOTE_MAX_CHARS); 512
 // leaves room for the NUL. The S3 pane (37 cols x 14 rows at size 1) could
 // show slightly more than that, but the server cap, not the pane, is the
@@ -373,6 +376,17 @@ extern int cfgScreenRotation;
 // cards (applyContrast() in settings.cpp).
 extern bool cfgReduceMotion;
 extern bool cfgHighContrast;
+// Dark / Light theme ("light_mode" NVS key): false = Dark. Applied to the
+// runtime colour tokens by applyThemeTokens() (settings.cpp).
+extern bool cfgLightMode;
+// Speaker (audio.h), all under Settings > Sound. cfgTapVol ("tap_level") is the
+// tap tock's volume, cfgAlertVol ("sound_level") the chime / Claude ding /
+// alerts' -- each 0 (Off) to SOUND_VOL_MAX. The bools are per-category switches
+// and the two mute rules, all default on ("hourly_chime", "claude_ding",
+// "sound_alerts", "mute_sleep", "mute_night").
+extern int cfgTapVol, cfgAlertVol;
+extern bool cfgHourlyChime, cfgClaudeDing, cfgSoundAlerts;
+extern bool cfgMuteSleep, cfgMuteNight;
 
 // Generic Settings-page persistence queue: a leaf's apply() (loop(), core 1)
 // mutates its live global directly, then queues the flash key/value here;
@@ -397,11 +411,18 @@ enum ConfigKeyId {
   CFGKEY_CAT_SHUFFLE, CFGKEY_NIGHT_MODE, CFGKEY_ROTATION, CFGKEY_SHOW_COUNTDOWN,
   CFGKEY_BATTERY_SAVE, CFGKEY_SHOW_AQI, CFGKEY_HOURLY_FLASH, CFGKEY_SHOW_PROGRESS,
   CFGKEY_LAST_PAGE, CFGKEY_REDUCE_MOTION, CFGKEY_HIGH_CONTRAST,
+  CFGKEY_LIGHT_MODE, CFGKEY_ALERT_VOL, CFGKEY_TAP_VOL, CFGKEY_HOURLY_CHIME,
+  CFGKEY_CLAUDE_DING, CFGKEY_SOUND_ALERTS, CFGKEY_MUTE_SLEEP, CFGKEY_MUTE_NIGHT,
   CFGKEY_COUNT
 };
 extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
 
 // ── FORMATTING (format.cpp) ────────────────────────────────
+// Non-blocking "is the wall clock set?" + local broken-down time. Use this, never
+// getLocalTime(&ti, 0): with ms == 0 the core's loop is `while (millis() - start
+// <= 0)`, so a 1 ms tick between its two millis() reads makes it return false
+// without ever reading the clock (~0.2% of calls; blanked the clock/calendar cards).
+bool haveLocalTime(struct tm* ti);
 String fmtTokens(int64_t t);
 String fmtCost(float c);
 String fmtBtc(double p);
@@ -556,10 +577,22 @@ void queueConfigSave(uint8_t keyId, int32_t value);
 void applyEffectiveBrightness(uint32_t fadeMs = 0);
 void applyEffectivePoll();
 void applyContrast();
+void applyThemeTokens();
+// Reads only the theme key from NVS so the very first frame is painted in the
+// right theme (setup(), before loadRuntimeConfig()).
+void loadThemeEarly();
 int settingsListHit(int32_t x, int32_t y);        // row index, or -1
-// Tap on a list row (commit on up): toggles flip in place and return false;
-// navigation/action rows set settingsLeafIndex and return true (push it).
-bool settingsListActivate(int idx);
+// Tap on a list row (commit on up): toggles and buttons act in place and
+// return SG_NONE; navigation/action rows set settingsLeafIndex and return
+// SG_LEAF (push the detail); a section row returns SG_SECTION (push the child
+// list: nav.cpp snapshots the screen, then calls settingsEnterSection()).
+enum SettingsGo { SG_NONE, SG_LEAF, SG_SECTION };
+SettingsGo settingsListActivate(int idx);
+// -1 = the main list; else the SETTINGS row whose children the list shows.
+extern int settingsSection;
+void settingsEnterSection();
+void settingsLeaveSection();
+void settingsUndoLeaveSection();
 int settingsLeafHit(int32_t x, int32_t y);        // option cell / arm button, or -1
 void settingsLeafActivate(int idx, uint32_t now);
 int settingsScrollMax();
@@ -585,6 +618,7 @@ bool navTransitionActive();       // a composite (slide / sheet / fade) is on sc
 bool navSheetOpen();              // Weather, Device Stats or Settings is up
 void navGoToPage(int page, bool forward);   // serial keys; animated unless offline
 void navOpenSheet(int which);     // 0 weather, 1 device, 2 settings
+void navRefreshBehind();          // theme changed under an open sheet: recompose the page behind it
 void navCloseSheet();
 void navFinishTransition();       // snap any running transition to its end
 bool navCatLayout();              // the cat player owns the current page

@@ -21,6 +21,13 @@
 #define S3_TOUCH_INT 3
 #define S3_TOUCH_ADDR 0x3B
 
+// Speaker: NS4168 I2S class-D amp on I2S0, mono, "Speak" JST 1.25 socket. The
+// amp's SD_MD pin is tied high through 1M, so it is always on: there is no
+// mute GPIO, and the I2S channel must never be torn down (it would pop).
+#define S3_I2S_BCLK  42
+#define S3_I2S_LRCLK 2
+#define S3_I2S_DIN   41
+
 // TF card: SD_MMC 1-bit (D3/CS on GPIO10 is only needed in SPI mode).
 #define S3_SD_CLK    12
 #define S3_SD_CMD    11

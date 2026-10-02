@@ -122,8 +122,6 @@ static SettingsScreen savedSettings = SET_OFF;
 bool navTransitionActive() { return tKind != T_NONE; }
 bool navSheetOpen() { return weatherPageOpen || devicePageOpen || settingsScreen != SET_OFF; }
 
-static const uint16_t BG = TOK_COLOR_BG_CANVAS;
-
 static int sheetScrimLevel(int vis) {
   if (cfgReduceMotion) return 0;
   return vis < SCREEN_H / 3 ? 0 : vis < 2 * SCREEN_H / 3 ? 1 : 2;  // 100 -> 75 -> 50%
@@ -136,18 +134,18 @@ static void presentComposite() {
       // The status strip (design.md 7) is pinned so it never slides with the
       // carousel, except into/out of GIF_PAGE/MOVIE_PAGE, which have no strip
       // -- their full-screen media frame really does occupy that band.
-      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, BG,
+      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, TOK_COLOR_BG_CANVAS,
                           tPinStrip ? TOK_LAYOUT_STRIP_Y0 : SCREEN_H);
       break;
     case T_PUSH:
-      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, BG, SCREEN_H);
+      displayPresentSlide(prevFrame, fb(), off, tForward, shiftX, shiftY, TOK_COLOR_BG_CANVAS, SCREEN_H);
       break;
     case T_SHEET:
-      if (!sheetClosing) displayPresentSheet(behindFrame, fb(), off, sheetScrimLevel(off), shiftX, shiftY, BG);
-      else displayPresentSheet(fb(), prevFrame, off, sheetScrimLevel(off), shiftX, shiftY, BG);
+      if (!sheetClosing) displayPresentSheet(behindFrame, fb(), off, sheetScrimLevel(off), shiftX, shiftY, TOK_COLOR_BG_CANVAS);
+      else displayPresentSheet(fb(), prevFrame, off, sheetScrimLevel(off), shiftX, shiftY, TOK_COLOR_BG_CANVAS);
       break;
     case T_FADE:
-      displayPresentFade(fadeFrom, fb(), fadeStep, shiftX, shiftY, BG);
+      displayPresentFade(fadeFrom, fb(), fadeStep, shiftX, shiftY, TOK_COLOR_BG_CANVAS);
       break;
     default:
       return;
@@ -264,6 +262,7 @@ void navOpenSheet(int which) {
   devicePageOpen = (which == 1);
   if (which == 2) {
     settingsScreen = SET_LIST;
+    settingsSection = -1;
     settingsScrollOffset = 0;
   }
   drawSheetInto();
@@ -274,6 +273,29 @@ void navOpenSheet(int which) {
   spring.v = 0;
   springTo(spring, SCREEN_H, TOK_MOTION_SPRING_SHEET_ZETA, TOK_MOTION_SPRING_SHEET_RESPONSE_MS);
   transitionDirty = true;
+}
+
+// Theme change under an open sheet: behindFrame holds the page in the old
+// theme (it shows through the scrim while the sheet is dragged), so compose
+// the page again the way beginSheetDrop() does and swap only that buffer. The
+// sheet's own pixels are parked in prevFrame and put back untouched.
+void navRefreshBehind() {
+  if (!behindFrame || !prevFrame || tKind != T_NONE || !navSheetOpen()) return;
+  memcpy(prevFrame, fb(), FRAME_BYTES);
+  bool w = weatherPageOpen, d = devicePageOpen;
+  SettingsScreen s = settingsScreen;
+  weatherPageOpen = devicePageOpen = false;
+  settingsScreen = SET_OFF;
+  bool held = presentHold;
+  presentHold = true;
+  if (navCatLayout()) gifPlayerRepaint(!STATE.haveData);
+  else render();
+  presentHold = held;
+  memcpy(behindFrame, fb(), FRAME_BYTES);
+  memcpy(fb(), prevFrame, FRAME_BYTES);
+  weatherPageOpen = w;
+  devicePageOpen = d;
+  settingsScreen = s;
 }
 
 // Swap to the dropping configuration: the sheet becomes a snapshot and the
@@ -331,10 +353,16 @@ void navCloseSheet() {
 }
 
 // ── Settings push / pop ──
-static void pushDetail() {
-  if (!ensureBuffers()) { settingsScreen = SET_LEAF; renderSettings(); return; }
+// Push the row just activated: a SET_LEAF detail, or (section) the row's child
+// SET_LIST. Both slide in from the right and pop the same way.
+static void pushDetail(bool section) {
+  if (!ensureBuffers()) {
+    if (section) settingsEnterSection(); else settingsScreen = SET_LEAF;
+    renderSettings();
+    return;
+  }
   memcpy(prevFrame, fb(), FRAME_BYTES);
-  settingsScreen = SET_LEAF;
+  if (section) settingsEnterSection(); else settingsScreen = SET_LEAF;
   drawSheetInto();
   if (cfgReduceMotion) { startFade(prevFrame); return; }
   tKind = T_PUSH;
@@ -345,8 +373,14 @@ static void pushDetail() {
   transitionDirty = true;
 }
 
+// What a pop leaves: a section's list (back to the main list) or a leaf (back
+// to the list it came from, main or section). revertPop() needs to know.
+static bool popFromSection = false;
+
 static void beginPop() {
   memcpy(prevFrame, fb(), FRAME_BYTES);
+  popFromSection = (settingsScreen == SET_LIST);
+  if (popFromSection) settingsLeaveSection();
   settingsScreen = SET_LIST;
   confirmArmedRow = -1;
   drawSheetInto();
@@ -359,7 +393,12 @@ static void beginPop() {
 }
 
 static void popDetail() {
-  if (!ensureBuffers()) { settingsScreen = SET_LIST; renderSettings(); return; }
+  if (!ensureBuffers()) {
+    if (settingsScreen == SET_LIST) settingsLeaveSection();
+    settingsScreen = SET_LIST;
+    renderSettings();
+    return;
+  }
   beginPop();
   if (cfgReduceMotion) { tKind = T_NONE; startFade(prevFrame); return; }
   springTo(spring, SCREEN_W, TOK_MOTION_SPRING_STANDARD_ZETA, TOK_MOTION_SPRING_STANDARD_RESPONSE_MS);
@@ -367,7 +406,8 @@ static void popDetail() {
 
 static void revertPop() {
   memcpy(fb(), prevFrame, FRAME_BYTES);
-  settingsScreen = SET_LEAF;
+  if (popFromSection) settingsUndoLeaveSection();
+  settingsScreen = popFromSection ? SET_LIST : SET_LEAF;
   tKind = T_NONE;
   tHeld = false;
   presentFrame();
@@ -590,7 +630,11 @@ static void onDown(int32_t x, int32_t y, uint32_t now) {
 // axis just cancels the tap.
 static Drag dragFor(bool horizontal, int32_t dx, int32_t dy) {
   if (G.grabbedSheet) return horizontal ? DR_DEAD : DR_SHEET;
-  if (settingsScreen == SET_LIST) return horizontal ? DR_DEAD : DR_LIST;
+  if (settingsScreen == SET_LIST) {
+    if (!horizontal) return DR_LIST;
+    // A section's list swipes back to the main list like a detail does.
+    return (settingsSection >= 0 && dx > 0 && !cfgReduceMotion) ? DR_BACK : DR_DEAD;
+  }
   if (settingsScreen == SET_LEAF) {
     if (cfgReduceMotion) return DR_DEAD;
     if (horizontal) return dx > 0 ? DR_BACK : DR_DEAD;
@@ -783,15 +827,18 @@ static void commitTap(uint32_t now) {
       enterScreenSleep();
       break;
     case TG_CLOSE:
-      if (settingsScreen == SET_LEAF) popDetail();
+      if (settingsScreen == SET_LEAF || (settingsScreen == SET_LIST && settingsSection >= 0)) popDetail();
       else navCloseSheet();
       break;
     case TG_SHEET_ANY:
       navCloseSheet();  // read-only sheets: tap anywhere dismisses
       break;
     case TG_ROW:
-      if (settingsListActivate(idx)) pushDetail();
-      else renderSettings();
+      switch (settingsListActivate(idx)) {
+        case SG_LEAF: pushDetail(false); break;
+        case SG_SECTION: pushDetail(true); break;
+        default: renderSettings(); break;
+      }
       break;
     case TG_CELL:
       settingsLeafActivate(idx, now);
@@ -814,6 +861,12 @@ static void commitTap(uint32_t now) {
     default:
       break;
   }
+  // The tock confirms a *committed* tap (touch-up on a target), never the
+  // touch-down, a cancelled tap or the swallowed wake tap. It comes after the
+  // action so a volume change or switch already applies to it (turning Tap
+  // sound off is silent; Test sound isn't preceded by a stray tock) and the
+  // mute rules see the new sleep state. Non-blocking.
+  if (t != TG_NONE) audioPlay(SND_TOCK);
 }
 
 static void onUp(uint32_t now) {

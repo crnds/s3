@@ -13,10 +13,41 @@
 // after boot and this file's one boot-time load never overlaps that.
 static const char* CFG_NS = "s3cfg";
 
+// Just the theme, before the first frame: painting the boot canvas in the
+// wrong theme would flash it until loadRuntimeConfig() catches up.
+void loadThemeEarly() {
+  Preferences p;
+  p.begin(CFG_NS, true);
+  cfgLightMode = p.isKey(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE]) &&
+                 p.getInt(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE]) != 0;
+  p.end();
+  applyThemeTokens();
+}
+
+// The Projects and Limits pages merged into one Usage page (page 1), so every
+// later page moved down one slot. Saved boot_page / last_page values from
+// before that (0 Status, 1 Projects, 2 Limits, 3 Cats ... 6 Note) are shifted
+// once: 2 and up lose one, so Limits lands on Usage and Cats on 2. The marker
+// key stops it running again; -1 (Auto) and 0..1 are already right.
+static void migratePageIndices() {
+  Preferences p;
+  p.begin(CFG_NS, false);
+  if (!p.isKey("pages_v2")) {
+    const ConfigKeyId keys[2] = {CFGKEY_BOOT_PAGE, CFGKEY_LAST_PAGE};
+    for (ConfigKeyId k : keys) {
+      const char* name = CONFIG_KEY_NAMES[k];
+      if (p.isKey(name) && p.getInt(name) >= 2) p.putInt(name, p.getInt(name) - 1);
+    }
+    p.putUChar("pages_v2", 1);
+  }
+  p.end();
+}
+
 // Optional override for the compiled config.h defaults. A key simply absent
 // from flash (first boot, or never changed since) means "use the compiled
 // default" -- not an error worth surfacing.
 void loadRuntimeConfig() {
+  migratePageIndices();
   Preferences p;
   p.begin(CFG_NS, true);  // read-only
 
@@ -92,8 +123,24 @@ void loadRuntimeConfig() {
   if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_HIGH_CONTRAST])) {
     cfgHighContrast = p.getInt(CONFIG_KEY_NAMES[CFGKEY_HIGH_CONTRAST]) != 0;
   }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE])) {
+    cfgLightMode = p.getInt(CONFIG_KEY_NAMES[CFGKEY_LIGHT_MODE]) != 0;
+  }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_ALERT_VOL])) {
+    cfgAlertVol = constrain(p.getInt(CONFIG_KEY_NAMES[CFGKEY_ALERT_VOL]), SOUND_VOL_OFF, SOUND_VOL_MAX);
+  }
+  if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_TAP_VOL])) {
+    cfgTapVol = constrain(p.getInt(CONFIG_KEY_NAMES[CFGKEY_TAP_VOL]), SOUND_VOL_OFF, SOUND_VOL_MAX);
+  }
+  const struct { int key; bool* var; } soundSwitches[] = {
+    {CFGKEY_HOURLY_CHIME, &cfgHourlyChime}, {CFGKEY_CLAUDE_DING, &cfgClaudeDing},
+    {CFGKEY_SOUND_ALERTS, &cfgSoundAlerts}, {CFGKEY_MUTE_SLEEP, &cfgMuteSleep},
+    {CFGKEY_MUTE_NIGHT, &cfgMuteNight},
+  };
+  for (const auto& sw : soundSwitches)
+    if (p.isKey(CONFIG_KEY_NAMES[sw.key])) *sw.var = p.getInt(CONFIG_KEY_NAMES[sw.key]) != 0;
   p.end();
-  applyContrast();
+  applyThemeTokens();  // includes applyContrast()
 
   // Apply after all related keys are loaded so Battery Save can floor the
   // poll interval against the user's poll_interval_sec preference. AUTO
@@ -137,7 +184,7 @@ void logDiag(const char* event) {
 
   struct tm timeinfo;
   char tsBuf[24];
-  if (getLocalTime(&timeinfo, 0)) {
+  if (haveLocalTime(&timeinfo)) {
     snprintf(tsBuf, sizeof(tsBuf), "%04d-%02d-%02d %02d:%02d:%02d",
               timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
               timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);

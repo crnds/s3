@@ -84,7 +84,15 @@ bool cfgShowAqi = true;        // default on; flash "show_aqi"
 bool cfgHourlyFlash = true;    // default on; flash "hourly_flash"
 bool cfgShowProgress = true;   // default on; flash "show_progress"
 bool cfgReduceMotion = false;  // default off; flash "reduce_motion"
+bool cfgLightMode = false;    // default Dark; flash "light_mode"
 bool cfgHighContrast = false;  // default off; flash "high_contrast"
+int cfgTapVol = TAP_VOL_DEFAULT;      // 0..SOUND_VOL_MAX; flash "tap_level"
+int cfgAlertVol = ALERT_VOL_DEFAULT;  // 0..SOUND_VOL_MAX; flash "sound_level"
+bool cfgHourlyChime = true;    // default on; flash "hourly_chime"
+bool cfgClaudeDing = true;     // default on; flash "claude_ding"
+bool cfgSoundAlerts = true;    // default on; flash "sound_alerts"
+bool cfgMuteSleep = true;      // default on; flash "mute_sleep"
+bool cfgMuteNight = true;      // default on; flash "mute_night"
 bool nightDimActive = false;
 // Generic Settings-page persistence queue, drained by networkTask (core 0)
 // so the flash write never happens on the render core.
@@ -278,8 +286,16 @@ static void serialCommand(char c) {
   switch (c) {
     case 'h':
       hourlyTestStartMs = millis() | 1;  // never 0, which means "not running"
+      audioPlay(SND_HOURLY);
       Serial.println("[hourly] test signal");
       break;
+    case 'k': {  // play every sound in turn (still subject to Off / sleep / night gating)
+      static uint8_t nextSound = 0;
+      Serial.printf("[audio] sound %u\n", nextSound);
+      audioPlay((SoundId)nextSound);
+      nextSound = (nextSound + 1) % SND_COUNT;
+      break;
+    }
     case 'n': case 'p':
       closeSheetNow();
       navGoToPage(c == 'n' ? (currentPage + 1) % PAGE_COUNT : (currentPage - 1 + PAGE_COUNT) % PAGE_COUNT, c == 'n');
@@ -336,6 +352,7 @@ void setup() {
     delay(2000);
     ESP.restart();
   }
+  loadThemeEarly();  // NVS only: the first frame must already be in the saved theme
   frame.fillScreen(TOK_COLOR_BG_CANVAS);
   presentFrame();
   // Backlight only after a real frame is on the panel (never light raw GRAM).
@@ -350,6 +367,7 @@ void setup() {
 
   // Settings/config load from internal flash (NVS) -- unconditional, no SD needed.
   loadRuntimeConfig();
+  audioInit();  // after the saved volume loads; the I2S channel then runs for good
   displaySetFlipped(cfgScreenRotation == 3);
   // AUTO resumes wherever the swipe cycle was before the last restart.
   currentPage = (cfgBootPage == BOOT_PAGE_AUTO) ? cfgLastPage : cfgBootPage;
@@ -362,9 +380,9 @@ void setup() {
   } else {
     Serial.println("[sd] card not found or failed to mount");
   }
+  Serial.printf("[cats] %d GIF(s) embedded in firmware\n", EMBEDDED_CAT_COUNT);
   logDiag((String("boot reason=") + resetReasonStr()).c_str());
 
-  Serial.printf("[cats] %d GIF(s) embedded in firmware\n", EMBEDDED_CAT_COUNT);
   // First-boot config portal: only when no WiFi SSID has ever been configured
   // (WIFI_SSID blank in config.h and none saved to flash).
   if (cfgWifiSsid.length() == 0) {
@@ -433,7 +451,7 @@ void loop() {
     if (now - lastNightCheckMs >= 1000) {
       lastNightCheckMs = now;
       struct tm ti;
-      if (getLocalTime(&ti, 0)) {
+      if (haveLocalTime(&ti)) {
         bool inWindow = (ti.tm_hour >= 23 || ti.tm_hour < 7);
         if (inWindow != nightDimActive) {
           nightDimActive = inWindow;
@@ -450,10 +468,16 @@ void loop() {
   {
     bool invertNow = false;
     time_t t = time(nullptr);
-    if (cfgHourlyFlash && t > 1700000000) {
+    if (t > 1700000000) {
       struct tm ti;
       localtime_r(&t, &ti);
-      invertNow = ti.tm_min == 0 && ti.tm_sec < 6 && ti.tm_sec % 2 == 0;
+      if (cfgHourlyFlash) invertNow = ti.tm_min == 0 && ti.tm_sec < 6 && ti.tm_sec % 2 == 0;
+      // The chime rings once at hh:00:00 (Settings > Sound > Hourly chime).
+      static int lastChimeHour = -1;
+      if (ti.tm_min == 0 && ti.tm_sec < 3 && ti.tm_hour != lastChimeHour) {
+        lastChimeHour = ti.tm_hour;
+        audioPlay(SND_HOURLY);
+      }
     }
     if (hourlyTestStartMs) {
       uint32_t el = now - hourlyTestStartMs;

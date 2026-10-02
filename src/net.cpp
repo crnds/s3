@@ -214,7 +214,7 @@ static bool applyUsageDoc(const JsonDocument& doc, bool fromNetwork) {
   // and keeps applying regardless of how time-of-day got set. Skipped once
   // getLocalTime() succeeds so a working NTP sync is never fought/overridden.
   struct tm haveTimeCheck;
-  if (!getLocalTime(&haveTimeCheck, 0)) {
+  if (!haveLocalTime(&haveTimeCheck)) {
     long epoch = doc["epoch"] | 0L;
     if (epoch > 0) {
       struct timeval tv = { (time_t)epoch, 0 };
@@ -446,7 +446,7 @@ static void appendArchiveRow(const JsonDocument& doc) {
 
   struct tm timeinfo;
   char tsBuf[24];
-  if (!getLocalTime(&timeinfo, 0)) return;  // no wall-clock yet — skip, don't write a bogus ts
+  if (!haveLocalTime(&timeinfo)) return;  // no wall-clock yet — skip, don't write a bogus ts
   snprintf(tsBuf, sizeof(tsBuf), "%04d-%02d-%02d %02d:%02d:%02d",
            timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
            timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
