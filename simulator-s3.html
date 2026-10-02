@@ -316,6 +316,7 @@ let TOK_COLOR_ACCENT_PRESSED = TOK_CORAL_600;
 let TOK_COLOR_STATUS_SUCCESS = TOK_GREEN_500;
 let TOK_COLOR_STATUS_WARNING = TOK_AMBER_500;
 const TOK_COLOR_STATUS_ERROR = TOK_RED_500;
+const TOK_COLOR_HOLIDAY = TOK_RED_500;      // calendar: Thai public holiday
 const TOK_COLOR_STATUS_INFO = TOK_BLUE_500;
 let TOK_COLOR_DATA_USAGE = TOK_CORAL_500;
 let TOK_COLOR_DATA_PACE = TOK_GREEN_500;
@@ -1744,6 +1745,16 @@ const CAL_CARD_X = TOK_LAYOUT_COL_RIGHT_X + CLOCK_CARD_W + TOK_SPACE_GUTTER;
 const CAL_CARD_W = TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - CAL_CARD_X;
 const CAL_GRID_X = CAL_CARD_X + Math.trunc((CAL_CARD_W - 7 * CAL_COL) / 2);
 const READOUT_X = CAL_GRID_X + Math.trunc((CAL_COL - 7) / 2);
+// Thai public holidays, (month << 8) | day per year (twin of pages.cpp's
+// THAI_HOLIDAYS). Lunar dates move yearly; add new years by hand.
+const THAI_HOLIDAYS = {
+  2026: [0x0101,0x0303,0x0406,0x040D,0x040E,0x040F,0x0501,0x0504,0x051F,0x0603,0x071C,0x071D,0x071E,0x080C,0x0A0D,0x0A17,0x0C05,0x0C0A,0x0C1F],
+  2027: [0x0101,0x0214,0x0406,0x040D,0x040E,0x040F,0x0501,0x0504,0x0514,0x0603,0x0712,0x0713,0x071C,0x080C,0x0A0D,0x0A17,0x0C05,0x0C0A,0x0C1F],
+};
+function isThaiHoliday(year, mon, d) {
+  const t = THAI_HOLIDAYS[year];
+  return !!t && t.includes(((mon + 1) << 8) | d);
+}
 // Minimal month grid (twin of pages.cpp's drawMonthGrid).
 function drawMonthGrid(x, y, year, mon, mday, wday) {
   const dimOf = (m, yr) => new Date(Date.UTC(yr, m + 1, 0)).getUTCDate();
@@ -1759,6 +1770,7 @@ function drawMonthGrid(x, y, year, mon, mday, wday) {
       const shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
       const cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * CAL_ROW + CAL_ROW / 2;
       let col = other ? TOK_COLOR_TEXT_TERTIARY
+              : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
               : (c === 0 || c === 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
       if (!other && d === mday) {
         gfx.fillSmoothCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);

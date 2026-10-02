@@ -1297,6 +1297,23 @@ static const int READOUT_X = CAL_GRID_X + (CAL_COL - 7) / 2;                    
 // Minimal month grid (Sunday first, no header): 7 columns x 20px, rows 20px.
 // This month's weekdays primary, weekends secondary, the neighbouring months'
 // days tertiary; today is white on an accent disc. 5 or 6 rows as needed.
+// Thai public holidays, (month << 8) | day per year (twin of the simulator's
+// THAI_HOLIDAYS). Lunar dates move yearly; add new years by hand.
+struct HolidayYear { int year; uint8_t n; const uint16_t *days; };
+static const uint16_t TH_2026[] = {0x0101,0x0303,0x0406,0x040D,0x040E,0x040F,0x0501,0x0504,0x051F,0x0603,0x071C,0x071D,0x071E,0x080C,0x0A0D,0x0A17,0x0C05,0x0C0A,0x0C1F};
+static const uint16_t TH_2027[] = {0x0101,0x0214,0x0406,0x040D,0x040E,0x040F,0x0501,0x0504,0x0514,0x0603,0x0712,0x0713,0x071C,0x080C,0x0A0D,0x0A17,0x0C05,0x0C0A,0x0C1F};
+static const HolidayYear THAI_HOLIDAYS[] = {
+  {2026, sizeof(TH_2026) / 2, TH_2026},
+  {2027, sizeof(TH_2027) / 2, TH_2027},
+};
+static bool isThaiHoliday(int year, int mon, int d) {
+  const uint16_t key = ((mon + 1) << 8) | d;
+  for (const HolidayYear &h : THAI_HOLIDAYS)
+    if (h.year == year)
+      for (uint8_t i = 0; i < h.n; i++) if (h.days[i] == key) return true;
+  return false;
+}
+
 static void drawMonthGrid(int x, int y, int year, int mon, int mday, int wday) {
   static const uint8_t DIM[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   auto dimOf = [&](int m, int yr) {
@@ -1315,6 +1332,7 @@ static void drawMonthGrid(int x, int y, int year, int mon, int mday, int wday) {
       int shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
       int cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * CAL_ROW + CAL_ROW / 2;
       uint16_t col = other ? TOK_COLOR_TEXT_TERTIARY
+                   : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
                    : (c == 0 || c == 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
       if (!other && d == mday) {
         aaFillCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);

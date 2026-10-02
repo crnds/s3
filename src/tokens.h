@@ -79,6 +79,7 @@ extern uint16_t TOK_COLOR_ACCENT_PRESSED;   // coral.600 | light coral pressed
 extern uint16_t TOK_COLOR_STATUS_SUCCESS;   // green.500 | light green
 extern uint16_t TOK_COLOR_STATUS_WARNING;   // amber.500 | light amber
 const uint16_t TOK_COLOR_STATUS_ERROR = TOK_RED_500;
+const uint16_t TOK_COLOR_HOLIDAY = TOK_RED_500;      // calendar: Thai public holiday
 const uint16_t TOK_COLOR_STATUS_INFO = TOK_BLUE_500;
 extern uint16_t TOK_COLOR_DATA_USAGE;       // coral.500 | light coral
 extern uint16_t TOK_COLOR_DATA_PACE;        // green.500 | light green
