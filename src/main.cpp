@@ -451,7 +451,7 @@ void loop() {
     if (now - lastNightCheckMs >= 1000) {
       lastNightCheckMs = now;
       struct tm ti;
-      if (getLocalTime(&ti, 0)) {
+      if (haveLocalTime(&ti)) {
         bool inWindow = (ti.tm_hour >= 23 || ti.tm_hour < 7);
         if (inWindow != nightDimActive) {
           nightDimActive = inWindow;

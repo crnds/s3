@@ -1337,7 +1337,7 @@ static void drawStatusPage() {
   drawCardSurface(TOK_LAYOUT_COL_RIGHT_X, WEATHER_CARD_Y, TOK_LAYOUT_COL_RIGHT_W, WEATHER_CARD_H, wxBg);
 
   struct tm timeinfo;
-  bool haveTime = getLocalTime(&timeinfo, 0);
+  bool haveTime = haveLocalTime(&timeinfo);
 
   long sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
   bool haveReset = haveTime && sessionRem >= 0;

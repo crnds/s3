@@ -418,6 +418,11 @@ enum ConfigKeyId {
 extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
 
 // ── FORMATTING (format.cpp) ────────────────────────────────
+// Non-blocking "is the wall clock set?" + local broken-down time. Use this, never
+// getLocalTime(&ti, 0): with ms == 0 the core's loop is `while (millis() - start
+// <= 0)`, so a 1 ms tick between its two millis() reads makes it return false
+// without ever reading the clock (~0.2% of calls; blanked the clock/calendar cards).
+bool haveLocalTime(struct tm* ti);
 String fmtTokens(int64_t t);
 String fmtCost(float c);
 String fmtBtc(double p);

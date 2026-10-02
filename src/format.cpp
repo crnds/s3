@@ -31,6 +31,12 @@ String fmtChangePct(double pct) {
   return String(pct < 0 ? "-" : "+") + String(whole) + "%";
 }
 
+bool haveLocalTime(struct tm* ti) {
+  time_t now = time(nullptr);
+  localtime_r(&now, ti);
+  return ti->tm_year > (2016 - 1900);  // same "clock is set" test as getLocalTime()
+}
+
 String fmtCountdown(long sec) {
   if (sec < 0) return "";
   long m = (sec + 30) / 60;  // round to nearest minute
