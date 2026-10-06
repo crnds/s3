@@ -213,8 +213,11 @@ static bool applyUsageDoc(const JsonDocument& doc, bool fromNetwork) {
   // configTime()'s TZ (GMT_OFFSET_SEC/DST_OFFSET_SEC) was already set at boot
   // and keeps applying regardless of how time-of-day got set. Skipped once
   // getLocalTime() succeeds so a working NTP sync is never fought/overridden.
+  // Live polls only: the SD cache (loadCachedUsage) carries the epoch of when
+  // it was saved, and seeding from it set the clock hours/days behind, which
+  // then counted as "set" and blocked the live correction until a reboot.
   struct tm haveTimeCheck;
-  if (!haveLocalTime(&haveTimeCheck)) {
+  if (fromNetwork && !haveLocalTime(&haveTimeCheck)) {
     long epoch = doc["epoch"] | 0L;
     if (epoch > 0) {
       struct timeval tv = { (time_t)epoch, 0 };
