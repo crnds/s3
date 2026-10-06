@@ -1287,12 +1287,37 @@ static const int CLOCK_CY = CLOCK_CARD_Y + 4 + CLOCK_R;                         
 static const int DIGITAL_Y = CLOCK_CY + CLOCK_R + 1 + 3;                                        // 168
 // Two cards: the clock (dial + digital time, 8px pads) and, 8px to its right,
 // the calendar (date + AQI row and the month grid, centred in the card).
-static const int CAL_COL = 20, CAL_ROW = 20, CAL_DISC_R = 8;
+static const int CAL_COL = 20, CAL_ROW = 20, CAL_ROW_TALL = 17, CAL_DISC_R = 8;
 static const int CLOCK_CARD_W = 2 * TOK_SPACE_CARD_PAD_HERO + 2 * CLOCK_R + 1;                  // 169
 static const int CAL_CARD_X = TOK_LAYOUT_COL_RIGHT_X + CLOCK_CARD_W + TOK_SPACE_GUTTER;         // 321
 static const int CAL_CARD_W = TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - CAL_CARD_X;     // 151
 static const int CAL_GRID_X = CAL_CARD_X + (CAL_CARD_W - 7 * CAL_COL) / 2;                      // 326
-static const int READOUT_X = CAL_GRID_X + (CAL_COL - 7) / 2;                                    // 332, date left edge
+// Calendar card, top to bottom: "Tue 6" (weekday accent, date primary, both
+// type.title) at the card's top on one baseline (y 35; it may run under the
+// sleep / battery-save buttons, which drawSystemCorner paints last), "Oct 2026"
+// under it, a gap, the month grid, and the AQI bar pinned to the bottom pad.
+// Left edge 329 is shared by the header rows and the bar.
+static const int CAL_PAD = TOK_SPACE_SM;                                                         // 8
+static const int CAL_X = CAL_CARD_X + CAL_PAD;                                                   // 329
+static const int CAL_BAR_H = 20, CAL_BAR_W = CAL_CARD_W - 2 * CAL_PAD;                           // 135
+static const int CAL_BAR_Y = CLOCK_CARD_Y + CLOCK_CARD_H - CAL_PAD - CAL_BAR_H;                  // 172
+static const int CAL_BASE_Y = CLOCK_CARD_Y + 27;                                                 // 35
+static const int CAL_GRID_Y = CLOCK_CARD_Y + 56;                                                 // 64
+
+// Calendar-card footer: full-width bar in the AQI colour, "AQI" left and the
+// index right-aligned (a category word does not fit 135px). aqi < 0 draws a
+// neutral placeholder.
+static void drawAqiBar(int x, int y, int w, int aqi) {
+  uint16_t bg = TOK_COLOR_FILL_TRACK, fg = TOK_COLOR_TEXT_TERTIARY;
+  if (aqi >= 0) aqiColors(aqi, bg, fg);
+  aaFillRoundRect(x, y, w, CAL_BAR_H, TOK_RADIUS_SM, bg);
+  const int ty = y + (CAL_BAR_H - fontLineH(TOK_TYPE_CAPTION)) / 2;
+  drawText(TOK_TYPE_LABEL, x + TOK_SPACE_SM, ty, "AQI", fg);
+  if (aqi < 0) { drawTextR(TOK_TYPE_LABEL, x + w - TOK_SPACE_SM, ty, "--", fg); return; }
+  char nb[8];
+  snprintf(nb, sizeof(nb), "%d", aqi);
+  drawTextR(TOK_TYPE_LABEL, x + w - TOK_SPACE_SM, ty, nb, fg);
+}
 
 // Minimal month grid (Sunday first, no header): 7 columns x 20px, rows 20px.
 // This month's weekdays primary, weekends secondary, the neighbouring months'
@@ -1324,13 +1349,14 @@ static void drawMonthGrid(int x, int y, int year, int mon, int mday, int wday) {
   const int dim = dimOf(mon, year);
   const int prevDim = mon == 0 ? dimOf(11, year - 1) : dimOf(mon - 1, year);
   const int rows = (first + dim + 6) / 7;
+  const int rowH = rows > 5 ? CAL_ROW_TALL : CAL_ROW;   // 6-row months squeeze to 17px so the grid stays ~100px tall
   const int lh = fontLineH(TOK_TYPE_CALENDAR);
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < 7; c++) {
       int d = r * 7 + c - first + 1;
       bool other = d < 1 || d > dim;
       int shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
-      int cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * CAL_ROW + CAL_ROW / 2;
+      int cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * rowH + rowH / 2;
       uint16_t col = other ? TOK_COLOR_TEXT_TERTIARY
                    : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
                    : (c == 0 || c == 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
@@ -1382,25 +1408,23 @@ static void drawStatusPage() {
     drawTextC(TOK_TYPE_CLOCK, CLOCK_CX, DIGITAL_Y, "--:--", TOK_COLOR_TEXT_TERTIARY);
   }
 
-  // Date (body) + AQI badge in one row at the top of the card, beside the
-  // dial. The row starts at y 40, the first line clear of the corner slots
-  // (TOK_CORNER_INK_Y1), so it can run the card's full width.
-  const bool haveAqi = cfgShowAqi && STATE.aqi >= 0;
-  const int rowY = TOK_CORNER_INK_Y1;
-  const int dateY = rowY + (TOK_BADGE_H - fontLineH(TOK_TYPE_CAPTION)) / 2;
-  int dateEnd;
+  // Calendar card: "Tue 6" (type.title, weekday accent) on one baseline, "Oct 2026"
+  // under it, the month grid, and the AQI bar in the bottom pad.
   if (haveTime) {
-    char buf[20];
-    snprintf(buf, sizeof(buf), "%s %d %s", WDAY_ABBR[timeinfo.tm_wday], timeinfo.tm_mday,
-             MON_ABBR[timeinfo.tm_mon]);
-    dateEnd = drawText(TOK_TYPE_CAPTION, READOUT_X, dateY, buf, TOK_COLOR_TEXT_SECONDARY);
-  } else {
-    dateEnd = drawText(TOK_TYPE_CAPTION, READOUT_X, dateY, "--", TOK_COLOR_TEXT_TERTIARY);
-  }
-  if (haveAqi) drawAqiBadge(dateEnd + TOK_SPACE_SM, rowY, STATE.aqi);
-  if (haveTime)
-    drawMonthGrid(CAL_GRID_X, rowY + TOK_BADGE_H + TOK_SPACE_SM, timeinfo.tm_year + 1900, timeinfo.tm_mon,
+    const int numY = CAL_BASE_Y - fontAscent(TOK_TYPE_TITLE);
+    const int wdEnd = drawText(TOK_TYPE_TITLE, CAL_X, numY, WDAY_ABBR[timeinfo.tm_wday], TOK_COLOR_ACCENT);
+    char nb[4];
+    snprintf(nb, sizeof(nb), "%d", timeinfo.tm_mday);
+    drawText(TOK_TYPE_TITLE, wdEnd + TOK_SPACE_SM, numY, nb, TOK_COLOR_TEXT_PRIMARY);
+    char my[12];
+    snprintf(my, sizeof(my), "%s %d", MON_ABBR[timeinfo.tm_mon], timeinfo.tm_year + 1900);
+    drawText(TOK_TYPE_CAPTION, CAL_X, CAL_BASE_Y + 1, my, TOK_COLOR_TEXT_SECONDARY);
+    drawMonthGrid(CAL_GRID_X, CAL_GRID_Y, timeinfo.tm_year + 1900, timeinfo.tm_mon,
                   timeinfo.tm_mday, timeinfo.tm_wday);
+  } else {
+    drawText(TOK_TYPE_TITLE, CAL_X, CAL_BASE_Y - fontAscent(TOK_TYPE_TITLE), "--", TOK_COLOR_TEXT_TERTIARY);
+  }
+  if (cfgShowAqi) drawAqiBar(CAL_X, CAL_BAR_Y, CAL_BAR_W, STATE.aqi);
 
   // ── weather strip (compact card, tappable -> Weather sheet) ──
   // H/L 20 | now 44 | 5 x 48 hourly = 304 inner. No disclosure chevron
