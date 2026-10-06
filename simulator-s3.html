@@ -1739,12 +1739,22 @@ const CLOCK_CY = CLOCK_CARD_Y + 4 + CLOCK_R;
 const DIGITAL_Y = CLOCK_CY + CLOCK_R + 1 + 3;
 // Two cards: the clock (dial + digital time, 8px pads) and, 8px to its right,
 // the calendar (date + AQI row and the month grid, centred in the card).
-const CAL_COL = 20, CAL_ROW = 20, CAL_DISC_R = 8;
+const CAL_COL = 20, CAL_ROW = 20, CAL_ROW_TALL = 17, CAL_DISC_R = 8;
 const CLOCK_CARD_W = 2 * TOK_SPACE_CARD_PAD_HERO + 2 * CLOCK_R + 1;
 const CAL_CARD_X = TOK_LAYOUT_COL_RIGHT_X + CLOCK_CARD_W + TOK_SPACE_GUTTER;
 const CAL_CARD_W = TOK_LAYOUT_COL_RIGHT_X + TOK_LAYOUT_COL_RIGHT_W - CAL_CARD_X;
 const CAL_GRID_X = CAL_CARD_X + Math.trunc((CAL_CARD_W - 7 * CAL_COL) / 2);
-const READOUT_X = CAL_GRID_X + Math.trunc((CAL_COL - 7) / 2);
+// Calendar card, top to bottom: "Tue 6" (weekday accent, date primary, both
+// type.title) at the card's top on one baseline (y 35; it may run under the
+// sleep / battery-save buttons, which the corner draw paints last), "Oct 2026"
+// under it, a gap, the month grid, and the AQI bar pinned to the bottom pad.
+// Left edge 329 is shared by the header rows and the bar.
+const CAL_PAD = TOK_SPACE_SM;
+const CAL_X = CAL_CARD_X + CAL_PAD;
+const CAL_BAR_H = 20, CAL_BAR_W = CAL_CARD_W - 2 * CAL_PAD;
+const CAL_BAR_Y = CLOCK_CARD_Y + CLOCK_CARD_H - CAL_PAD - CAL_BAR_H;
+const CAL_BASE_Y = CLOCK_CARD_Y + 27;
+const CAL_GRID_Y = CLOCK_CARD_Y + 56;
 // Thai public holidays, (month << 8) | day per year (twin of pages.cpp's
 // THAI_HOLIDAYS). Lunar dates move yearly; add new years by hand.
 const THAI_HOLIDAYS = {
@@ -1756,19 +1766,32 @@ function isThaiHoliday(year, mon, d) {
   return !!t && t.includes(((mon + 1) << 8) | d);
 }
 // Minimal month grid (twin of pages.cpp's drawMonthGrid).
+// Calendar-card footer: full-width bar in the AQI colour, "AQI" left and the
+// index right-aligned (a category word does not fit 135px). aqi < 0 draws a
+// neutral placeholder.
+function drawAqiBar(x, y, w, aqi) {
+  let bg = TOK_COLOR_FILL_TRACK, fg = TOK_COLOR_TEXT_TERTIARY;
+  if (aqi >= 0) [bg, fg] = aqiColors(aqi);
+  gfx.fillSmoothRoundRect(x, y, w, CAL_BAR_H, TOK_RADIUS_SM, bg);
+  const ty = y + Math.trunc((CAL_BAR_H - fontLineH(TOK_TYPE_CAPTION)) / 2);
+  drawText(TOK_TYPE_LABEL, x + TOK_SPACE_SM, ty, 'AQI', fg);
+  if (aqi < 0) { drawTextR(TOK_TYPE_LABEL, x + w - TOK_SPACE_SM, ty, '--', fg); return; }
+  drawTextR(TOK_TYPE_LABEL, x + w - TOK_SPACE_SM, ty, String(aqi), fg);
+}
 function drawMonthGrid(x, y, year, mon, mday, wday) {
   const dimOf = (m, yr) => new Date(Date.UTC(yr, m + 1, 0)).getUTCDate();
   const first = (((wday - (mday - 1)) % 7) + 7) % 7;
   const dim = dimOf(mon, year);
   const prevDim = mon === 0 ? dimOf(11, year - 1) : dimOf(mon - 1, year);
   const rows = Math.trunc((first + dim + 6) / 7);
+  const rowH = rows > 5 ? CAL_ROW_TALL : CAL_ROW;   // 6-row months squeeze to 17px so the grid stays ~100px tall
   const lh = fontLineH(TOK_TYPE_CALENDAR);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < 7; c++) {
       const d = r * 7 + c - first + 1;
       const other = d < 1 || d > dim;
       const shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
-      const cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * CAL_ROW + CAL_ROW / 2;
+      const cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * rowH + Math.trunc(rowH / 2);
       let col = other ? TOK_COLOR_TEXT_TERTIARY
               : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
               : (c === 0 || c === 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
@@ -1803,15 +1826,16 @@ function drawStatusPage() {
   // Digital time (type.clock) centred under the dial.
   drawTextC(TOK_TYPE_CLOCK, CLOCK_CX, DIGITAL_Y, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), TOK_COLOR_TEXT_PRIMARY);
 
-  // Date + AQI badge in one row at the top of the card, from y 40 (TOK_CORNER_INK_Y1).
-  const haveAqi = STATE.cfgShowAqi && STATE.aqi >= 0;
-  const rowY = TOK_CORNER_INK_Y1;
-  const dateY = rowY + Math.trunc((TOK_BADGE_H - fontLineH(TOK_TYPE_CAPTION)) / 2);
-  const dateEnd = drawText(TOK_TYPE_CAPTION, READOUT_X, dateY, `${bkk.weekday} ${parseInt(bkk.day, 10)} ${bkk.month}`, TOK_COLOR_TEXT_SECONDARY);
-  if (haveAqi) drawAqiBadge(dateEnd + TOK_SPACE_SM, rowY, STATE.aqi);
-  drawMonthGrid(CAL_GRID_X, rowY + TOK_BADGE_H + TOK_SPACE_SM, parseInt(bkk.year, 10),
+  // Calendar card: "Tue 6" (type.title, weekday accent) on one baseline, "Oct 2026"
+  // under it, the month grid, and the AQI bar in the bottom pad.
+  const numY = CAL_BASE_Y - fontAscent(TOK_TYPE_TITLE);
+  const wdEnd = drawText(TOK_TYPE_TITLE, CAL_X, numY, bkk.weekday, TOK_COLOR_ACCENT);
+  drawText(TOK_TYPE_TITLE, wdEnd + TOK_SPACE_SM, numY, String(parseInt(bkk.day, 10)), TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, CAL_X, CAL_BASE_Y + 1, `${bkk.month} ${bkk.year}`, TOK_COLOR_TEXT_SECONDARY);
+  drawMonthGrid(CAL_GRID_X, CAL_GRID_Y, parseInt(bkk.year, 10),
                 ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(bkk.month),
                 parseInt(bkk.day, 10), WDAY_ABBR.indexOf(bkk.weekday));
+  if (STATE.cfgShowAqi) drawAqiBar(CAL_X, CAL_BAR_Y, CAL_BAR_W, STATE.aqi);
 
   const ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;
   const iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
