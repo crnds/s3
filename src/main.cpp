@@ -120,7 +120,16 @@ const uint32_t RESTART_AFTER_WIFI_DOWN_MS = 900000UL;
 // switching the display to the cat/offline screen. Left at 0 on purpose: a
 // board that never reaches the Mac goes offline OFFLINE_AFTER_MS after boot.
 uint32_t lastFetchSuccessMs = 0;
-const uint32_t OFFLINE_AFTER_MS = 60000UL;  // ~1 min without a successful poll
+// Floor for the offline grace. A congested WLAN drops the board's TCP connects
+// in bursts (measured on the office network: gaps of 66-268s between good
+// polls), and Battery Save stretches the poll to 120s, so the old fixed 60s
+// flipped to the cat screen between perfectly healthy polls. The effective
+// grace is max(this, 3 poll intervals): see offlineAfterMs().
+const uint32_t OFFLINE_AFTER_MS = 180000UL;  // ~3 min without a successful poll
+static inline uint32_t offlineAfterMs() {
+  uint32_t byPoll = POLL_INTERVAL_MS * 3;
+  return byPoll > OFFLINE_AFTER_MS ? byPoll : OFFLINE_AFTER_MS;
+}
 
 // ── NETWORK TASK ───────────────────────────────────────────
 // All blocking I/O (usage poll -- which also carries BTC/weather -- mDNS,
@@ -187,7 +196,7 @@ void networkTask(void* param) {
         STATE.haveData = true;
         lastFetchSuccessMs = now;
         pollOkSeq++;  // one pace sweep on the render side
-      } else if (now - lastFetchSuccessMs >= OFFLINE_AFTER_MS) {
+      } else if (now - lastFetchSuccessMs >= offlineAfterMs()) {
         STATE.haveData = false;
       } else if (!STATE.haveData && STATE.sdOk) {
         // Still inside the grace window with nothing to show yet (cold boot

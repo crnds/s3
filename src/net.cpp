@@ -509,6 +509,13 @@ bool fetchUsage() {
   }
 
   if (code != 200) {
+    // Serial only (the SD diag log keeps just the first miss of a streak):
+    // enough to tell a weak link (RSSI), a stale target IP and a refusing
+    // server apart without pulling the card.
+    Serial.printf("[net] fetch fail code=%d (%s) rssi=%ddBm ip=%s -> %s:%d streak=%d\n",
+                  code, HTTPClient::errorToString(code).c_str(), WiFi.RSSI(),
+                  WiFi.localIP().toString().c_str(), serverIp.toString().c_str(),
+                  cfgServerPort, ipFailStreak + 1);
     ipFailStreak++;
     if (ipFailStreak == 1) {
       logDiag((String("fetch_fail http_code=") + code).c_str());
@@ -570,7 +577,7 @@ bool fetchUsage() {
   // kept permanently, low-volume, so a future regression in the fetch/parse/
   // SD-write path shows up the same way the JSON-filter and single-parse
   // optimizations here were verified.
-  Serial.printf("[timing] fetchUsage() took %luus\n", (unsigned long)(micros() - startUs));
+  Serial.printf("[timing] fetchUsage() took %luus rssi=%ddBm\n", (unsigned long)(micros() - startUs), WiFi.RSSI());
   return true;
 }
 
