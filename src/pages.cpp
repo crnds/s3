@@ -300,7 +300,7 @@ static void drawStatusDot(int r) {
 // Status-dot pulse (motion.pulse): while the server is reachable the dot
 // breathes -- its opacity follows a cosine from 100% down to 1% and back
 // once a period, free-running (never restarted, so it can't jump). Drawn as a
-// sub-pixel disc at that alpha over the box's background every loop pass.
+// sub-pixel disc at that alpha over the box's background every ambient tick.
 static const int PULSE_BOX_R = 6;
 static bool pulseDrawnLive = false;  // last pulseTick drew a breathing frame
 
@@ -340,12 +340,12 @@ static int progressLineW() {
   return (int)((float)elapsed / POLL_INTERVAL_MS * SCREEN_W);
 }
 // How long one physical pixel of fill takes to appear at the current poll
-// interval, floored at TOK_MOTION_PROGRESS_FLOOR_MS: the finest step the
+// interval, floored at TOK_MOTION_AMBIENT_TICK_MS: the finest step the
 // hairline can show is 1 px, so presenting any more often than that wastes a
-// present, and any less often is a visible jump.
+// present; below the floor it grows several px per ambient tick.
 static uint32_t progressStepMs() {
   uint32_t px = POLL_INTERVAL_MS / SCREEN_W;
-  return px > TOK_MOTION_PROGRESS_FLOOR_MS ? px : TOK_MOTION_PROGRESS_FLOOR_MS;
+  return px > TOK_MOTION_AMBIENT_TICK_MS ? px : TOK_MOTION_AMBIENT_TICK_MS;
 }
 static int progressDrawnW = 0;  // how much of the hairline is currently in `frame`
 static uint32_t progressLastMs = 0;
@@ -386,8 +386,8 @@ static void drawStatusStrip() {
 
 // Between-render top-up of the hairline: re-presents every time the fill
 // would grow by 1 physical pixel (progressStepMs), the finest step it can
-// show, floored at motion.progress.maxHz (~30, design.md 12.7) so a short
-// poll interval can't out-pace the render loop. Only on pages with a strip
+// show, but no more often than motion.ambient.tick (8 Hz, design.md 12.7) --
+// at the default 20 s poll that is ~3 px a step. Only on pages with a strip
 // (loop() gates it).
 bool progressTick(uint32_t nowMs) {
   if (!cfgShowProgress || !connected) return false;
@@ -405,8 +405,8 @@ bool progressTick(uint32_t nowMs) {
 }
 
 // Between-render top-up of the pulse: repaints the dot's box (canvas, the
-// health pill if pressed, then the live dot) every loop pass while live, plus
-// once when it stops so the steady dot is left behind.
+// health pill if pressed, then the live dot) on every ambient tick while live,
+// plus once when it stops so the steady dot is left behind.
 bool pulseTick(uint32_t nowMs) {
   bool live = pulseLive();
   if (!live && !pulseDrawnLive) return false;
@@ -1645,12 +1645,17 @@ void render() {
   // Permanent low-volume diagnostic (one line per render, only visible with a
   // serial monitor attached) so a draw-time regression shows up the same way
   // the CYD's did.
-  static uint32_t lastLogMs = 0;
-  if (millis() - lastLogMs >= 10000) {
-    lastLogMs = millis();
-    Serial.printf("[timing] render() page=%d draw %luus present %luus (te wait %luus)\n", currentPage,
-                  (unsigned long)drawUs, (unsigned long)displayLastPresentUs(),
-                  (unsigned long)displayLastTeWaitUs());
+  // presents/s is the ambient budget: each present is a whole ~16ms frame.
+  static uint32_t lastLogMs = 0, lastLogPresents = 0;
+  uint32_t nowMs = millis();
+  if (nowMs - lastLogMs >= 10000) {
+    uint32_t presents = displayPresentCount();
+    float perSec = lastLogMs ? (presents - lastLogPresents) * 1000.0f / (nowMs - lastLogMs) : 0;
+    lastLogMs = nowMs;
+    lastLogPresents = presents;
+    Serial.printf("[timing] render() page=%d draw %luus present %luus (te wait %luus) presents %.1f/s\n",
+                  currentPage, (unsigned long)drawUs, (unsigned long)displayLastPresentUs(),
+                  (unsigned long)displayLastTeWaitUs(), perSec);
   }
 }
 

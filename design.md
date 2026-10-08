@@ -1284,10 +1284,10 @@ excluded on purpose are listed in §11.23.
 - **Anatomy:** 1 px, `text.secondary`, along y 319, filling left to right over the poll interval.
   It is the **one** element allowed inside the screen margin, because it's a
   system edge indicator.
-- **Rules:** re-presents as soon as the fill would grow by one physical pixel --
-  its finest visible step -- floored at `motion.progress.maxHz` so a short poll
-  interval can't out-pace the render loop (§12.7). It is hidden while offline
-  and when the Progress Bar setting is off.
+- **Rules:** grows on the shared `motion.ambient.tick` (8 Hz), never more often
+  than one physical pixel of growth -- about 3 px a step at the default 20 s
+  poll (§12.7). It is hidden while offline and when the Progress Bar setting
+  is off.
 
 ### 11.14 Modal header
 
@@ -1477,7 +1477,7 @@ Why springs rather than today's 180 ms ease-out cubic:
 | `motion.pulse` | 2000 ms period, 1% floor | The status-dot breath while the server is reachable: opacity 100% → 1% → 100% on a cosine |
 | `motion.fade` | 3 frames (25 / 50 / 75%) | The reduced-motion replacement for springs (§12.9) |
 | `motion.ambient.maxHz` | 1 Hz | Continuous motion that isn't content (the second hand) |
-| `motion.progress.maxHz` | ~30 Hz (floor only) | The hairline re-presents on every 1 px of growth; this only caps how often, for a poll interval short enough that 1 px would arrive faster than the loop can present |
+| `motion.ambient.tick` | 125 ms (8 Hz) | The one shared cadence for between-render ambient motion -- status-dot breath, progress hairline, pace shine -- drawn and presented together. Every present is a whole ~16 ms frame (QSPI, no partial windows), so this is the idle CPU budget: at the loop rate (~30 presents/s) the status page measured 52% CPU, at 8 Hz 16%. |
 | `motion.toast` | 2500 ms | How long a toast stays |
 | `motion.ack` | 100 ms (3 frames), non-blocking | Acknowledges a tap on a target with no visible control (§12.8). Unused after migration. |
 | `motion.backlight.*` | §12.10 | Backlight fades |
@@ -1555,9 +1555,9 @@ Why springs rather than today's 180 ms ease-out cubic:
 |---|---|
 | Clock second hand | 1 Hz, as today. This is the status page's one ambient motion. |
 | Cat GIFs | Content, so exempt. They play at their own frame delays. |
-| Progress hairline | Re-presents on every 1 px step -- ~24 Hz at the default 20 s poll (§15.1) -- floored at `motion.progress.maxHz` (~30 Hz) so a 5 s poll (96 px/s) can't out-pace the loop. A fixed low-Hz cap (4, then 8 Hz) made the fill visibly jump several px at once; matching the step to what the loop can actually deliver removes the jump instead of just slowing it. |
-| Status dot | **Breathes every 2 seconds** while the server is reachable (`motion.pulse`): its opacity follows a cosine 100% → 1% → 100%, free-running so it never jumps. Offline and Reduce Motion hold it steady. |
-| Pace-bar highlight (the "shine") | **One `motion.sweep` every 3 s** (`motion.sweep.period`), across the pace fills, then still. (Was once per successful poll; changed by request.) Never the perpetual 2.6 s loop, which at about 0.4 Hz is close to the slow oscillations Apple's accessibility guidance tells you to avoid. |
+| Progress hairline | Grows on `motion.ambient.tick` (8 Hz): ~3 px a step at the default 20 s poll (§15.1), 1 px at polls of 60 s and longer. It once re-presented on every 1 px step (~24 Hz) because a 4, then 8 Hz cap made the fill visibly jump; that cost ~40% CPU on its own (every present is a whole frame), so the 8 Hz step is the deliberate trade. |
+| Status dot | **Breathes every 2 seconds** while the server is reachable (`motion.pulse`): its opacity follows a cosine 100% → 1% → 100%, free-running so it never jumps, sampled on `motion.ambient.tick` (16 steps a period). Offline and Reduce Motion hold it steady. |
+| Pace-bar highlight (the "shine") | **One `motion.sweep` every 3 s** (`motion.sweep.period`), across the pace fills, then still, stepped on `motion.ambient.tick`. (Was once per successful poll; changed by request.) Never the perpetual 2.6 s loop, which at about 0.4 Hz is close to the slow oscillations Apple's accessibility guidance tells you to avoid. |
 | Hourly signal | **Full-screen inversion** on the even seconds of hh:00:00..05 (three flashes), by request. It is a panel register write (INVON/INVOFF, `displaySetInvert`): no presents, works on every screen. It was once replaced by a backlight breath (§12.10, the token is kept but unused). The inversion is the exception for this signal only; no other feature may flash the screen. |
 
 ### 12.8 Press feedback
@@ -1894,8 +1894,8 @@ Hourly chime, Claude ding, Alerts, Mute when asleep, Mute at night).
 | `DRAG_TAP_PX 8` | `touch.slop 10` |
 | `flashTouchCenter()` (blocking) | Pressed states; `motion.ack` only if ever needed |
 | Shine loop, `SHINE_PERIOD_MS 2600` | One sweep per successful poll |
-| `progressTick` every loop | Capped at `motion.progress.maxHz` |
-| 1 Hz status-dot blink | Steady dot plus a per-poll pulse |
+| `progressTick` every loop | On `motion.ambient.tick` (8 Hz), shared with the breath and the shine |
+| 1 Hz status-dot blink | Breathing dot (`motion.pulse`) on `motion.ambient.tick` |
 | `1 / 6` text | Page indicator dots |
 | All-caps Settings strings | Sentence case; `type.label` only for section labels |
 | On/Off detail screens | Toggle rows |

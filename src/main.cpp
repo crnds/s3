@@ -498,6 +498,14 @@ void loop() {
 
   bool needPresent = shiftDirty;
 
+  // Ambient motion (breath, hairline, shine) is drawn and presented together on
+  // one 8 Hz tick (motion.ambient.tick), never per pass: a present is a whole
+  // ~16ms frame, so the loop rate cost the status page ~52% CPU. A 1 Hz render
+  // draws all three itself, so it restarts the tick.
+  static uint32_t lastAmbientMs = 0;
+  bool ambientDue = now - lastAmbientMs >= (uint32_t)(TOK_MOTION_AMBIENT_TICK_MS * motionTimeScale);
+  if (ambientDue) lastAmbientMs = now;
+
   if (navSheetOpen()) {
     // Sheets are drawn on entry / change. Device Stats is live (1 Hz); a
     // Settings toast is cleared when it expires.
@@ -522,21 +530,24 @@ void loop() {
         unlockState();
         gifPlayerRedrawOverlays(offline);
         needPresent = false;
+        lastAmbientMs = now;
+      } else if (ambientDue) {
+        if (shineTick(now)) needPresent = true;
+        if (progressTick(now)) needPresent = true;
+        if (pulseTick(now)) needPresent = true;
       }
-      if (shineTick(now)) needPresent = true;
-      if (progressTick(now)) needPresent = true;
-      if (pulseTick(now)) needPresent = true;
     }
   } else {
     // Repaint once a second for the local countdowns and the clock's second
     // hand (motion.ambient.maxHz); the sweep, pulse and hairline top up
-    // between renders.
+    // between renders, on the ambient tick.
     static uint32_t lastRenderMs = 0;
     if (now - lastRenderMs >= 1000) {
       lastRenderMs = now;
       render();
       needPresent = false;
-    } else {
+      lastAmbientMs = now;
+    } else if (ambientDue) {
       if (progressTick(now)) needPresent = true;
       if (shineTick(now)) needPresent = true;
       if (pulseTick(now)) needPresent = true;
