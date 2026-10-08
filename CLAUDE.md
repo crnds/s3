@@ -168,13 +168,17 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   300KB each in PSRAM. A `[motion]` serial line per transition reports frames
   and the slowest present (~23ms slide, ~30ms sheet, ~12 frames).
 - **Presents are batched per loop pass.** `loop()` (~33ms period) collects
-  "changed" from `gifTick()`, `shineTick()` (one pace sweep per successful
-  poll), `pulseTick()` (one status-dot pulse per poll) and `progressTick()`
-  (hairline, capped at 4Hz) -- all draw straight into `frame` -- and presents
-  once. `render()` (1Hz on normal pages) composes and presents itself.
+  "changed" from `gifTick()` and, only on the shared 8Hz ambient tick
+  (`TOK_MOTION_AMBIENT_TICK_MS`), from `shineTick()` (pace sweep every 3s),
+  `pulseTick()` (status-dot breath) and `progressTick()` (hairline) -- all draw
+  straight into `frame` -- and presents once. `render()` (1Hz on normal pages)
+  composes and presents itself and restarts the ambient tick. **Every present
+  is a whole ~16ms frame**, so presents/s is the idle CPU budget: ambient ticks
+  at the loop rate put the status page at 52% CPU (8Hz: 16%). The 10s
+  `[timing]` serial line reports `presents N/s`; page 0 at rest is ~7.8.
   `presentHold` suppresses presents while nav composes an incoming screen
   off-screen. Drawing cost is dominated by PSRAM bandwidth (full clear ~8ms)
-  and anti-aliased text (~1ms per string); the status page is ~40ms at 1Hz.
+  and anti-aliased text (~1ms per string); the status page is ~54ms at 1Hz.
   Smooth shapes use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp:
   LovyanGFX's algorithm blended straight into the buffer).
 - **Two cores, two locks — unchanged from the CYD** (read `~/cyd/CLAUDE.md`):

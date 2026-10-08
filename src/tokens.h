@@ -223,11 +223,12 @@ const uint32_t TOK_MOTION_SWEEP_PERIOD_MS = 3000;  // pace-bar shine repeats eve
 const uint32_t TOK_MOTION_PULSE_PERIOD_MS = 2000;  // status-dot breath: 100% -> 1% -> 100% opacity
 const int TOK_MOTION_PULSE_MIN_PCT = 1;
 const int TOK_MOTION_FADE_FRAMES = 3;
-// motion.progress.maxHz: not a fixed rate -- the hairline re-presents as soon
-// as it would grow by one physical pixel (POLL_INTERVAL_MS/SCREEN_W), floored
-// here at ~30 Hz (the loop's own throughput ceiling, design.md 12.7) so a
-// short poll interval can't out-pace the render loop.
-const uint32_t TOK_MOTION_PROGRESS_FLOOR_MS = 33;
+// motion.ambient.tick: the one shared cadence (8 Hz) at which the between-render
+// ambient motion -- status-dot breath, progress hairline, pace shine -- is
+// drawn and presented together (design.md 12.7). Every present is a whole
+// ~16ms frame (the QSPI panel has no partial windows), so this IS the idle
+// CPU budget: at the loop rate (~30 Hz) the status page sat at ~52%.
+const uint32_t TOK_MOTION_AMBIENT_TICK_MS = 125;
 const uint32_t TOK_MOTION_TOAST_MS = 2500;
 const uint32_t TOK_MOTION_BACKLIGHT_SLEEP_MS = 200;
 const uint32_t TOK_MOTION_BACKLIGHT_WAKE_MS = 200;

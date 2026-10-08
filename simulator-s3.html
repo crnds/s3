@@ -382,7 +382,7 @@ const TOK_TOGGLE_W = 52, TOK_TOGGLE_H = 28, TOK_TOAST_H = 36, TOK_PRESSED_DISC_R
 
 const TOK_MOTION_SPRING_STANDARD = [100, 250], TOK_MOTION_SPRING_SHEET = [100, 300], TOK_MOTION_SPRING_FLICK = [80, 300];
 const TOK_MOTION_LEAN_PX = 8, TOK_MOTION_SWEEP_MS = 600, TOK_MOTION_SWEEP_PERIOD_MS = 3000, TOK_MOTION_PULSE_PERIOD_MS = 2000, TOK_MOTION_PULSE_MIN_PCT = 1, TOK_MOTION_FADE_FRAMES = 3;
-const TOK_MOTION_PROGRESS_FLOOR_MS = 33, TOK_MOTION_TOAST_MS = 2500;
+const TOK_MOTION_AMBIENT_TICK_MS = 125, TOK_MOTION_TOAST_MS = 2500;
 const TOK_MOTION_BACKLIGHT_SLEEP_MS = 200, TOK_MOTION_BACKLIGHT_WAKE_MS = 200, TOK_MOTION_BACKLIGHT_NIGHT_MS = 2000;
 const TOK_MOTION_BACKLIGHT_ADJUST_MS = 150, TOK_MOTION_BACKLIGHT_BREATH_MS = 1000;
 const TOK_MOTION_BACKLIGHT_BREATH_PCT = 40, TOK_MOTION_BACKLIGHT_BREATH_COUNT = 3;
@@ -1105,10 +1105,10 @@ function progressLineW() {
   return Math.floor(elapsed / pollMs * SCREEN_W);
 }
 // How long one physical pixel of fill takes to appear, floored at
-// TOK_MOTION_PROGRESS_FLOOR_MS (display.cpp/pages.cpp twin).
+// TOK_MOTION_AMBIENT_TICK_MS (pages.cpp twin).
 function progressStepMs() {
   const px = Math.floor(effectivePollMs() / SCREEN_W);
-  return Math.max(px, TOK_MOTION_PROGRESS_FLOOR_MS);
+  return Math.max(px, TOK_MOTION_AMBIENT_TICK_MS);
 }
 let progressDrawnW = 0, progressLastMs = 0;
 function drawStatusStrip() {
@@ -3248,7 +3248,7 @@ let hourlyTestStartMs = 0;  // serial 'h' twin
 document.getElementById('hourly-signal').addEventListener('click', () => { hourlyTestStartMs = performance.now(); });
 
 // ── LOOP (main.cpp's loop(), ~30 passes/sec) ──────────────────
-let lastRenderMs = 0, lastSheetRenderMs = 0;
+let lastRenderMs = 0, lastSheetRenderMs = 0, lastAmbientMs = 0;
 function tick() {
   const start = performance.now(), now = start;
   backlightTick(now);
@@ -3297,7 +3297,11 @@ function tick() {
       lastRenderMs = now;
       render();
       needPresent = false;
-    } else if (!navCatLayout() || STATE.currentPage === MIXED_PAGE) {
+      lastAmbientMs = now;
+    } else if ((!navCatLayout() || STATE.currentPage === MIXED_PAGE) &&
+               now - lastAmbientMs >= TOK_MOTION_AMBIENT_TICK_MS * motionTimeScale) {
+      // Ambient motion on one shared 8 Hz tick (main.cpp twin, motion.ambient.tick).
+      lastAmbientMs = now;
       if (progressTick(now)) needPresent = true;
       if (shineTick(now)) needPresent = true;
       if (pulseTick(now)) needPresent = true;
