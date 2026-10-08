@@ -861,7 +861,9 @@ static void drawLimitCard(int cardY, const char* label, int percent, bool ahead,
                           int pace, int barIdx, const char* resets, const String& inText) {
   drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
   const int x = SHINE_BAR_X;
-  const int top = cardY + TOK_SPACE_CARD_PAD_COMPACT_V + 3;  // +3: the card is 6px taller than its content
+  // numeral.lg ink starts 6px below its line top and the last caption's ends at
+  // +94: 10px of air above and below the ink.
+  const int top = cardY + TOK_SPACE_XS;
   const int baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
   int xe;
   if (percent >= 0) xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, String(percent) + "%", TOK_COLOR_DATA_USAGE);
@@ -936,7 +938,7 @@ static void drawLimitsColumn() {
 
 // Bitcoin logo: 15px orange disc with a black (bg.canvas) pixel-drawn B and two ticks
 // (top and bottom), centred on (cx, cy). Twin of simulator-s3.html's.
-static const int BTC_LOGO_R = 7, BTC_LOGO_W = 2 * BTC_LOGO_R + 1;
+static const int BTC_LOGO_R = 7;
 static void drawBtcLogo(int cx, int cy) {
   static const char* const B[9] = {
     ".X.X.",
@@ -954,37 +956,29 @@ static void drawBtcLogo(int cx, int cy) {
       if (B[r][c] == 'X') g->drawPixel(cx - 2 + c, cy - 4 + r, TOK_COLOR_BG_CANVAS);
 }
 
-// BTC (compact card): logo, the price, then the 24h change on one baseline;
-// the card's 32px is centred on the logo. The change is right-aligned to the
-// content edge (green up, red down; the sign carries it without colour). In
-// the 112px inner width the price steps down from headline to caption size
-// before the change is dropped.
+// BTC (compact card), two rows with 8px of air between and around the ink: the
+// logo and the 24h change (right-aligned to the content edge; green up, red
+// down, the sign carries it without colour), then the price in numeral.lg on
+// the full 112px inner width. A price too wide for it steps down to md, then sm.
 static void drawBtcCard() {
   drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
-  const int cy = BTC_Y + BTC_CARD_H / 2;
+  const int cy = BTC_Y + TOK_SPACE_SM + BTC_LOGO_R;
   drawBtcLogo(SHINE_BAR_X + BTC_LOGO_R, cy);
-  const int px = SHINE_BAR_X + BTC_LOGO_W + TOK_SPACE_XS;
-  const int baseline = cy - fontLineH(TOK_TYPE_HEADLINE) / 2 + fontAscent(TOK_TYPE_HEADLINE);
+  if (STATE.btcPrice >= 0 && !isnan(STATE.btcChangePct))
+    drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, cy - fontLineH(TOK_TYPE_NUMERAL_SM) / 2,
+              fmtChangePct(STATE.btcChangePct),
+              STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
+  // numeral.lg ink ends 27px below its line top.
+  const int baseline = BTC_Y + BTC_CARD_H - TOK_SPACE_SM - 27 + fontAscent(TOK_TYPE_NUMERAL_LG);
   if (STATE.btcPrice < 0) {
-    drawText(TOK_TYPE_NUMERAL_MD, px, baseline - fontAscent(TOK_TYPE_NUMERAL_MD), "--", TOK_COLOR_TEXT_TERTIARY);
+    drawText(TOK_TYPE_NUMERAL_LG, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_NUMERAL_LG), "--", TOK_COLOR_TEXT_TERTIARY);
     return;
   }
   String price = fmtBtc(STATE.btcPrice);
-  FontId pf = TOK_TYPE_NUMERAL_MD;
-  bool showChg = false;
-  String chg;
-  if (!isnan(STATE.btcChangePct)) {
-    chg = fmtChangePct(STATE.btcChangePct);
-    const int wChg = textW(TOK_TYPE_NUMERAL_SM, chg) + TOK_SPACE_XS;
-    const FontId tries[2] = {TOK_TYPE_NUMERAL_MD, TOK_TYPE_NUMERAL_SM};
-    for (int i = 0; i < 2 && !showChg; i++) {
-      if (px + textW(tries[i], price) + wChg <= SHINE_BAR_X + SHINE_BAR_W) { pf = tries[i]; showChg = true; }
-    }
-  }
-  drawText(pf, px, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
-  if (!showChg) return;
-  drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, baseline - fontAscent(TOK_TYPE_NUMERAL_SM), chg,
-            STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
+  FontId pf = TOK_TYPE_NUMERAL_LG;
+  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_MD;
+  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_SM;
+  drawText(pf, SHINE_BAR_X, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
 }
 
 // ── NOTE PAGE (NOTE_PAGE) ──────────────────────────────────

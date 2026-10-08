@@ -125,10 +125,10 @@ const int DST_OFFSET_SEC = 0;
 const int SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
 
 // Status page cards (design.md 7.4).
-const int LIMIT_CARD_H = 118, BTC_CARD_H = 32;
+const int LIMIT_CARD_H = 104, BTC_CARD_H = 60;
 const int LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;                              // 8
-const int LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;       // 134
-const int BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;           // 260
+const int LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;       // 120
+const int BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;           // 232
 const int CLOCK_CARD_H = 192, WEATHER_CARD_H = 84;
 const int CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;                           // 8
 const int WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;  // 208

@@ -441,7 +441,7 @@ The type tokens map onto the nine generated fonts.
 |---|---|---|---|---|---|---|---|
 | `type.display` | `FONT_XL` | 40 / 650 | 49 (1.23×) | 39 | **−1 px** (−0.025 em) | 26 | Hero numerals only: the weather hero temperature and the offline or empty-state hero. At most one per screen. |
 | `type.title` | `FONT_LG` | 26 / 650 | 33 (1.27×) | 26 | **−1 px** (−0.038 em) | 17 | Glanceable key numbers (5h %, week %, digital time) and the values to type on the AP setup screen. **Not for screen titles:** every screen title is headline, in the modal header (§11.14). |
-| `type.headline` | `FONT_MDB` | 17 / 650 | 23 (1.35×) | 18 | 0 | 12 | Screen titles (modal header), row labels, button labels, emphasised values (BTC price, AQI number, the pace flag `!`). |
+| `type.headline` | `FONT_MDB` | 17 / 650 | 23 (1.35×) | 18 | 0 | 12 | Screen titles (modal header), row labels, button labels, emphasised values (AQI number, the pace flag `!`). |
 | `type.body` | `FONT_MD` | 17 / 500 | 23 (1.35×) | 18 | 0 | 11 | Readable text and values: limits rows, reset lines, forecast temperatures, the date. |
 | `type.label` | `FONT_SMB` | 13 / 650 | 17 (1.31×) | 13 | **+1 px** (+0.077 em) | 10 | **UPPERCASE** section labels (`5H`, `WK`, `TOP PROJECTS`), 1–3 words. |
 | `type.caption` | `FONT_SM` | 13 / 500 | 17 (1.31×) | 13 | 0 | 9 | Secondary information: units, axis labels, the status strip, subtitles. |
@@ -454,8 +454,8 @@ Numeric roles are aliases of the same fonts, so data code reads as intent:
 | Numeric token | Alias of | Use |
 |---|---|---|
 | `type.numeral.hero` | type.display | Weather hero temperature |
-| `type.numeral.lg` | type.title | 5h/week %, digital clock |
-| `type.numeral.md` | type.headline | BTC price, stat values, device-stat % |
+| `type.numeral.lg` | type.title | 5h/week %, BTC price, digital clock |
+| `type.numeral.md` | type.headline | stat values, device-stat % |
 | `type.numeral.sm` | type.caption | Axis values, forecast hours, small temperatures |
 
 The hierarchy comes from **size, weight and colour together**, as the Apple
@@ -706,15 +706,16 @@ y: 8  +----------+ +--------------------------[b]--[a]---+  <- corner slots
       | ====     | |   |           |      12:27            |
       | Resets   | |   |   clock   |      Thu 24 Sep       |
       | 16:30    | |   |   r 76    |      [51]             |
-  119 +----------+ |    \         /                        |
-  128 +----------+ |     '-------'                         |
+  111 +----------+ |    \         /                        |
+  120 +----------+ |     '-------'                         |
       |8% WK !86h| |                                       |
       | ======== | +---------------------------------------+  199
       | ==       | +---------------------------------------+  208
       | Resets   | | 28 (rain)  13   14   15   16        > |
-  239 +----------+ | 24  27     ..   ..   ..   ..          |
-  248 +----------+ |                                       |
-      |BTC 84,194| |                                       |
+  223 +----------+ | 24  27     ..   ..   ..   ..          |
+  232 +----------+ |                                       |
+      |(B)    -1%| |                                       |
+      | 84,194   | |                                       |
   279 +----------+ +---------------------------------------+  279
 ```
 (The left cards' text is abbreviated in the sketch. The real strings are measured with
@@ -722,13 +723,13 @@ the firmware glyph advances and the §5.2 tracking in the table below.)
 
 | Card | Box | Internal budget (px) |
 |---|---|---|
-| 5H limit | 172 × 112, pad 8 / 12 (compact) | **Width:** 148 inner. Worst-case top row `99%  WK  ! 167h` = 142 px ✓. At 100% the flag has no duration (`formatPaceDur` returns ""), so `100%  WK  !` = 113 ✓. The label-to-flag gap is `space.xs`. **Vertical:** 96 inner = numeral.lg 33 + 4 + usage meter 8 + 4 + pace meter 6 + 4 + caption `Resets 16:30` / `Resets Thu 05:00` (≤113 px) 17 + caption `in 4h 03m` / `in 6d 16h` (≤63 px) 17 = 93 ✓, with 3 px of slack at the bottom (§7.2 rule 5). |
-| Week limit | 172 × 112, pad 8 / 12 | Same as 5H. The label stays `WK`: `WEEK` would push `99% WEEK ! 86h` to 149 px, over the 148 available. |
-| BTC (compact) | 172 × 32, pad 8 / 12 | caption `BTC` 26 + 8 + headline `123,456` 76 = 110, then the 24h change in `numeral.sm` right-aligned to the content edge (`+5%` 29, green / `-5%` red via `status.success` / `status.error`; the sign carries it without colour), at least `space.xs` clear of the price: 110 + 4 + 29 = 143 ≤ 148 ✓. Headline 23 is vertically centred. |
+| 5H limit | 128 × 104, pad 8 / 12 (compact) | **Width:** 148 inner. Worst-case top row `99%  WK  ! 167h` = 142 px ✓. At 100% the flag has no duration (`formatPaceDur` returns ""), so `100%  WK  !` = 113 ✓. The label-to-flag gap is `space.xs`. **Vertical:** numeral.lg 33 + 4 + usage meter 8 + 4 + pace meter 6 + 4 + caption `Resets 16:30` / `Resets Thu 05:00` (≤113 px) 17 + caption `in 4h 03m` / `in 6d 16h` (≤63 px) 17 = 93 of line boxes, starting `space.xs` below the card top. Measured on ink, the numeral's starts 6 px into its line and the last caption's ends 14 px into its: 10 px of air above and below. |
+| Week limit | 128 × 104, pad 8 / 12 | Same as 5H. The label stays `WK`: `WEEK` would push `99% WEEK ! 86h` to 149 px, over the 148 available. |
+| BTC (compact) | 128 × 60, pad 8 | Two rows, 8 px of air around and between the ink. **Row 1:** the 15 px logo (ink y+8..22) and the 24h change in `numeral.sm`, right-aligned to the content edge and centred on the logo (`+5%` 29, green / `-5%` red via `status.success` / `status.error`; the sign carries it without colour). **Row 2:** the price in `numeral.lg` on the full 112 inner width (`123,456` = 109 ✓); its ink ends 8 px above the card bottom. A wider price (≥ 1,000,000) steps down to `numeral.md`, then `numeral.sm`. |
 | Clock (hero) | 284 × 192, pad 8 | **Side by side**, because the extra width lets the clock grow. Clock ⌀ 153 (r 76, up from today's 68) + 12 + readout column 103 = 268 ✓. The readout is numeral.lg `12:27` 75 px, 4, body `Thu 24 Sep` 92 px, 8, then the AQI badge (48 × 24) = 92 px tall, vertically centred (y 58..149). That keeps it clear of the corner slots, which end at y 31 plus 8 px of clearance. |
 | Weather (compact) | 284 × 72, pad 8 / 12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 260 inner = H/L 20 + now 40 + **4** × 44 hourly (one more hour than before) + 24 disclosure column ✓. |
 
-Left column: 118 + 8 + 118 + 8 + 32 = 284 ✓. Right column: 192 + 8 + 84 = 284 ✓.
+Left column: 104 + 8 + 104 + 8 + 60 = 284 ✓. Right column: 192 + 8 + 84 = 284 ✓.
 
 What the migration does to page 0:
 - The left column narrows from today's 236 px to its fixed 172 px reservation, and the
@@ -1078,7 +1079,7 @@ excluded on purpose are listed in §11.23.
   | Variant | Padding | Use |
   |---|---|---|
   | standard | 12 all round | Most cards |
-  | compact | 8 vertical / 12 horizontal | Single-line or dense tiles (BTC, the weather strip). Minimum height 32. |
+  | compact | 8 vertical / 12 horizontal | Dense tiles (BTC, the weather strip). Minimum height 32. |
   | hero | 8 all round | Visual-first content that should dominate (the clock) |
 
 - **Dimensions:** width is a column or a full width (§7.2). Height sums to the column (§7.2 rule 3).
@@ -1114,8 +1115,8 @@ excluded on purpose are listed in §11.23.
   | Size | Font | Use |
   |---|---|---|
   | hero | `numeral.hero` | Weather temperature |
-  | lg | `numeral.lg` | 5h and week %, digital time |
-  | md | `numeral.md` | BTC, stat % |
+  | lg | `numeral.lg` | 5h and week %, BTC price, digital time |
+  | md | `numeral.md` | stat % |
   | sm | `numeral.sm` | Forecast values |
 
 - **Colour:** the value's colour is its **data-series colour** (usage = accent) or

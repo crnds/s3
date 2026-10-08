@@ -389,7 +389,7 @@ const TOK_MOTION_BACKLIGHT_BREATH_PCT = 40, TOK_MOTION_BACKLIGHT_BREATH_COUNT = 
 
 // ── LAYOUT (state.h's LAYOUT block) ──────────────────────────
 const SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
-const LIMIT_CARD_H = 118, BTC_CARD_H = 32;
+const LIMIT_CARD_H = 104, BTC_CARD_H = 60;
 const LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;
 const LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;
 const BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;
@@ -1484,7 +1484,9 @@ function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec, 
 function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx, resets, inText) {
   drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
   const x = SHINE_BAR_X;
-  const top = cardY + TOK_SPACE_CARD_PAD_COMPACT_V + 3;  // +3: the card is 6px taller than its content
+  // numeral.lg ink starts 6px below its line top and the last caption's ends at
+  // +94: 10px of air above and below the ink.
+  const top = cardY + TOK_SPACE_XS;
   const baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
   const xe = percent >= 0 ? drawText(TOK_TYPE_NUMERAL_LG, x, top, percent + '%', TOK_COLOR_DATA_USAGE)
                           : drawText(TOK_TYPE_NUMERAL_LG, x, top, '--', TOK_COLOR_TEXT_TERTIARY);
@@ -1532,7 +1534,7 @@ function drawLimitsColumn() {
                 weekResetWeekdayLabel(weekRem, STATE.weekResets), weekRem >= 0 ? 'in ' + fmtCountdownDHM(weekRem) : '');
 }
 // Bitcoin logo (twin of pages.cpp's drawBtcLogo).
-const BTC_LOGO_R = 7, BTC_LOGO_W = 2 * BTC_LOGO_R + 1;
+const BTC_LOGO_R = 7;
 function drawBtcLogo(cx, cy) {
   const B = ['.X.X.', 'XXXX.', 'X...X', 'X...X', 'XXXX.', 'X...X', 'X...X', 'XXXX.', '.X.X.'];
   gfx.fillSmoothCircle(cx, cy, BTC_LOGO_R, TOK_BTC_ORANGE);
@@ -1542,24 +1544,20 @@ function drawBtcLogo(cx, cy) {
 }
 function drawBtcCard() {
   drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
-  const cy = BTC_Y + Math.trunc(BTC_CARD_H / 2);
+  const cy = BTC_Y + TOK_SPACE_SM + BTC_LOGO_R;
   drawBtcLogo(SHINE_BAR_X + BTC_LOGO_R, cy);
-  const px = SHINE_BAR_X + BTC_LOGO_W + TOK_SPACE_XS;
-  const baseline = cy - Math.trunc(fontLineH(TOK_TYPE_HEADLINE) / 2) + fontAscent(TOK_TYPE_HEADLINE);
-  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_MD, px, baseline - fontAscent(TOK_TYPE_NUMERAL_MD), '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  if (STATE.btcPrice >= 0 && STATE.btcChangePct !== null)
+    drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, cy - Math.trunc(fontLineH(TOK_TYPE_NUMERAL_SM) / 2),
+              fmtChangePct(STATE.btcChangePct),
+              STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
+  // numeral.lg ink ends 27px below its line top.
+  const baseline = BTC_Y + BTC_CARD_H - TOK_SPACE_SM - 27 + fontAscent(TOK_TYPE_NUMERAL_LG);
+  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_LG, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_NUMERAL_LG), '--', TOK_COLOR_TEXT_TERTIARY); return; }
   const price = fmtBtc(STATE.btcPrice);
-  let pf = TOK_TYPE_NUMERAL_MD, showChg = false, chg = '';
-  if (STATE.btcChangePct !== null) {
-    chg = fmtChangePct(STATE.btcChangePct);
-    const wChg = textW(TOK_TYPE_NUMERAL_SM, chg) + TOK_SPACE_XS;
-    for (const f of [TOK_TYPE_NUMERAL_MD, TOK_TYPE_NUMERAL_SM]) {
-      if (!showChg && px + textW(f, price) + wChg <= SHINE_BAR_X + SHINE_BAR_W) { pf = f; showChg = true; }
-    }
-  }
-  drawText(pf, px, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
-  if (!showChg) return;
-  drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, baseline - fontAscent(TOK_TYPE_NUMERAL_SM), chg,
-            STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
+  let pf = TOK_TYPE_NUMERAL_LG;
+  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_MD;
+  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_SM;
+  drawText(pf, SHINE_BAR_X, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
 }
 
 // ── NOTE PAGE (pages.cpp twin) ────────────────────────────────
