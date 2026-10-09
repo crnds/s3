@@ -122,6 +122,8 @@ static void blitMovieCanvas() {
     memcpy(fb + (size_t)dy * SCREEN_W + destX, movieCanvas + (size_t)y * movieCanvasW,
            (size_t)movieCanvasW * 2);
   }
+  // Every blit rewrites the whole movie, so the corners are never masked twice.
+  aaMaskRoundCorners(destX, destY, movieCanvasW, movieCanvasH, TOK_RADIUS_LG, TOK_COLOR_PLATE);
 }
 
 // Read the next back-to-back JPEG frame (FFD8...FFD9) from movieFile into

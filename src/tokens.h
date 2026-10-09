@@ -179,6 +179,7 @@ const int TOK_HEADER_TITLE_X = 60, TOK_HEADER_TITLE_Y = 11;
 const int TOK_RADIUS_NONE = 0;
 const int TOK_RADIUS_SM = 4;
 const int TOK_RADIUS_MD = 8;
+const int TOK_RADIUS_LG = 12;  // media: the cat GIF and movie display area
 // radius.full = h / 2, computed at the call site.
 
 // Stroke: LovyanGFX drawWideLine takes a HALF-width, so these are the `r` arg.

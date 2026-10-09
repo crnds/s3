@@ -111,6 +111,30 @@ void aaFillRoundRect(int x, int y, int w, int h, int r, uint16_t c) {
 
 void aaFillCircle(int x, int y, int r, uint16_t c) { aaFillRoundRect(x - r, y - r, r * 2 + 1, r * 2 + 1, r, c); }
 
+// The inverse of a round-rect fill, for media already in the frame (cat GIFs,
+// movies): paint `bg` outside a radius-r arc in each corner of (x, y, w, h),
+// blending the 1px anti-aliased edge over the media. Edge pixels blend, so
+// running it twice over the same pixels darkens them: callers clip it to the
+// pixels they just rewrote. Respects the clip rect.
+void aaMaskRoundCorners(int x, int y, int w, int h, int r, uint16_t bg) {
+  if (r > w / 2) r = w / 2;
+  if (r > h / 2) r = h / 2;
+  const float LO = 1.0f / 32.0f, HI = 1.0f - LO;
+  for (int j = 0; j < r; j++) {
+    for (int i = 0; i < r; i++) {
+      float dx = r - i - 0.5f, dy = r - j - 0.5f;
+      float a = sqrtf(dx * dx + dy * dy) - r + 0.5f;  // bg coverage of this pixel
+      if (a < LO) break;  // the rest of this row is inside the arc
+      const int px[4] = {x + i, x + w - 1 - i, x + i, x + w - 1 - i};
+      const int py[4] = {y + j, y + j, y + h - 1 - j, y + h - 1 - j};
+      for (int k = 0; k < 4; k++) {
+        if (a > HI) g->drawPixel(px[k], py[k], bg);
+        else blendPx(px[k], py[k], bg, (uint8_t)(a * 255));
+      }
+    }
+  }
+}
+
 // Anti-aliased ring of thickness t whose outer edge is radius r: only the
 // band's pixels are touched (coverage = outer disc minus inner disc), so a
 // big clock face costs ~1 ms instead of two full disc fills.

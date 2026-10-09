@@ -514,6 +514,7 @@ void drawCardSurface(int x, int y, int w, int h, uint16_t fill);
 void aaFillRoundRect(int x, int y, int w, int h, int r, uint16_t c);
 void aaFillCircle(int x, int y, int r, uint16_t c);
 void aaRing(int cx, int cy, int r, int t, uint16_t c);  // AA ring, outer radius r, thickness t
+void aaMaskRoundCorners(int x, int y, int w, int h, int r, uint16_t bg);  // round the corners of media in the frame
 // The full-screen cat page's reset readout, on a color.plate (design.md 11.20).
 void drawResetPlate();
 // Empty / error state (design.md 13.4), centred in a box: a title, space.sm,

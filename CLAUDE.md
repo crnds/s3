@@ -74,18 +74,26 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 ## Commands
 
 ```sh
-pio run                                  # build (first run downloads pioarduino)
-pio run -t upload                        # flash over native USB (/dev/cu.usbmodem1101)
-pio device monitor                       # serial log (baud is irrelevant on native USB)
-python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
-                                         # drive the board over serial, save shots/*.png
+PIO=~/.pio-venv/bin/pio                  # pio is not on PATH; this venv is the install
+$PIO run                                 # build (first run downloads pioarduino)
+$PIO run -t upload --upload-port /dev/cu.usbmodem1301   # flash over native USB
+$PIO device monitor --port /dev/cu.usbmodem1301         # serial log (baud is irrelevant on native USB)
+~/.pio-venv/bin/python tools/grab_screen.py --port /dev/cu.usbmodem1301 "x 1 g:status n 1 g:usage w 1 g:weather x"
+                                         # drive the board over serial, save shots/*.ppm
 python3 tools/make_vlw.py                # regenerate fonts (firmware + sim) after editing FONTS
 ```
 
-`grab_screen.py` must run under the **system `python3`** (it has pyserial +
-Pillow; PlatformIO's venv has no Pillow), and it can't open the port while
+**Port:** the board currently enumerates as `/dev/cu.usbmodem1301`, but
+`platformio.ini` (`upload_port`/`monitor_port`) and `grab_screen.py`'s default
+still say `1101`. The number follows the Mac's USB socket, so check
+`ls /dev/cu.usbmodem*` and pass the port explicitly.
+
+`grab_screen.py` runs under **`~/.pio-venv/bin/python`**: it has pyserial, but
+the system `python3` no longer does. That venv has no Pillow, so the script
+falls back to `shots/<name>.ppm`; convert it with
+`sips -s format png shots/x.ppm --out shots/x.png`. It can't open the port while
 `pio device monitor` holds it. In its command string a bare number is a
-pause in seconds, and `g:name` writes `shots/<name>.png`. A grab is a single
+pause in seconds, and `g:name` writes `shots/<name>.ppm` (`.png` with Pillow). A grab is a single
 frame, so it can't show a one-frame glitch (flash, tear): those need eyes on
 the panel.
 
@@ -98,10 +106,15 @@ canvas takes the same keys (plus arrows/Esc) when focused, and
 `?slowmo=10` starts it in slow motion. A grab is the `frame` buffer, not the
 composite on the panel, so grab after transitions settle.
 
-Headless sim screenshot (Playwright is installed at `~/node_modules`):
-```sh
-node -e 'const{chromium}=require(require("os").homedir()+"/node_modules/playwright");(async()=>{const b=await chromium.launch();const p=await b.newPage();p.on("pageerror",e=>console.log("ERR",e.message));await p.goto("file://'"$PWD"'/simulator-s3.html");await p.waitForTimeout(1500);await p.locator("#screen").screenshot({path:"/tmp/s3sim.png"});await b.close();})()'
-```
+Headless sim screenshot: `~/node_modules/playwright` is gone, so use the
+Playwright MCP. It blocks `file://`, so serve the repo first
+(`python3 -m http.server 8765`, then open `http://127.0.0.1:8765/simulator-s3.html`;
+the CORS error from `/api/usage` is expected and the sim runs on its fallback).
+The MCP only writes screenshots under `~/s3`, so save them to `.playwright-mcp/`
+(untracked) and delete it afterwards. To set data and the page, `browser_evaluate`
+`Object.assign(STATE, {currentPage: 0, btcPrice: 82893, ...}); render();`.
+To compare pixel for pixel, read the canvas with `getImageData` in the same
+evaluate rather than cropping a screenshot.
 The `#screen` box is 486×326 = 480×320 canvas + 3px border; crop 3px to
 compare against a board grab pixel-for-pixel.
 

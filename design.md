@@ -759,9 +759,10 @@ What the migration does to page 0:
 
 | Token | Value | Use |
 |---|---|---|
-| `radius.none` | 0 | The canvas; full-bleed media |
+| `radius.none` | 0 | The canvas |
 | `radius.sm` | 4 | Badges (AQI), chart bars, toast |
 | `radius.md` | 8 | Cards, list rows, buttons, option cells |
+| `radius.lg` | 12 | Media: the cat GIF and movie display area (full-screen, and the mixed page's pane). Corners go to `color.plate` full-screen, `bg.canvas` in the pane. |
 | `radius.full` | h / 2 | Meters and tracks, pills, dots, the scroll thumb |
 
 Rules:
@@ -771,7 +772,7 @@ Rules:
 - Radius depends on the component, not the size.
 
 **AA primitives.** Use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp)
-for anything with radius ≥ 4. They run LovyanGFX 1.2.30's `fillSmoothRoundRect`
+for anything with radius ≥ 4, and `aaMaskRoundCorners` to round media already in the frame (clip it to the pixels just rewritten: re-blending an edge pixel darkens it). They run LovyanGFX 1.2.30's `fillSmoothRoundRect`
 algorithm but blend edge pixels straight into the frame buffer; the simulator's
 `gfx.fillSmoothRoundRect` / `gfx.aaRing` port the same loops (confirmed by a
 board-vs-simulator pixel compare). Plain `fillRoundRect` corners are aliased and
