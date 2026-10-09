@@ -54,6 +54,12 @@ static int destX = 0, destY = 0;
 // largest-frame ceiling.
 static const int MOVIE_BUF_CAP = 300 * 1024;
 static uint8_t* movieBuf = nullptr;
+// The file is read in MOVIE_READ_CHUNK blocks (one byte per File::read() was
+// most of a frame's cost), so a read usually overshoots the frame's FFD9: the
+// overshoot stays at movieBuf[movieTailStart .. +movieTailLen) and is moved to
+// the front as the start of the next frame.
+static const int MOVIE_READ_CHUNK = 8 * 1024;
+static int movieTailStart = 0, movieTailLen = 0;
 
 // ── JPEGDEC CALLBACK ───────────────────────────────────────
 // One decoded MCU block into movieCanvas, analogous to gif_player.cpp's
@@ -127,22 +133,30 @@ static void blitMovieCanvas() {
 }
 
 // Read the next back-to-back JPEG frame (FFD8...FFD9) from movieFile into
-// movieBuf, one byte at a time. Returns the frame length, or 0 at end of
-// file / on a frame exceeding MOVIE_BUF_CAP (treated as corrupt/EOF by the
-// caller). Deliberately avoids seek(): the file position naturally lands
-// exactly at the next frame's FFD8 once this returns, no rewind needed.
+// movieBuf, in MOVIE_READ_CHUNK blocks. Returns the frame length, or 0 at end
+// of file / on a frame exceeding MOVIE_BUF_CAP (treated as corrupt/EOF by the
+// caller). Deliberately avoids seek(): bytes read past this frame's FFD9 are
+// kept as the head of the next one (movieTail*), so the stream stays in step.
 static int readNextFrame() {
-  int len = 0;
-  bool sawFF = false;
-  while (len < MOVIE_BUF_CAP) {
-    int c = movieFile.read();
-    if (c < 0) return 0;  // EOF before a full frame
-    uint8_t b = (uint8_t)c;
-    movieBuf[len++] = b;
-    if (sawFF && b == 0xD9) return len;
-    sawFF = (b == 0xFF);
+  int len = movieTailLen;
+  if (len) memmove(movieBuf, movieBuf + movieTailStart, len);
+  movieTailStart = movieTailLen = 0;
+  int scanned = 0;
+  for (;;) {
+    // Scan from one byte back so an FF ending the last block still pairs.
+    for (int i = scanned > 0 ? scanned : 1; i < len; i++) {
+      if (movieBuf[i] == 0xD9 && movieBuf[i - 1] == 0xFF) {
+        movieTailStart = i + 1;
+        movieTailLen = len - movieTailStart;
+        return movieTailStart;
+      }
+    }
+    scanned = len;
+    if (len >= MOVIE_BUF_CAP) return 0;
+    int got = movieFile.read(movieBuf + len, min(MOVIE_READ_CHUNK, MOVIE_BUF_CAP - len));
+    if (got <= 0) return 0;  // EOF before a full frame
+    len += got;
   }
-  return 0;
 }
 
 static bool openMovieAtIndex(int index, bool resetOpenedTime) {
@@ -152,6 +166,7 @@ static bool openMovieAtIndex(int index, bool resetOpenedTime) {
   bool ok = (bool)movieFile;
   unlockSD();
   if (!ok) return false;
+  movieTailStart = movieTailLen = 0;
   movieOpen = true;
   moviePendingFirstFrame = true;
   if (resetOpenedTime) movieOpenedAtMs = millis();
@@ -172,6 +187,7 @@ static bool reopenCurrentMovie() {
 static void closeMovie() {
   if (movieOpen) { lockSD(); movieFile.close(); unlockSD(); }
   movieOpen = false;
+  movieTailStart = movieTailLen = 0;
 }
 
 // Empty / error state when there's nothing to show (no SD, or an empty
@@ -304,6 +320,20 @@ void moviePlayerResetForPageChange() {
   moviePlaceholderDrawn = false;
   nextOpenIsLoop = false;
   movieNextFrameMs = millis();
+}
+
+// gifPlayerStagePage()'s movie half: close the movie (the first ungated
+// movieTick() after the slide lands opens one and decodes its first frame)
+// and stage the poster, or the plate that frame clears to.
+void moviePlayerStagePage(bool offline, const uint16_t* poster) {
+  moviePlayerResetForPageChange();
+  if (!STATE.sdOk || movieCount == 0 || !jpeg || !movieCanvas || !movieBuf) {
+    drawMoviePlaceholder(offline);
+    return;
+  }
+  if (poster) memcpy(frame.getBuffer(), poster, (size_t)SCREEN_W * SCREEN_H * 2);
+  else g->fillScreen(TOK_COLOR_PLATE);
+  drawMediaOverlays(offline);
 }
 
 // Draw the first frame immediately (page slide renders the incoming page

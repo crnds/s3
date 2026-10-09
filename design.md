@@ -1496,6 +1496,9 @@ Why springs rather than today's 180 ms ease-out cubic:
   from three frame buffers (current, next, and the one after: 900 KB of PSRAM). Until then,
   the minimum acceptable behaviour is to finish the slide in flight on the same present and
   start the next with the carried velocity. The tap is never dropped; only its first frame jumps.
+- **A slide never waits on media.** The media pages slide in showing their last screen (or
+  the plate, before a first visit) and their players start on the first frame after the
+  slide lands. A decode inside the slide is a frame the slide doesn't get.
 - **2D motion is split into independent X and Y springs.** In this system only one axis
   moves at a time today, but the rule holds for anything that moves diagonally.
 

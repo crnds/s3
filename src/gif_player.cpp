@@ -387,6 +387,31 @@ void gifPlayerResetForPageChange() {
   gifNextFrameMs = millis();
 }
 
+// A page slide is landing on this page: close the player (the next ungated
+// gifTick() opens a fresh cat and decodes its first frame in one tick, so
+// nothing presents between the close and that frame) and stage the screen
+// cheaply -- the page's poster, or the plate the first frame clears to.
+void gifPlayerStagePage(bool offline, const uint16_t* poster) {
+  if (currentPage == MOVIE_PAGE && !offline) { moviePlayerStagePage(offline, poster); return; }
+  gifPlayerResetForPageChange();
+  if (catCount == 0 || !gif || !gifCanvas) { drawGifPlaceholder(offline); return; }
+  bool mixed = (currentPage == MIXED_PAGE && !offline);
+  if (poster) {
+    memcpy(frame.getBuffer(), poster, (size_t)SCREEN_W * SCREEN_H * 2);
+  } else if (mixed) {
+    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_PLATE);
+    aaMaskRoundCorners(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
+  } else {
+    g->fillScreen(TOK_COLOR_PLATE);
+  }
+  if (mixed) {  // the live half, over a poster's stale one (it leaves the pane alone)
+    lockState();
+    drawMixedPageStatic();
+    unlockState();
+  }
+  drawMediaOverlays(offline);
+}
+
 // Draw the first frame immediately (page slide renders the incoming page
 // before animating to it).
 void gifPlayerPrimeFrame(bool offline) {
