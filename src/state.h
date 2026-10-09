@@ -514,6 +514,7 @@ void drawCardSurface(int x, int y, int w, int h, uint16_t fill);
 void aaFillRoundRect(int x, int y, int w, int h, int r, uint16_t c);
 void aaFillCircle(int x, int y, int r, uint16_t c);
 void aaRing(int cx, int cy, int r, int t, uint16_t c);  // AA ring, outer radius r, thickness t
+void aaMaskRoundCorners(int x, int y, int w, int h, int r, uint16_t bg);  // round the corners of media in the frame
 // The full-screen cat page's reset readout, on a color.plate (design.md 11.20).
 void drawResetPlate();
 // Empty / error state (design.md 13.4), centred in a box: a title, space.sm,
@@ -536,6 +537,11 @@ void gifPlayerResetForPageChange(); // force a fresh random GIF on the next tick
 // Decode + draw the first frame right now (into `frame`, then presentFrame()
 // -- held during a page slide), instead of waiting for the next gifTick().
 void gifPlayerPrimeFrame(bool offline);
+// Stage the page for a slide onto it without opening the player: the
+// poster (the page's last screen, or nullptr for the plain plate) + overlays,
+// into `frame`, no present. The next gifTick() after the slide lands opens
+// and decodes the first frame (loop() gates it on navPageTransitionActive()).
+void gifPlayerStagePage(bool offline, const uint16_t* poster);
 // Re-blit the whole open GIF canvas (+ the page's static parts and
 // overlays) into `frame` -- after a sheet or a cancelled lean overwrote it.
 void gifPlayerRepaint(bool offline);
@@ -561,6 +567,7 @@ void moviePlayerEnter();
 void moviePlayerExit();
 void moviePlayerResetForPageChange();
 void moviePlayerPrimeFrame(bool offline);
+void moviePlayerStagePage(bool offline, const uint16_t* poster);
 void moviePlayerRepaint(bool offline);
 
 // ── SETTINGS (settings.cpp) ────────────────────────────────
@@ -615,6 +622,8 @@ void navTouch(bool down, int32_t x, int32_t y, uint32_t now);
 // presented this pass (loop() then skips its own present).
 bool navTick(uint32_t now);
 bool navTransitionActive();       // a composite (slide / sheet / fade) is on screen
+bool navPageTransitionActive();   // a page slide (or Reduce Motion page fade): media players hold
+void navInvalidatePosters();      // theme changed: the media pages' slide-in posters are stale
 bool navSheetOpen();              // Weather, Device Stats or Settings is up
 void navGoToPage(int page, bool forward);   // serial keys; animated unless offline
 void navOpenSheet(int which);     // 0 weather, 1 device, 2 settings

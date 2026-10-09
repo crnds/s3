@@ -74,18 +74,26 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 ## Commands
 
 ```sh
-pio run                                  # build (first run downloads pioarduino)
-pio run -t upload                        # flash over native USB (/dev/cu.usbmodem1101)
-pio device monitor                       # serial log (baud is irrelevant on native USB)
-python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
-                                         # drive the board over serial, save shots/*.png
+PIO=~/.pio-venv/bin/pio                  # pio is not on PATH; this venv is the install
+$PIO run                                 # build (first run downloads pioarduino)
+$PIO run -t upload --upload-port /dev/cu.usbmodem1301   # flash over native USB
+$PIO device monitor --port /dev/cu.usbmodem1301         # serial log (baud is irrelevant on native USB)
+~/.pio-venv/bin/python tools/grab_screen.py --port /dev/cu.usbmodem1301 "x 1 g:status n 1 g:usage w 1 g:weather x"
+                                         # drive the board over serial, save shots/*.ppm
 python3 tools/make_vlw.py                # regenerate fonts (firmware + sim) after editing FONTS
 ```
 
-`grab_screen.py` must run under the **system `python3`** (it has pyserial +
-Pillow; PlatformIO's venv has no Pillow), and it can't open the port while
+**Port:** the board currently enumerates as `/dev/cu.usbmodem1301`, but
+`platformio.ini` (`upload_port`/`monitor_port`) and `grab_screen.py`'s default
+still say `1101`. The number follows the Mac's USB socket, so check
+`ls /dev/cu.usbmodem*` and pass the port explicitly.
+
+`grab_screen.py` runs under **`~/.pio-venv/bin/python`**: it has pyserial, but
+the system `python3` no longer does. That venv has no Pillow, so the script
+falls back to `shots/<name>.ppm`; convert it with
+`sips -s format png shots/x.ppm --out shots/x.png`. It can't open the port while
 `pio device monitor` holds it. In its command string a bare number is a
-pause in seconds, and `g:name` writes `shots/<name>.png`. A grab is a single
+pause in seconds, and `g:name` writes `shots/<name>.ppm` (`.png` with Pillow). A grab is a single
 frame, so it can't show a one-frame glitch (flash, tear): those need eyes on
 the panel.
 
@@ -98,10 +106,15 @@ canvas takes the same keys (plus arrows/Esc) when focused, and
 `?slowmo=10` starts it in slow motion. A grab is the `frame` buffer, not the
 composite on the panel, so grab after transitions settle.
 
-Headless sim screenshot (Playwright is installed at `~/node_modules`):
-```sh
-node -e 'const{chromium}=require(require("os").homedir()+"/node_modules/playwright");(async()=>{const b=await chromium.launch();const p=await b.newPage();p.on("pageerror",e=>console.log("ERR",e.message));await p.goto("file://'"$PWD"'/simulator-s3.html");await p.waitForTimeout(1500);await p.locator("#screen").screenshot({path:"/tmp/s3sim.png"});await b.close();})()'
-```
+Headless sim screenshot: `~/node_modules/playwright` is gone, so use the
+Playwright MCP. It blocks `file://`, so serve the repo first
+(`python3 -m http.server 8765`, then open `http://127.0.0.1:8765/simulator-s3.html`;
+the CORS error from `/api/usage` is expected and the sim runs on its fallback).
+The MCP only writes screenshots under `~/s3`, so save them to `.playwright-mcp/`
+(untracked) and delete it afterwards. To set data and the page, `browser_evaluate`
+`Object.assign(STATE, {currentPage: 0, btcPrice: 82893, ...}); render();`.
+To compare pixel for pixel, read the canvas with `getImageData` in the same
+evaluate rather than cropping a screenshot.
 The `#screen` box is 486×326 = 480×320 canvas + 3px border; crop 3px to
 compare against a board grab pixel-for-pixel.
 
@@ -165,8 +178,20 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   transition runs at a time; while one is up, `presentFrame()` just marks the
   frame dirty and `navTick()` composites it. Buffers: `prevFrame` (outgoing
   screen / dropping sheet) and `behindFrame` (the page under an open sheet),
-  300KB each in PSRAM. A `[motion]` serial line per transition reports frames
-  and the slowest present (~23ms slide, ~30ms sheet, ~12 frames).
+  300KB each in PSRAM. A `[motion]` serial line per transition reports frames,
+  the slowest present (~23ms slide, ~30ms sheet, ~12 frames) and the longest
+  gap between composites, counted from the slide's start so it includes
+  composing the incoming page (~65ms onto a media page).
+- **Media pages load after the slide lands.** A slide onto GIF/MOVIE/MIXED
+  never opens or decodes: `preparePage()` stages the page with
+  `gifPlayerStagePage()` (the page's poster -- its last screen, captured from
+  `prevFrame` as a slide leaves it, three 300KB PSRAM buffers -- or the plate
+  before a first visit, plus the overlays; the mixed page's left column is
+  redrawn live), and `loop()` skips the whole cat-mode branch while
+  `navPageTransitionActive()`. The first pass after landing opens a fresh clip
+  and decodes it in one tick. A theme change invalidates the posters
+  (`navInvalidatePosters()`). A first-frame decode in the slide cost the movie
+  slide 5-9 frames and a ~230-330ms stall.
 - **Presents are batched per loop pass.** `loop()` (~33ms period) collects
   "changed" from `gifTick()` and, only on the shared 8Hz ambient tick
   (`TOK_MOTION_AMBIENT_TICK_MS`), from `shineTick()` (pace sweep every 3s),
@@ -210,6 +235,8 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   flip) is deferred via `nextOpenIsLoop` and done in the same `gifTick()` as
   the first frame's decode. The last frame is held for its own delay first.
   Presenting in between is the one-frame black flash users see at a loop.
+  Movies read the SD in 8KB blocks (`readNextFrame`; the overshoot past a
+  frame's FFD9 is carried to the next frame, still no `seek()`): 6.5 -> 9.6 fps.
 - **Fonts (`fonts.cpp`):** VLW preloaded once into `lgfx::VLWfont` objects;
   `drawText/drawTextR/drawTextC(FontId, …)` are the only text API — no
   `setTextSize`/`print` built-in font anywhere. ASCII only (server

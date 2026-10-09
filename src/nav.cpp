@@ -50,8 +50,31 @@ void navSyncCatMode(bool catMode) {
   prevCatMode = catMode;
 }
 
-// Compose currentPage into `frame` without presenting (cat pages open a GIF
-// and decode its first frame).
+// ── MEDIA POSTERS ──────────────────────────────────────────
+// The last screen each media page showed, captured as a page slides away from
+// it (prevFrame already holds exactly that). A slide back onto the page shows
+// it while the player stays closed; the player opens and decodes only once the
+// slide has landed (loop() gates gifTick on navPageTransitionActive()), so a
+// slide never waits on, or shares its frames with, a GIF/MJPEG decode.
+static uint16_t* poster[3] = {nullptr, nullptr, nullptr};  // GIF_PAGE, MOVIE_PAGE, MIXED_PAGE
+static bool posterValid[3] = {false, false, false};
+static int posterSlot(int p) { return isCatPage(p) ? p - GIF_PAGE : -1; }
+
+static void capturePoster(int page) {
+  int i = posterSlot(page);
+  if (i < 0 || !STATE.haveData) return;
+  if (!poster[i]) poster[i] = (uint16_t*)heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM);
+  if (!poster[i]) return;
+  memcpy(poster[i], prevFrame, FRAME_BYTES);
+  posterValid[i] = true;
+}
+
+// A theme change recolours the canvas round the media (the mixed pane's
+// corners, the overlays' plates), so a poster from before it is stale.
+void navInvalidatePosters() { posterValid[0] = posterValid[1] = posterValid[2] = false; }
+
+// Compose currentPage into `frame` without presenting. Cat pages are staged
+// (poster or plate + overlays), not played: see MEDIA POSTERS above.
 static void preparePage() {
   bool held = presentHold;
   presentHold = true;
@@ -59,14 +82,8 @@ static void preparePage() {
   bool cat = navCatLayout();
   navSyncCatMode(cat);
   if (cat) {
-    if (currentPage == MIXED_PAGE && !offline) {
-      lockState();
-      g->fillScreen(TOK_COLOR_BG_CANVAS);
-      drawMixedPageStatic();
-      unlockState();
-    }
-    gifPlayerResetForPageChange();
-    gifPlayerPrimeFrame(offline);
+    int i = posterSlot(currentPage);
+    gifPlayerStagePage(offline, (!offline && i >= 0 && posterValid[i]) ? poster[i] : nullptr);
   } else {
     render();
   }
@@ -108,10 +125,15 @@ static bool tPinStrip = false;    // T_PAGE: pin the status strip (neither end i
 static bool sheetClosing = false;  // T_SHEET: false = sheet live over behindFrame; true = page live under prevFrame
 static const uint16_t* fadeFrom = nullptr;
 static int fadeStep = 0;
+static bool fadeIsPage = false;  // T_FADE: a Reduce Motion page change (navPageTransitionActive)
 static bool tHeld = false;       // a finger owns the transition (no spring stepping)
 // Diagnostics (one serial line per transition): composite frames presented
 // and the slowest one -- design.md 18.4's "sheet cost" / "60 Hz" checks.
 static uint32_t tFrames = 0, tMaxPresentUs = 0;
+// ...and the longest wait for a composite frame, counted from the moment a page
+// slide starts (so it includes composing the incoming page): a stall the
+// present time alone can't show.
+static uint32_t tStartUs = 0, tLastFrameUs = 0, tMaxGapUs = 0;
 static uint32_t lastTickMs = 0;
 
 // What was open when a sheet started to drop -- grabbing it mid-drop and
@@ -120,6 +142,7 @@ static bool savedWeather = false, savedDevice = false;
 static SettingsScreen savedSettings = SET_OFF;
 
 bool navTransitionActive() { return tKind != T_NONE; }
+bool navPageTransitionActive() { return tKind == T_PAGE || (tKind == T_FADE && fadeIsPage); }
 bool navSheetOpen() { return weatherPageOpen || devicePageOpen || settingsScreen != SET_OFF; }
 
 static int sheetScrimLevel(int vis) {
@@ -154,6 +177,10 @@ static void presentComposite() {
   shiftDirty = false;
   transitionDirty = false;
   tFrames++;
+  uint32_t nowUs = micros();
+  uint32_t since = tLastFrameUs ? tLastFrameUs : tStartUs;
+  if (since && nowUs - since > tMaxGapUs) tMaxGapUs = nowUs - since;
+  tLastFrameUs = nowUs;
   uint32_t busy = displayLastPresentUs() - displayLastTeWaitUs();
   if (busy > tMaxPresentUs) tMaxPresentUs = busy;
 }
@@ -162,14 +189,16 @@ static void startFade(const uint16_t* from) {
   tKind = T_FADE;
   fadeFrom = from;
   fadeStep = 1;
+  fadeIsPage = false;
   transitionDirty = true;
 }
 
 static void endTransition() {
   static const char* const NAMES[] = {"none", "page", "sheet", "push", "fade"};
-  if (tFrames) Serial.printf("[motion] %s: %lu frames, slowest present %luus (excl. TE wait)\n", NAMES[tKind],
-                             (unsigned long)tFrames, (unsigned long)tMaxPresentUs);
-  tFrames = tMaxPresentUs = 0;
+  if (tFrames) Serial.printf("[motion] %s: %lu frames, slowest present %luus (excl. TE wait), longest gap %luus\n",
+                             NAMES[tKind], (unsigned long)tFrames, (unsigned long)tMaxPresentUs,
+                             (unsigned long)tMaxGapUs);
+  tFrames = tMaxPresentUs = tMaxGapUs = tStartUs = tLastFrameUs = 0;
   tKind = T_NONE;
   tHeld = false;
   spring.active = false;
@@ -181,8 +210,10 @@ static void endTransition() {
 // Snapshot the current page, switch currentPage to `page` and compose it off
 // screen. The slide itself is the spring's job.
 static void beginPageTransition(int page, bool forward) {
+  if (!tStartUs) tStartUs = micros();
   memcpy(prevFrame, fb(), FRAME_BYTES);
   tFromPage = currentPage;
+  capturePoster(tFromPage);
   tPinStrip = tFromPage != GIF_PAGE && tFromPage != MOVIE_PAGE && page != GIF_PAGE && page != MOVIE_PAGE;
   currentPage = page;
   preparePage();
@@ -205,6 +236,7 @@ static void commitPageEnd() {
 // Put the original page back exactly as it was (its pixels from prevFrame;
 // a cat page re-blits its canvas, reopening only if the layout changed).
 static void revertPage() {
+  tFrames = tMaxPresentUs = tMaxGapUs = tStartUs = tLastFrameUs = 0;
   currentPage = tFromPage;
   memcpy(fb(), prevFrame, FRAME_BYTES);
   bool cat = navCatLayout();
@@ -238,6 +270,7 @@ void navGoToPage(int page, bool forward) {
   beginPageTransition(page, forward);
   if (cfgReduceMotion) {
     startFade(prevFrame);
+    fadeIsPage = true;
     cfgLastPage = page;
     queueConfigSave(CFGKEY_LAST_PAGE, page);
     return;

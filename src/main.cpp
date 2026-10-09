@@ -519,6 +519,10 @@ void loop() {
       toastText[0] = 0;
       renderSettings();
     }
+  } else if (catMode && navPageTransitionActive()) {
+    // Sliding onto (or between) media pages: the incoming page is staged (a
+    // poster or plate, nav.cpp) and the player opens on the first pass after
+    // the slide lands -- a decode here would cost the slide its frame rate.
   } else if (catMode) {
     if (gifTick(offline)) needPresent = true;
     if (currentPage == MIXED_PAGE && !offline) {

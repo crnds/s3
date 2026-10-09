@@ -273,6 +273,7 @@ static void applyTheme(int v) {
   cfgLightMode = (v != 0);
   applyThemeTokens();
   navRefreshBehind();
+  navInvalidatePosters();
   queueConfigSave(CFGKEY_LIGHT_MODE, v);
 }
 

@@ -759,9 +759,10 @@ What the migration does to page 0:
 
 | Token | Value | Use |
 |---|---|---|
-| `radius.none` | 0 | The canvas; full-bleed media |
+| `radius.none` | 0 | The canvas |
 | `radius.sm` | 4 | Badges (AQI), chart bars, toast |
 | `radius.md` | 8 | Cards, list rows, buttons, option cells |
+| `radius.lg` | 12 | Media: the cat GIF and movie display area (full-screen, and the mixed page's pane). Corners go to `color.plate` full-screen, `bg.canvas` in the pane. |
 | `radius.full` | h / 2 | Meters and tracks, pills, dots, the scroll thumb |
 
 Rules:
@@ -771,7 +772,7 @@ Rules:
 - Radius depends on the component, not the size.
 
 **AA primitives.** Use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp)
-for anything with radius ≥ 4. They run LovyanGFX 1.2.30's `fillSmoothRoundRect`
+for anything with radius ≥ 4, and `aaMaskRoundCorners` to round media already in the frame (clip it to the pixels just rewritten: re-blending an edge pixel darkens it). They run LovyanGFX 1.2.30's `fillSmoothRoundRect`
 algorithm but blend edge pixels straight into the frame buffer; the simulator's
 `gfx.fillSmoothRoundRect` / `gfx.aaRing` port the same loops (confirmed by a
 board-vs-simulator pixel compare). Plain `fillRoundRect` corners are aliased and
@@ -1495,6 +1496,9 @@ Why springs rather than today's 180 ms ease-out cubic:
   from three frame buffers (current, next, and the one after: 900 KB of PSRAM). Until then,
   the minimum acceptable behaviour is to finish the slide in flight on the same present and
   start the next with the carried velocity. The tap is never dropped; only its first frame jumps.
+- **A slide never waits on media.** The media pages slide in showing their last screen (or
+  the plate, before a first visit) and their players start on the first frame after the
+  slide lands. A decode inside the slide is a frame the slide doesn't get.
 - **2D motion is split into independent X and Y springs.** In this system only one axis
   moves at a time today, but the rule holds for anything that moves diagonally.
 

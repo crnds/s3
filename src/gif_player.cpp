@@ -121,6 +121,20 @@ static void GIFDraw(GIFDRAW* pDraw) {
 }
 
 // ── CANVAS -> FRAME ────────────────────────────────────────
+// Round the cat's display area (radius.lg): the screen-wide cat's corners go
+// to the letterbox plate, the mixed pane's to the page canvas. Clipped to the
+// pixels a blit just rewrote, since re-blending an edge pixel darkens it;
+// openCatAtIndex() masks the freshly cleared area once, unclipped, so corners
+// a GIF never redraws are still round.
+static void maskCatCorners(int clipX, int clipY, int clipW, int clipH) {
+  g->setClipRect(clipX, clipY, clipW, clipH);
+  if (gifMixedMode)
+    aaMaskRoundCorners(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
+  else
+    aaMaskRoundCorners(destX, destY, canvasW, canvasH, TOK_RADIUS_LG, TOK_COLOR_PLATE);
+  g->clearClipRect();
+}
+
 // Copy the frame's dirty box from the canvas into `frame`.
 static void blitDirty() {
   if (dirtyX1 < 0) return;
@@ -135,6 +149,7 @@ static void blitDirty() {
       if (x1 < x0) continue;
       memcpy(fb + dy * SCREEN_W + destX + x0, gifCanvas + y * canvasW + x0, (x1 - x0 + 1) * 2);
     }
+    maskCatCorners(destX + dirtyX0, destY + dirtyY0, dirtyX1 - dirtyX0 + 1, dirtyY1 - dirtyY0 + 1);
     return;
   }
   // Cover-fit into the mixed pane: nearest-sample the canvas through the
@@ -165,6 +180,8 @@ static void blitDirty() {
       drow[px] = srow[sx];
     }
   }
+  if (dstX1 >= dstX0 && dstY1 >= dstY0)
+    maskCatCorners(destX + dstX0, destY + dstY0, dstX1 - dstX0 + 1, dstY1 - dstY0 + 1);
 }
 
 // Everything drawn over the cat (or movie) after each frame: the reset plate
@@ -235,6 +252,7 @@ static bool openCatAtIndex(int index, bool resetOpenedTime) {
     destY = (SCREEN_H - canvasH) / 2;
     g->fillScreen(TOK_COLOR_PLATE);  // smaller (legacy 320x240) GIFs letterbox on black
   }
+  maskCatCorners(0, 0, SCREEN_W, SCREEN_H);
   gifOpen = true;
   if (resetOpenedTime) gifOpenedAtMs = millis();
   return true;
@@ -367,6 +385,31 @@ void gifPlayerResetForPageChange() {
   gifPlaceholderDrawn = false;
   nextOpenIsLoop = false;
   gifNextFrameMs = millis();
+}
+
+// A page slide is landing on this page: close the player (the next ungated
+// gifTick() opens a fresh cat and decodes its first frame in one tick, so
+// nothing presents between the close and that frame) and stage the screen
+// cheaply -- the page's poster, or the plate the first frame clears to.
+void gifPlayerStagePage(bool offline, const uint16_t* poster) {
+  if (currentPage == MOVIE_PAGE && !offline) { moviePlayerStagePage(offline, poster); return; }
+  gifPlayerResetForPageChange();
+  if (catCount == 0 || !gif || !gifCanvas) { drawGifPlaceholder(offline); return; }
+  bool mixed = (currentPage == MIXED_PAGE && !offline);
+  if (poster) {
+    memcpy(frame.getBuffer(), poster, (size_t)SCREEN_W * SCREEN_H * 2);
+  } else if (mixed) {
+    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_PLATE);
+    aaMaskRoundCorners(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
+  } else {
+    g->fillScreen(TOK_COLOR_PLATE);
+  }
+  if (mixed) {  // the live half, over a poster's stale one (it leaves the pane alone)
+    lockState();
+    drawMixedPageStatic();
+    unlockState();
+  }
+  drawMediaOverlays(offline);
 }
 
 // Draw the first frame immediately (page slide renders the incoming page
