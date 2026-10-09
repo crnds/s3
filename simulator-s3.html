@@ -412,7 +412,7 @@ const NIGHT_MODE_DIM_VALUE = 64;
 const SHIFT_ORBIT = [[0,0],[1,0],[2,0],[2,-1],[2,-2],[1,-2],[0,-2],[0,-1]];
 let SHIFT_STEP_MS = 180000;  // firmware default; flash "pixel_shift_min" * 60000
 
-const WEATHER_HOURLY_N = 6;
+const WEATHER_HOURLY_N = 11;
 const WEATHER_DAILY_N = 5;
 const LAST_USAGE_KEY = 's3dashboard_v1_lastusage';
 const LAST_WEATHER_KEY = 's3dashboard_v1_weather';
@@ -1847,14 +1847,14 @@ function drawStatusPage() {
   drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2);
   drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, lowY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
   gfx.fillRect(ix + 64, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_TERTIARY);
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 10; i++) {
     const idx = i + 1;
-    const cx = ix + 64 + i * 48 + 24;
+    const cx = ix + 64 + i * 24 + 12;
     const have = STATE.weatherHourly.length > idx;
     const hr = have ? STATE.weatherHourly[idx] : null;
     drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? String(hr.h).padStart(2, '0') : '--',
               have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
-    drawWeatherIcon(cx, glyphCy, have ? hr.code : -1, 1.2);
+    drawWeatherIcon(cx, glyphCy, have ? hr.code : -1, 0.9);
     drawTemp(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? hr.tempC : 0, have);
   }
 }
@@ -2909,6 +2909,8 @@ const MOCK = {
     hourly: [
       { h: 17, tempC: 34, code: 3 }, { h: 18, tempC: 33, code: 2 }, { h: 19, tempC: 32, code: 0 },
       { h: 20, tempC: 31, code: 0 }, { h: 21, tempC: 30, code: 0 }, { h: 22, tempC: 29, code: 2 },
+      { h: 23, tempC: 29, code: 3 }, { h: 0, tempC: 28, code: 61 }, { h: 1, tempC: 28, code: 61 },
+      { h: 2, tempC: 27, code: 3 }, { h: 3, tempC: 27, code: 2 },
     ],
     daily: [
       { wd: 1, high: 35, low: 26, code: 51 }, { wd: 2, high: 35, low: 27, code: 95 },

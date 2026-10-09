@@ -160,7 +160,7 @@ const int SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
 // Weather forecast slots delivered by /api/usage (Mac-proxied Open-Meteo)
 // and cached on SD as /weather.json. Fixed-size arrays — no String/heap
 // churn on every poll.
-const int WEATHER_HOURLY_N = 6;
+const int WEATHER_HOURLY_N = 11;
 const int WEATHER_DAILY_N = 5;
 struct WeatherHour {
   int8_t hour = -1;   // 0-23 local; -1 = empty slot

@@ -727,7 +727,7 @@ the firmware glyph advances and the §5.2 tracking in the table below.)
 | Week limit | 128 × 104, pad 8 / 12 | Same as 5H. The label stays `WK`: `WEEK` would push `99% WEEK ! 86h` to 149 px, over the 148 available. |
 | BTC (compact) | 128 × 60, pad 8 | Two rows, 8 px of air around and between the ink. **Row 1:** the 15 px logo (ink y+8..22) and the 24h change in `numeral.sm`, right-aligned to the content edge and centred on the logo (`+5%` 29, green / `-5%` red via `status.success` / `status.error`; the sign carries it without colour). **Row 2:** the price in `numeral.lg` on the full 112 inner width (`123,456` = 109 ✓); its ink ends 8 px above the card bottom. A wider price (≥ 1,000,000) steps down to `numeral.md`, then `numeral.sm`. |
 | Clock (hero) | 284 × 192, pad 8 | **Side by side**, because the extra width lets the clock grow. Clock ⌀ 153 (r 76, up from today's 68) + 12 + readout column 103 = 268 ✓. The readout is numeral.lg `12:27` 75 px, 4, body `Thu 24 Sep` 92 px, 8, then the AQI badge (48 × 24) = 92 px tall, vertically centred (y 58..149). That keeps it clear of the corner slots, which end at y 31 plus 8 px of clearance. |
-| Weather (compact) | 284 × 72, pad 8 / 12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 260 inner = H/L 20 + now 40 + **4** × 44 hourly (one more hour than before) + 24 disclosure column ✓. |
+| Weather (compact) | 284 × 72, pad 8 / 12 | Vertical: caption 17 + content.sm glyph 22 + caption 17 = 56 ✓. Horizontal: 304 inner (328 card) = H/L 20 + now 44 + **10** × 24 hourly (no disclosure column), hourly glyph at scale 0.9 (~18 px) ✓. |
 
 Left column: 104 + 8 + 104 + 8 + 60 = 284 ✓. Right column: 192 + 8 + 84 = 284 ✓.
 
@@ -737,7 +737,7 @@ What the migration does to page 0:
 - Each limit card keeps two short caption lines, `Resets …` then `in …`, now in caption
   rather than body.
 - The clock moves beside its readout and grows to r 76.
-- The Weather strip shows five hours after Now (5 × 40 px columns). It carries no disclosure chevron and no `C`
+- The Weather strip shows ten hours after Now (10 × 24 px columns, glyph scale 0.9). The Weather sheet's hourly card shows Now + 10 (11 × 40 px slots). It carries no disclosure chevron and no `C`
   unit (see §11.1).
 
 **The same left column is shared** by the Mixed and Note pages (`drawLimitsCard` +
@@ -1092,8 +1092,8 @@ excluded on purpose are listed in §11.23.
   the right edge of its content box, vertically centred. The card reserves a 24 px
   column for it (the glyph plus `space.sm`). The **whole card** is the hit box. A card
   never contains a second target unless each target is ≥44 px and 8 px apart.
-  **Exception:** the status page's Weather strip draws no chevron (a fifth hour takes its
-  24 px column) and its temperatures carry no `C` unit; the strip still opens the Weather sheet.
+  **Exception:** the status page's Weather strip draws no chevron (the hourly columns take its
+  width) and its temperatures carry no `C` unit; the strip still opens the Weather sheet.
   A 1 px `text.primary` divider (x 260, the content box's height) separates Now from the
   next hour.
 

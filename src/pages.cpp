@@ -1445,7 +1445,7 @@ static void drawStatusPage() {
   if (cfgShowAqi) drawAqiBar(CAL_X, CAL_BAR_Y, CAL_BAR_W, STATE.aqi);
 
   // ── weather strip (compact card, tappable -> Weather sheet) ──
-  // H/L 20 | now 44 | 5 x 48 hourly = 304 inner. No disclosure chevron
+  // H/L 20 | now 44 | 10 x 24 hourly = 304 inner. No disclosure chevron
   // (design.md 11.1's exception); the whole card is still the target.
   const int ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;   // 156
   const int iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;           // 216
@@ -1464,17 +1464,17 @@ static void drawStatusPage() {
   // 1px divider on the now | next-hour column boundary, the content box's height.
   g->fillRect(ix + 64, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_TERTIARY);
 
-  // Next 5 hours: weatherHourly[] starts at the current hour (the "now"
-  // column), so indices 1..5.
-  for (int i = 0; i < 5; i++) {
+  // Next 10 hours: weatherHourly[] starts at the current hour (the "now"
+  // column), so indices 1..10. 24px columns take a 0.9 glyph (~18px).
+  for (int i = 0; i < 10; i++) {
     int idx = i + 1;
-    int cx = ix + 64 + i * 48 + 24;
+    int cx = ix + 64 + i * 24 + 12;
     bool have = STATE.weatherHourlyCount > idx;
     char hbuf[4];
     if (have) snprintf(hbuf, sizeof(hbuf), "%02d", STATE.weatherHourly[idx].hour);
     drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? hbuf : "--",
               have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
-    drawWeatherIcon(cx, glyphCy, have ? STATE.weatherHourly[idx].code : -1, 1.2f);
+    drawWeatherIcon(cx, glyphCy, have ? STATE.weatherHourly[idx].code : -1, 0.9f);
     drawTemp(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? STATE.weatherHourly[idx].tempC : 0, have);
   }
 }
@@ -1524,7 +1524,7 @@ static void drawDevicePage() {
 
 // ── WEATHER SHEET ──────────────────────────────────────────
 // No close glyph -- a tap anywhere dismisses it -- so the hero card spans the
-// full content width: x 8..471, y 8..71. Then the hourly card (next 6) and the
+// full content width: x 8..471, y 8..71. Then the hourly card (now + 10) and the
 // 5-day card.
 static const int WX_HERO_X = TOK_LAYOUT_CONTENT_X0, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
 static const int WX_HERO_W = TOK_LAYOUT_CONTENT_X1 - WX_HERO_X, WX_HERO_H = 64;
@@ -1574,7 +1574,7 @@ static void drawWeatherPage() {
   }
   if (haveAqi) drawAqiBadge(badgeX, WX_HERO_Y + (WX_HERO_H - TOK_BADGE_H) / 2, STATE.aqi);
 
-  // ── Hourly (next 6): hour (caption), glyph.content.md, temperature (body) ──
+  // ── Hourly (now + 10): hour (caption), glyph.content.md, temperature (body) ──
   drawCard(TOK_LAYOUT_CONTENT_X0, WX_HOURLY_Y, TOK_LAYOUT_CONTENT_W, WX_HOURLY_H);
   const int innerX = TOK_LAYOUT_CONTENT_X0 + TOK_SPACE_CARD_PAD_COMPACT_H;
   const int innerW = TOK_LAYOUT_CONTENT_W - 2 * TOK_SPACE_CARD_PAD_COMPACT_H;
