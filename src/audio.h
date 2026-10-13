@@ -6,9 +6,9 @@
 
 enum SoundId : uint8_t {
   SND_TOCK = 0,   // a committed tap: low-key wood "tock"
-  SND_DONE,       // Claude Code finished
-  SND_ATTN,       // Claude Code needs you
-  SND_ALERT,      // usage / BTC / connectivity alert
+  SND_DONE,       // Claude Code went quiet (active_now fell; main.cpp pollAlerts)
+  SND_ATTN,       // Claude Code needs you -- reserved: needs Claude Code hooks on the Mac (roadmap.md F1)
+  SND_ALERT,      // usage running out / limit reached / board offline (main.cpp pollAlerts)
   SND_HOURLY,     // hh:00:00 chime
   SND_COUNT
 };

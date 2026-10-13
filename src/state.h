@@ -139,9 +139,11 @@ const int WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;  // 2
 const int WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
 const int WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
 
-// Status strip targets (design.md 11.12): 56x40 each, reaching up into the
-// 8px gap above the strip (touch.edge.min for a bottom-edge target).
-const int STRIP_HIT_Y0 = TOK_LAYOUT_STRIP_Y0;                             // 300: 20px targets -- a deliberate exception to touch.edge.min
+// Status strip targets (design.md 11.12): 56x40 each (touch.edge.min for a
+// bottom-edge target) -- the 20px strip, the 8px gap and the bottom 12px of the
+// content area. nav.cpp's hit order gives them that strip of content ahead of a
+// card, but not ahead of the shuffle button (design.md 9.2).
+const int STRIP_HIT_Y0 = SCREEN_H - TOK_TOUCH_EDGE_MIN;                   // 280
 const int HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;                          // -> Device Stats
 const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;              // -> Settings
 const int STRIP_CY = 309;                                                 // glyph centre line
@@ -205,7 +207,10 @@ struct UsageState {
   float creditsLimit = -1;
   int creditsPercent = -1;
   uint32_t lastFetchOkMs = 0;
-  double btcPrice = -1;      // BTC/USDT (from the Mac via /api/usage); -1 = unknown
+  // The server's active_now (Claude Code wrote something in the last 180 s),
+  // from live polls only; -1 = none yet. Drives the Claude ding (main.cpp).
+  int8_t claudeActive = -1;
+  double btcPrice = -1;     // BTC/USDT (from the Mac via /api/usage); -1 = unknown
   double btcChangePct = NAN; // rolling 24h change in %; NAN = unknown
   int aqi = -1;              // Bangkok AQI, aqicn.org (from the Mac via /api/usage); -1 = unknown
   float weatherTempC = -999; // Bangkok temp (from the Mac via /api/usage); -999 = unknown
@@ -260,6 +265,10 @@ extern int confirmArmedRow;
 // line (core 1) with no lock -- volatile for the same reason as
 // STATE.haveData above.
 extern volatile uint32_t lastPollMs;
+// millis() of the last successful *live* poll; 0 = none since boot (what is on
+// screen, if anything, is the SD cache). Written by networkTask, read by
+// dataStale() on the render side.
+extern volatile uint32_t lastFetchSuccessMs;
 extern uint32_t lastTouchMs;
 // Screen sleep (main.cpp enterScreenSleep/exitScreenSleep): backlight 0,
 // panel off, CPU 80MHz, WiFi modem sleep, polls floored like Battery Save.
@@ -524,6 +533,16 @@ void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, 
 // The shuffle button's centre for the current media layout (full screen or
 // the mixed pane).
 void shuffleCentre(bool mixed, int& cx, int& cy);
+// The two usage windows, and the pace projection: seconds until the limit at
+// the window's average rate so far, or -1 when unknown or the reset lands
+// first. Shared by the pace flag and networkTask's sound alerts.
+const long SESSION_WINDOW_SEC = 5L * 3600;       // 5h
+const long WEEK_WINDOW_SEC = 7L * 24 * 3600;     // 168h
+long paceSecondsToLimit(int currentPct, long elapsedSec, long remainingSec);
+// Stale data (design.md 13.4): the dashboard is up, but the last good poll is
+// older than max(2 poll intervals, 1 min), or there has been none since boot
+// (the SD cache). The strip says how old; the limit numerals go secondary.
+bool dataStale();
 
 // ── GIF PLAYER (gif_player.cpp) ─────────────────────────────
 // Returns true when it changed `frame` -- loop() presents once per pass.

@@ -8,12 +8,16 @@ PNG for every 'g'.
 
 Needs pyserial + Pillow (the system python3 here has both):
     python3 tools/grab_screen.py g   (needs pyserial + Pillow)
-    python3 tools/grab_screen.py --port /dev/cu.usbmodem1101 "g n g n g"
+    python3 tools/grab_screen.py --port /dev/cu.usbmodem1301 "g n g n g"
+
+Without --port it uses the only /dev/cu.usbmodem* present (the number follows
+the Mac's USB socket).
 
 Commands are space-separated; 'g' may be written 'g:name' to pick the file
 name (shots/<name>.png). A bare number is a pause in seconds.
 """
 import argparse
+import glob
 import os
 import struct
 import sys
@@ -77,13 +81,21 @@ def grab(ser, path):
 def main():
     ap = argparse.ArgumentParser(description="Screenshot the S3 dashboard over serial.")
     ap.add_argument("commands", nargs="*", default=["g"], help='e.g. "g n g w g x" (default: g)')
-    ap.add_argument("--port", default="/dev/cu.usbmodem1101")
+    ap.add_argument("--port", help="default: the only /dev/cu.usbmodem* present")
     ap.add_argument("--outdir", default=os.path.join(ROOT, "shots"))
     ap.add_argument("--settle", type=float, default=0.8, help="seconds to wait after each navigation key")
     args = ap.parse_args()
+    port = args.port
+    if not port:
+        ports = sorted(glob.glob("/dev/cu.usbmodem*"))
+        if len(ports) != 1:
+            print("Error: " + ("no /dev/cu.usbmodem* port -- is the board plugged in?" if not ports
+                               else "several ports (%s) -- pick one with --port" % ", ".join(ports)))
+            sys.exit(1)
+        port = ports[0]
     os.makedirs(args.outdir, exist_ok=True)
     cmds = " ".join(args.commands).split()
-    ser = serial.Serial(args.port, 115200, timeout=0.2)
+    ser = serial.Serial(port, 115200, timeout=0.2)
     n = 0
     for c in cmds:
         if c[0] == "g":

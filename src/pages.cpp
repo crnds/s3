@@ -381,11 +381,25 @@ static void drawStatusStrip() {
   drawLiveDot(millis());
   drawWifiGlyph();
 
-  // CPU usage: render-loop duty cycle, "CPU" in text.secondary, the number in
-  // text.primary, no separating space or bracket.
-  int cpuInt = (int)(cpuPercentAvg + 0.5f);
-  int cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, "CPU", TOK_COLOR_TEXT_SECONDARY);
-  drawText(TOK_TYPE_CAPTION, cpuTx, STRIP_CAPTION_Y, String(cpuInt) + "%", TOK_COLOR_TEXT_PRIMARY);
+  if (dataStale()) {
+    // Stale data (design.md 13.4) takes the CPU readout's place, in its two
+    // tones: "Updated" in text.secondary, the age in text.primary -- or "Saved
+    // data" for the SD cache before the first good poll.
+    if (lastFetchSuccessMs == 0) {
+      drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, "Saved data", TOK_COLOR_TEXT_PRIMARY);
+    } else {
+      uint32_t ageMin = (millis() - lastFetchSuccessMs) / 60000;
+      String age = ageMin < 60 ? String(ageMin) + "m ago" : String(ageMin / 60) + "h ago";
+      int tx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, "Updated ", TOK_COLOR_TEXT_SECONDARY);
+      drawText(TOK_TYPE_CAPTION, tx, STRIP_CAPTION_Y, age, TOK_COLOR_TEXT_PRIMARY);
+    }
+  } else {
+    // CPU usage: render-loop duty cycle, "CPU" in text.secondary, the number in
+    // text.primary, no separating space or bracket.
+    int cpuInt = (int)(cpuPercentAvg + 0.5f);
+    int cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, "CPU", TOK_COLOR_TEXT_SECONDARY);
+    drawText(TOK_TYPE_CAPTION, cpuTx, STRIP_CAPTION_Y, String(cpuInt) + "%", TOK_COLOR_TEXT_PRIMARY);
+  }
 
   // Page indicator: 6 dots, 6px across with 6px gaps, centred at x 240.
   int x = TOK_LAYOUT_HALF_SPLIT_X - DOTS_W / 2;
@@ -446,6 +460,19 @@ bool pulseTick(uint32_t nowMs) {
 }
 
 // ── DATA HELPERS ───────────────────────────────────────────
+// Stale data (state.h). One missed poll is not news, so the bar is two
+// intervals, floored at a minute; offline mode (main.cpp's offlineAfterMs)
+// takes over at 3 min / 3 polls.
+static const uint32_t STALE_AFTER_MIN_MS = 60000;
+bool dataStale() {
+  if (!STATE.haveData) return false;
+  uint32_t okMs = lastFetchSuccessMs;
+  if (okMs == 0) return true;
+  uint32_t after = POLL_INTERVAL_MS * 2;
+  if (after < STALE_AFTER_MIN_MS) after = STALE_AFTER_MIN_MS;
+  return millis() - okMs > after;
+}
+
 // Live countdown: tick the last server-provided remaining-seconds down by
 // wall time since lastFetchOkMs.
 static long liveResetsInSec(long baseSec) {
@@ -478,8 +505,9 @@ static void drawLimitRow(int x, int r, int y, const char* label, int percent) {
   String pct = percent >= 0 ? String(percent) + "%" : String("--");
   int pw = textW(TOK_TYPE_NUMERAL_SM, pct);
   drawText(TOK_TYPE_BODY, x, y, fitText(TOK_TYPE_BODY, label, r - x - pw - TOK_SPACE_XS), TOK_COLOR_TEXT_PRIMARY);
+  // Stale: secondary, as the limit cards' numerals (drawLimitCard).
   drawTextR(TOK_TYPE_NUMERAL_SM, r, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), pct,
-            percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+            percent < 0 ? TOK_COLOR_TEXT_TERTIARY : dataStale() ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY);
   drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
 }
 
@@ -836,8 +864,7 @@ bool shineTick(uint32_t nowMs) {
 }
 
 // ── SHARED LEFT COLUMN (status / mixed / note pages) ───────
-static const long SESSION_WINDOW_SEC = 5L * 3600;       // 5h
-static const long WEEK_WINDOW_SEC = 7L * 24 * 3600;     // 168h
+// SESSION_WINDOW_SEC / WEEK_WINDOW_SEC live in state.h (the sound alerts use them).
 
 // Pace = % of the window elapsed: 0% right after a reset, 100% right before
 // the next.
@@ -850,16 +877,23 @@ static int elapsedPercentOfWindow(long remainingSec, long windowSec) {
 }
 
 // Projected time until 100% "if this pace continues" -- the average rate
-// since the window's own start (currentPct / elapsedSec). "" when unknown or
+// since the window's own start (currentPct / elapsedSec). -1 when unknown or
 // the reset would land first ("the reset wins, say nothing").
-static String formatPaceDur(int currentPct, long elapsedSec, long remainingSec) {
-  if (currentPct <= 0 || elapsedSec <= 0 || remainingSec < 0) return "";
+long paceSecondsToLimit(int currentPct, long elapsedSec, long remainingSec) {
+  if (currentPct <= 0 || elapsedSec <= 0 || remainingSec < 0) return -1;
   float remainingPct = 100 - currentPct;
-  if (remainingPct <= 0) return "";
+  if (remainingPct <= 0) return -1;
   float ratePerSec = (float)currentPct / (float)elapsedSec;
   float secToExhaust = remainingPct / ratePerSec;
-  if (secToExhaust >= remainingSec) return "";  // reset wins, say nothing
-  if (secToExhaust < 3600.0f) {
+  if (secToExhaust >= remainingSec) return -1;  // reset wins, say nothing
+  return (long)secToExhaust;
+}
+
+// The pace flag's projection text: "45m" / "3h", or "" (see above).
+static String formatPaceDur(int currentPct, long elapsedSec, long remainingSec) {
+  long secToExhaust = paceSecondsToLimit(currentPct, elapsedSec, remainingSec);
+  if (secToExhaust < 0) return "";
+  if (secToExhaust < 3600) {
     int m = (int)(secToExhaust / 60.0f + 0.5f);
     return String(m < 1 ? 1 : m) + "m";
   }
@@ -890,7 +924,10 @@ static void drawLimitCard(int cardY, const char* label, int percent, bool ahead,
   const int top = cardY + TOK_SPACE_XS;
   const int baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
   int xe;
-  if (percent >= 0) xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, String(percent) + "%", TOK_COLOR_DATA_USAGE);
+  // Stale (design.md 13.4): the numeral steps down to text.secondary, so the
+  // glance doesn't read an old % as live; the strip says how old.
+  if (percent >= 0) xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, String(percent) + "%",
+                                  dataStale() ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_DATA_USAGE);
   else xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, "--", TOK_COLOR_TEXT_TERTIARY);
   int lx = xe + TOK_SPACE_SM;
   drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);

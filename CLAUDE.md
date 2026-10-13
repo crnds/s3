@@ -74,22 +74,24 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 ## Commands
 
 ```sh
-PIO=~/.pio-venv/bin/pio                  # pio is not on PATH; this venv is the install
+PIO=pio                                  # Homebrew's /opt/homebrew/bin/pio (older setups: ~/.pio-venv/bin/pio)
 $PIO run                                 # build (first run downloads pioarduino)
-$PIO run -t upload --upload-port /dev/cu.usbmodem1301   # flash over native USB
-$PIO device monitor --port /dev/cu.usbmodem1301         # serial log (baud is irrelevant on native USB)
-~/.pio-venv/bin/python tools/grab_screen.py --port /dev/cu.usbmodem1301 "x 1 g:status n 1 g:usage w 1 g:weather x"
+$PIO run -t upload                       # flash over native USB (port auto-detected)
+$PIO device monitor                      # serial log (baud is irrelevant on native USB)
+python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
                                          # drive the board over serial, save shots/*.ppm
 python3 tools/make_vlw.py                # regenerate fonts (firmware + sim) after editing FONTS
 ```
 
-**Port:** the board currently enumerates as `/dev/cu.usbmodem1301`, but
-`platformio.ini` (`upload_port`/`monitor_port`) and `grab_screen.py`'s default
-still say `1101`. The number follows the Mac's USB socket, so check
-`ls /dev/cu.usbmodem*` and pass the port explicitly.
+**Port:** the board enumerates as `/dev/cu.usbmodemNNNN`, and the number
+follows the Mac's USB socket (it has been `1101` and `1301`). So
+`platformio.ini` sets no port: PlatformIO auto-detects the board (USB
+Serial/JTAG, 303A:1001), and `grab_screen.py` uses the only
+`/dev/cu.usbmodem*` present. Pass `--upload-port` / `--port` when several
+are plugged in.
 
-`grab_screen.py` runs under **`~/.pio-venv/bin/python`**: it has pyserial, but
-the system `python3` no longer does. That venv has no Pillow, so the script
+`grab_screen.py` needs pyserial: the system `python3` has it on this Mac
+(older setups used `~/.pio-venv/bin/python`). It has no Pillow, so the script
 falls back to `shots/<name>.ppm`; convert it with
 `sips -s format png shots/x.ppm --out shots/x.png`. It can't open the port while
 `pio device monitor` holds it. In its command string a bare number is a
@@ -129,7 +131,8 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   `espressif32` 6.x platform (core 2.0.x / IDF 4.4) has no QSPI `esp_lcd` and
   will not build this.
 - Flash 16MB, `default_16MB.csv` (6.25MB app ×2). OPI PSRAM (`qio_opi`), 8MB.
-  Build is ~1.55MB (24% of the app slot); ~200KB of it is fonts.
+  Build is ~2.97MB (45% of the app slot): ~1.3MB of it is the embedded cat
+  GIFs and ~200KB is fonts.
 - Native USB Serial/JTAG — uploads at 921600 are reliable here (unlike the
   CYD's CH340, which needed 115200). If the port vanishes: hold BOOT, tap RST.
 - A first `pio run` can die in pioarduino's package postinstall
@@ -225,7 +228,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   (GIF-sized RGB565 in PSRAM), then blitted into `frame` — 1:1 centred on the
   full-screen cat page, or **cover-fit** (nearest-sampled, uniform scale
   computed once per GIF open, cropped to fill — never stretched) into the
-  mixed page's 240px pane. Compositing on a GIF-owned canvas is what keeps
+  mixed page's 328px pane (the right column). Compositing on a GIF-owned canvas is what keeps
   transparency/disposal right under the resize and the overlays. Frame delays
   are honoured
   as-is (no 12fps ceiling). A layout flip under an open GIF (going
@@ -247,10 +250,26 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   480×320). `/movies/*.mjpeg` is still SD-only; cats are not.
 - **NVS namespace `s3cfg`** (separate board, separate settings). Same keys as
   the CYD minus touch calibration; no `/config.json` migration.
-- **Offline threshold / WiFi self-reboot are wall-clock** (60s / 15 min),
-  never poll-cycle counts — see `~/cyd/CLAUDE.md` for the flap this fixed.
+- **Offline threshold / WiFi self-reboot are wall-clock** (max(3 min, 3 poll
+  intervals) — `offlineAfterMs()` / 15 min), never poll-cycle counts — see
+  `~/cyd/CLAUDE.md` for the flap this fixed. The simulator's
+  `offlineAfterMs()` mirrors it.
+- **Stale data (`dataStale()`, pages.cpp; design.md 13.4):** before offline,
+  once the last good *live* poll (`lastFetchSuccessMs`, 0 = none since boot,
+  i.e. the SD cache) is older than max(2 poll intervals, 1 min), the strip's
+  CPU readout becomes "Updated Nm ago" / "Saved data" and the limit numerals
+  go `text.secondary`. Twinned in the simulator.
+- **Sound alerts (`pollAlerts`, main.cpp; design.md 12.10):** networkTask
+  reads them off each poll and calls `audioPlay()` (safe from any core; it
+  applies the switches, volume and mute rules). Alerts = a limit projected to
+  run out before its reset (`paceSecondsToLimit`, shared with the pace flag,
+  once 10% of the window has passed), a limit reaching 100%, going offline;
+  each once per window/outage. Claude ding = the server's `active_now`
+  (`STATE.claudeActive`, live polls only) falling true -> false. The first
+  good poll after boot or an outage only primes them. `SND_ATTN` has no
+  trigger yet (needs Claude Code hooks on the Mac, roadmap.md F1).
 - **Screen sleep (`enterScreenSleep`/`exitScreenSleep`, main.cpp):** the
-  sleep icon button (a crescent in corner slot a, `drawSystemCorner`,
+  sleep icon button (a minimal grey pill in corner slot a, `drawSystemCorner`,
   `SLEEP_HIT_*` in state.h) is drawn last on every screen, and its hit box is
   checked before every other touch target. Corner slot b (the Battery Save
   glyph) sits to its left; content ink stays 8px clear of both. Sleeping
@@ -270,9 +289,11 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 ## Layout grid and tokens
 
 `design.md` section 7 is the source of truth: 8px margins and gutters, content
-x 8..471 / y 8..279, a fixed 172px left column (x 8..179) and a 284px right
-column (x 188..471), status strip y 288..318, progress hairline y 319; page
-navigation splits at the screen half (x 240), independent of the grid.
+x 8..471 / y 8..291, a fixed 128px left column (x 8..135) and a 328px right
+column (x 144..471; the Usage page and Weather sheet keep an alignment line at
+x 188), status strip y 300..318, progress hairline y 319. The strip's two
+targets are 56x40, reaching up to y 280 (design.md 9.6). Page navigation
+splits at the screen half (x 240), independent of the grid.
 Colours, type roles, spacing, radii, touch and motion values are design
 tokens in `src/tokens.h` (`TOK_*`, the upper snake of design.md's dotted
 names), mirrored line for line in the simulator's TOKENS block (RGB888 with

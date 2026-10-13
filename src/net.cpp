@@ -300,6 +300,10 @@ static bool applyUsageDoc(const JsonDocument& doc, bool fromNetwork) {
     STATE.noteSize = constrain((int)(doc["note"]["size"] | 1), 1, 3);
   }
 
+  // Claude Code activity, for the Claude ding (main.cpp's pollAlerts): live
+  // polls only -- a cached flag is from whenever the cache was written.
+  if (fromNetwork && !doc["active_now"].isNull()) STATE.claudeActive = (doc["active_now"] | false) ? 1 : 0;
+
   STATE.lastFetchOkMs = millis();
   unlockState();
 

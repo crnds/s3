@@ -871,7 +871,9 @@ A touch goes to the **first** match:
 2. **The system corner** (sleep).
 3. **The active modal layer** (Settings list or leaf, overlay): its controls, then its
    close/back, then (for overlays) "tap anywhere to dismiss".
-4. **Page controls:** tappable cards, the status strip's targets, the media control (§11.20).
+4. **Page controls:** the media control (§11.20), then the status strip's targets, then tappable
+   cards. The strip targets reach 12 px up into the content area (§9.6), so where they overlap a card
+   (the Weather card's bottom-right corner) the strip wins; the shuffle button keeps its whole box.
 5. **Page navigation halves:** x < 240 → previous, x ≥ 240 → next.
 
 This matches today's router in `main.cpp:505–553`. The design change is only in
@@ -970,18 +972,21 @@ x: 0                        240 (screen-half split)               436     479
    |                           |                                         |
    |                           |   [tappable card -> its overlay]        |
    |                           |   e.g. Weather, with chevron            |
-   +--------+------------------------------------------------+-----------+  y 300
+   +--------+------------------------------------------------+-----------+  y 280
    | HEALTH |                                                | SETTINGS  |
-   | ->Dev. |  (page halves continue; dots are not a target) | 56 x 20   |
-   | 56 x 20|                                                |           |
+   | ->Dev. |  (page halves continue; dots are not a target) | 56 x 40   |
+   | 56 x 40|                                                |           |
    +--------+------------------------------------------------+-----------+  y 319
            x 56                                             x 424
 ```
 
-The strip's targets are the strip itself, y 300..319, so they are 20 px
-tall. That is **below `touch.edge.min` (40 px)**, on purpose: the strip is
-20 px to give the cards room, and it is the one exception to the touch
-guideline. Nothing reaches up into the content area.
+The strip is 20 px (y 300..319) to give the cards room, but its two targets
+are **56 × 40**, meeting `touch.edge.min`: they reach up through the 8 px gap
+and the bottom 12 px of the content area (y 280..319). The content there is
+card padding and the ends of the weather card's last temperatures, never a control.
+On the Status page that takes the Weather card's bottom-right corner (§9.2);
+on Status + cats with Cat shuffle on Fixed, the shuffle button keeps its box and
+the gear's target is 28 px tall under it.
 
 ---
 
@@ -1262,18 +1267,18 @@ excluded on purpose are listed in §11.23.
 ### 11.12 Status strip (footer)
 
 - **Purpose:** persistent system status and the entry points to Settings and Device Stats.
-- **Box:** y 296..318 (23 px) plus the progress hairline at y 319. Canvas background. It appears only on
+- **Box:** y 300..318 (19 px) plus the progress hairline at y 319. Canvas background. It appears only on
   the dashboard pages, never on overlays, sheets or full-screen media.
 - **Anatomy, left to right:**
 
   | Zone | Contents | Target |
   |---|---|---|
-  | **Health cluster** (glyphs x 8..39) | Status dot (x 8..15), then 8 px, then the Wi-Fi glyph (x 24..39) | Hit x 0..55, y 300..319 (56 × 20) → opens **Device Stats**. Pressed state: a `fill.pressed` pill behind both glyphs. |
-  | **CPU** (x 47) | `type.caption`: "CPU" in `text.secondary`, then the render-loop duty-cycle percentage in `text.primary` (e.g. "CPU10%") -- no space, no bracket | none |
+  | **Health cluster** (glyphs x 8..39) | Status dot (x 8..15), then 8 px, then the Wi-Fi glyph (x 24..39) | Hit x 0..55, y 280..319 (56 × 40, §9.6) → opens **Device Stats**. Pressed state: a `fill.pressed` pill behind both glyphs. |
+  | **CPU** (x 47) | `type.caption`: "CPU" in `text.secondary`, then the render-loop duty-cycle percentage in `text.primary` (e.g. "CPU10%") -- no space, no bracket. **While the data is stale** (§13.4) the age replaces it: "Updated " in `text.secondary`, then "2m ago" in `text.primary`; "Saved data" (`text.primary`) for the SD cache before the first good poll | none |
   | **Centre** | Page indicator | none |
-  | **Settings** (x 452, centred) | Gear glyph | Hit x 424..479, y 300..319 (56 × 20) → opens **Settings** |
+  | **Settings** (x 452, centred) | Gear glyph | Hit x 424..479, y 280..319 (56 × 40, §9.6) → opens **Settings** |
 
-- **Vertical:** glyph centres at y 303. Any caption text in the strip uses top y 295.
+- **Vertical:** glyph centres at y 309. Any caption text in the strip uses top y 301.
 - **ROM/RAM stay out** of the strip; both remain developer telemetry available in Device Stats.
 - **Pinned during the carousel slide.** "Persistent" means visually static: the strip
   (and the hairline under it) stays put while the page above it slides horizontally,
@@ -1612,7 +1617,17 @@ brightness jumps are easiest to avoid.
 **Sound** (NS4168 amp, `src/audio.cpp`) follows Apple's three rules:
 - **Causality:** sound only for meaningful events. A *committed* tap (touch-up on a target, never the
   touch-down, a cancelled tap or the swallowed wake tap) gets a low-key "tock". The only unsolicited
-  sounds are the hourly chime, the Claude Code ding and alerts, each with its own switch.
+  sounds are the hourly chime, the Claude Code ding and alerts, each with its own switch, and each
+  plays once per event (`main.cpp`'s `pollAlerts`, read off the poll):
+
+  | Switch | Sound | Plays when |
+  |---|---|---|
+  | **Hourly chime** | chime | hh:00:00 |
+  | **Claude ding** | ding (`SND_DONE`) | Claude Code goes quiet: the server's `active_now` turns false, i.e. 180 s with no new Claude Code output, so it finished or is waiting on you. That's ~3–4 min after its last message. A "needs you" ding (`SND_ATTN`) is reserved for Claude Code hooks on the Mac (roadmap F1). |
+  | **Alerts** | alert (`SND_ALERT`) | A 5h or weekly limit is projected to run out before its reset (the pace flag's projection, once 10% of the window has passed); a limit reaches 100%; the board goes offline. Once per window, or per outage. |
+
+  The first good poll after boot or an outage only primes these, so a condition that was already
+  true makes no sound.
 - **Harmony:** the tock fires after the tap's action, on the same present, so it already reflects the
   change (turning Tap sound off is silent; a new volume applies to its own tock).
 - **Utility:** two independent volumes, each Off then levels 1-7 in ~4.5 dB steps: **Tap volume** (the
@@ -1700,7 +1715,8 @@ Hourly chime, Claude ding, Alerts, Mute when asleep, Mute at night).
 | **Loading / not yet received** | Components render with their final layout and `--` placeholders in tertiary. The status dot shows a tertiary ring. No spinners on dashboard pages. |
 | **Empty** (valid, but nothing to show) | Centred in its container: a title (headline, primary), `space.sm`, a description (caption, secondary, telling you the next step). Example: "No note yet" / "Edit at :8787/note". A full-screen empty state may use `type.display` for its title, in `text.secondary`, **not accent**. |
 | **Error** (something is missing or failed) | The same structure as empty, with the title in `status.error` headline. Example: "No SD card" / "Insert an SD card with /movies/ .mjpeg files". |
-| **Offline** (server unreachable for 60 s or more) | A *mode*, not an error: the media screen (cats) with the reset readout plate. The status strip isn't shown, so the corner glyphs and the reset plate carry the status. Returning online cuts back to the page you were on. |
+| **Stale** (still online, but the last good poll is older than max(2 poll intervals, 1 min); or the SD cache before the first good poll) | The page stays as it is, with two cues. The strip's CPU readout becomes the data's age, "Updated 2m ago" (or "Saved data"; §11.12), next to the status dot's warning ring. The limit numerals (the 5H / WK cards and the Usage page's limit rows) step down from `data.usage` / `text.primary` to `text.secondary`, so a glance doesn't take an old % as live. Countdowns keep ticking on wall time; they are still right. |
+| **Offline** (no good poll for max(3 min, 3 poll intervals)) | A *mode*, not an error: the media screen (cats) with the reset readout plate. The status strip isn't shown, so the corner glyphs and the reset plate carry the status. Returning online cuts back to the page you were on. |
 | **Boot** (firmware-only) | The splash BMP, then a spinner. The spinner uses `text.secondary` and is the only spinner in the system. |
 | **AP setup** (firmware-only) | A full-screen instruction layout: numbered steps in body; the values to type (SSID, IP) in `type.title` **primary**; waiting status in caption, secondary; `space.xxl` between steps. |
 

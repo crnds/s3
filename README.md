@@ -3,20 +3,27 @@
 Claude Code token-usage dashboard for the **JC3248W535EN** (Guition 3.5″
 ESP32-S3, 480×320 touch) — the big-screen sibling of [`~/cyd`](../cyd).
 
-Six tap-to-cycle pages, the same as the CYD:
+Six pages in a carousel:
 
 | # | Page | |
 |---|---|---|
-| 1 | Status | 5h / week limits with pace flag, BTC, Bangkok analog + digital clock, AQI, weather (tap → forecast) |
-| 2 | Projects | top 4 projects (7 days) + 7-day token trend |
-| 3 | Limits | `/usage`-style panel: context, 5h, weekly, per-model, credits |
-| 4 | Cats | random cat GIFs from the SD card |
-| 5 | Mixed | limits column + cats |
-| 6 | Note | limits column + the note from `http://127.0.0.1:8787/note` |
+| 1 | Status | 5h / week limits with pace flag, BTC, Bangkok analog + digital clock, calendar with Thai holidays and the AQI bar, 10-hour weather strip (tap → Weather sheet) |
+| 2 | Usage | `/usage`-style limits column (context, 5h, weekly, per-model, credits), top 4 projects (7 days) and the 7-day token trend |
+| 3 | Cats | full-screen cat GIFs, embedded in the firmware |
+| 4 | Movies | `.mjpeg` playback from the SD card's `/movies/` |
+| 5 | Status + cats | the limits column beside a cat pane |
+| 6 | Note | the limits column beside the note from `http://127.0.0.1:8787/` |
 
-Tap the right half for the next page, left half for the previous one (pages
-slide). Footer: tap the CPU/ROM/RAM line for Device Stats, the gear for
-Settings. With no server for ~60 s the board shows cats full-screen.
+Tap the right half for the next page and the left half for the previous one, or
+swipe; pages slide. The status strip along the bottom has two buttons: the
+status dot and Wi-Fi glyph (bottom-left) open Device Stats, and the gear
+(bottom-right) opens Settings. When the data stops updating, the strip says how
+old it is ("Updated 2m ago") and the limit numbers turn grey. With no server for
+3 minutes (or 3 polls, if longer), the board shows cats full-screen.
+
+The speaker plays a tap sound, an hourly chime, a Claude ding when Claude Code
+goes quiet, and alerts when a usage limit is about to run out or the board goes
+offline. Each has a switch in Settings > Sound.
 
 ## Setup
 
@@ -25,23 +32,23 @@ Settings. With no server for ~60 s the board shows cats full-screen.
 2. `cp src/config.example.h src/config.h` and fill in WiFi + the Mac's
    `.local` name (or leave `WIFI_SSID` empty to use the `S3-Setup-XXXX`
    setup hotspot on first boot).
-3. `pio run -t upload` (board on USB-C, `/dev/cu.usbmodem1101`).
+3. `pio run -t upload` with the board on USB-C. PlatformIO finds the port
+   (`/dev/cu.usbmodemNNNN`, where the number depends on the Mac's USB
+   socket); pass `--upload-port` to choose one.
+
+## Cats
+
+The cat GIFs in `cats/` are linked into the firmware at build time, so cats
+need no SD card. Add or remove a GIF, then re-flash. The library is capped at
+4 MB of GIFs; see `CLAUDE.md` → Cat library for picking and fitting cats.
 
 ## SD card (optional, FAT32)
 
 ```
-/cats/*.gif     cat library (see below)
-/splash.bmp     480x320 24-bit boot splash
+/movies/*.mjpeg  480x320 MJPEG clips for the Movies page
+/splash.bmp      480x320 24-bit boot splash
 ```
 The board writes its caches, `/archive.csv` and `/diag_log.csv` there too.
-
-Build the cat library at 480×320:
-
-```sh
-cp -R ~/cyd/cats cats          # the CYD's 120 cats, same library
-python3 tools/fit_cats.py
-COPYFILE_DISABLE=1 cp -r cats /Volumes/<SD>/cats
-```
 
 ## Server control panel
 
@@ -63,7 +70,9 @@ draws with the firmware's own glyphs, so layouts match the board.
 ## Screenshots from the board
 
 ```sh
-python3 tools/grab_screen.py "x 1 g:status n 1 g:projects"   # -> shots/*.png
+python3 tools/grab_screen.py "x 1 g:status n 1 g:usage"   # -> shots/*.png
 ```
 
-See `CLAUDE.md` for internals and `esp32-s3-spec.md` for the hardware.
+It uses the only `/dev/cu.usbmodem*` port present; pass `--port` if there
+are several. See `CLAUDE.md` for internals, `esp32-s3-spec.md` for the
+hardware, `design.md` for the design system and `roadmap.md` for what's next.

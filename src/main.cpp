@@ -119,7 +119,7 @@ const uint32_t RESTART_AFTER_WIFI_DOWN_MS = 900000UL;
 // OFFLINE_AFTER_MS in the past, STATE.haveData is forced back to false,
 // switching the display to the cat/offline screen. Left at 0 on purpose: a
 // board that never reaches the Mac goes offline OFFLINE_AFTER_MS after boot.
-uint32_t lastFetchSuccessMs = 0;
+volatile uint32_t lastFetchSuccessMs = 0;
 // Floor for the offline grace. A congested WLAN drops the board's TCP connects
 // in bursts (measured on the office network: gaps of 66-268s between good
 // polls), and Battery Save stretches the poll to 120s, so the old fixed 60s
@@ -129,6 +129,67 @@ const uint32_t OFFLINE_AFTER_MS = 180000UL;  // ~3 min without a successful poll
 static inline uint32_t offlineAfterMs() {
   uint32_t byPoll = POLL_INTERVAL_MS * 3;
   return byPoll > OFFLINE_AFTER_MS ? byPoll : OFFLINE_AFTER_MS;
+}
+
+// ── SOUND ALERTS (Settings > Sound, design.md 12.10) ───────
+// Events read off the poll, each played once per crossing; audioPlay() applies
+// the category toggles, the alert volume and the mute rules. networkTask only.
+//  - Alerts (SND_ALERT): a 5h or weekly limit projected to run out before its
+//    reset (once 10% of the window has passed -- before that the average rate
+//    is minutes of data), a limit reaching 100%, and the board going offline.
+//    Usage % only falls at a reset, so a fall re-arms that window's alerts.
+//  - Claude ding (SND_DONE): the server's active_now going true -> false --
+//    Claude Code has written nothing for 180 s (~/cyd's ACTIVE_WINDOW_SEC), so
+//    it finished or is waiting on you.
+// The first live poll after boot or an outage only primes the state, so a
+// condition that was already true makes no sound.
+static const int ALERT_MIN_ELAPSED_PCT = 10;
+struct LimitAlert {
+  int lastPct = -1;
+  bool runOut = false;  // already alerted "runs out before the reset" this window
+  bool full = false;    // already alerted "reached 100%" this window
+};
+static LimitAlert sessionAlert, weekAlert;
+static bool alertsPrimed = false;
+static bool claudeWasActive = false;
+
+// True when this poll newly crosses one of the limit's alert conditions.
+static bool limitAlertCrossed(LimitAlert& a, int pct, long remSec, long windowSec, bool prime) {
+  if (pct < 0 || remSec < 0) return false;  // limit unavailable: keep the last state
+  if (a.lastPct >= 0 && pct < a.lastPct) a.runOut = a.full = false;  // the window reset
+  a.lastPct = pct;
+  long elapsed = windowSec - remSec;
+  bool runOut = elapsed * 100 >= windowSec * ALERT_MIN_ELAPSED_PCT &&
+                paceSecondsToLimit(pct, elapsed, remSec) >= 0;
+  bool full = pct >= 100;
+  bool crossed = (runOut && !a.runOut) || (full && !a.full);
+  a.runOut = a.runOut || runOut;
+  a.full = a.full || full;
+  return crossed && !prime;
+}
+
+static void pollAlerts(bool liveOk, bool wentOffline) {
+  if (wentOffline) {
+    if (alertsPrimed) audioPlay(SND_ALERT);
+    alertsPrimed = false;  // re-prime on the first good poll back
+    return;
+  }
+  if (!liveOk) return;
+  lockState();
+  int sessionPct = STATE.sessionPercent, weekPct = STATE.weekPercent;
+  long sessionRem = STATE.sessionResetsInSec, weekRem = STATE.weekResetsInSec;
+  int8_t active = STATE.claudeActive;
+  unlockState();
+
+  bool prime = !alertsPrimed;
+  bool alert = limitAlertCrossed(sessionAlert, sessionPct, sessionRem, SESSION_WINDOW_SEC, prime);
+  if (limitAlertCrossed(weekAlert, weekPct, weekRem, WEEK_WINDOW_SEC, prime)) alert = true;
+  if (alert) audioPlay(SND_ALERT);
+  if (active >= 0) {
+    if (!prime && claudeWasActive && !active) audioPlay(SND_DONE);
+    claudeWasActive = active;
+  }
+  alertsPrimed = true;
 }
 
 // ── NETWORK TASK ───────────────────────────────────────────
@@ -192,6 +253,7 @@ void networkTask(void* param) {
       // A failed poll covers both WiFi down and WiFi up but the Mac
       // unreachable. haveData is otherwise sticky-true, so this is the only
       // thing that ever flips the display back to the offline/cat screen.
+      bool hadData = STATE.haveData;
       if (connected) {
         STATE.haveData = true;
         lastFetchSuccessMs = now;
@@ -203,6 +265,7 @@ void networkTask(void* param) {
         // against an unreachable Mac): fall back to the SD cache.
         STATE.haveData = loadCachedUsage();
       }
+      pollAlerts(connected, hadData && !STATE.haveData);
     }
 
     if (pendingConfigSave) {

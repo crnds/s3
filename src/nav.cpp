@@ -589,18 +589,21 @@ static Target hitTest(int32_t x, int32_t y, int& idx) {
   if (weatherPageOpen) return TG_SHEET_ANY;  // no close glyph: tap anywhere
   if (devicePageOpen) return closeHit ? TG_CLOSE : TG_SHEET_ANY;
   bool offline = !STATE.haveData;
-  if (!offline && currentPage == 0 &&
-      inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return TG_WEATHER;
-  if (stripPage() && y >= STRIP_HIT_Y0) {
-    if (x >= HEALTH_HIT_X0 && x < HEALTH_HIT_X1) return TG_HEALTH;
-    if (x >= SETTINGS_HIT_X0 && x < SETTINGS_HIT_X1) return TG_GEAR;
-  }
+  // Page controls (design.md 9.2): the shuffle button keeps its whole box; the
+  // strip targets (56x40, reaching 12px into the content area) come next, so a
+  // card under them -- the Weather card -- gives up its bottom corner.
   if (catShuffleFixed && navCatLayout()) {
     int cx, cy;
     shuffleCentre(currentPage == MIXED_PAGE && !offline, cx, cy);
     int h = SHUFFLE_HIT / 2;
     if (inRect(x, y, cx - h, cy - h, cx + h, cy + h)) return TG_SHUFFLE;
   }
+  if (stripPage() && y >= STRIP_HIT_Y0) {
+    if (x >= HEALTH_HIT_X0 && x < HEALTH_HIT_X1) return TG_HEALTH;
+    if (x >= SETTINGS_HIT_X0 && x < SETTINGS_HIT_X1) return TG_GEAR;
+  }
+  if (!offline && currentPage == 0 &&
+      inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return TG_WEATHER;
   return TG_HALF;
 }
 

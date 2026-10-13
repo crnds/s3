@@ -253,7 +253,7 @@ const GIF_PAGE = 2;    // cat GIFs on the device (placeholder here -- see drawGi
 const MOVIE_PAGE = 3;  // movies on the device (placeholder here -- see drawGifPage)
 const MIXED_PAGE = 4;  // limits column + cats pane
 const NOTE_PAGE = 5;   // limits column + note pane (an ordinary render() page)
-const OFFLINE_AFTER_MS = 60000;  // wall-clock, like main.cpp -- never a poll-cycle count
+const OFFLINE_AFTER_MS = 180000;  // wall-clock floor, like main.cpp -- never a poll-cycle count
 const BOOT_PAGE_AUTO = -1;
 
 // ── TOKENS (src/tokens.h; RGB888 as the panel shows it, the 0x.... beside) ──
@@ -372,6 +372,7 @@ const TOK_HEADER_TITLE_X = 60, TOK_HEADER_TITLE_Y = 11;
 const TOK_RADIUS_SM = 4, TOK_RADIUS_MD = 8, TOK_RADIUS_LG = 12;  // lg: media (cat GIF / movie area; firmware-only)
 const TOK_STROKE_GLYPH_R = 1.0;
 
+const TOK_TOUCH_MIN = 44, TOK_TOUCH_COMFORTABLE = 56, TOK_TOUCH_EDGE_MIN = 40;
 const TOK_TOUCH_SLOP = 10, TOK_TOUCH_REARM_MS = 120, TOK_TOUCH_ARM_WINDOW_MS = 4000, TOK_TOUCH_WAKE_GUARD_MS = 600;
 const TOK_TOUCH_VELOCITY_WINDOW_MS = 100, TOK_TOUCH_DECEL = 0.995;
 const TOK_TOUCH_FLICK_COMMIT = 150, TOK_TOUCH_FLICK_BOUNCE = 300, TOK_TOUCH_RUBBERBAND = 0.55;
@@ -398,7 +399,7 @@ const CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;
 const WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;
 const WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
 const WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
-const STRIP_HIT_Y0 = TOK_LAYOUT_STRIP_Y0;
+const STRIP_HIT_Y0 = SCREEN_H - TOK_TOUCH_EDGE_MIN;  // 280: 56x40 strip targets (touch.edge.min)
 const HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;
 const SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;
 const STRIP_CY = 309;
@@ -1115,9 +1116,21 @@ function drawStatusStrip() {
   if (NAV.pressedId === 'health') gfx.fillSmoothRoundRect(DOT_CX - 8, STRIP_CY - 10, 48, 20, 10, TOK_COLOR_FILL_PRESSED);
   drawLiveDot(performance.now());
   drawWifiGlyph();
-  const cpuInt = Math.round(STATE.cpuPercentAvg);
-  const cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, 'CPU', TOK_COLOR_TEXT_SECONDARY);
-  drawText(TOK_TYPE_CAPTION, cpuTx, STRIP_CAPTION_Y, cpuInt + '%', TOK_COLOR_TEXT_PRIMARY);
+  if (dataStale()) {
+    // Stale data (design.md 13.4) takes the CPU readout's place (pages.cpp twin).
+    if (STATE.lastFetchSuccessMs === 0) {
+      drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, 'Saved data', TOK_COLOR_TEXT_PRIMARY);
+    } else {
+      const ageMin = Math.floor((performance.now() - STATE.lastFetchSuccessMs) / 60000);
+      const age = ageMin < 60 ? ageMin + 'm ago' : Math.floor(ageMin / 60) + 'h ago';
+      const tx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, 'Updated ', TOK_COLOR_TEXT_SECONDARY);
+      drawText(TOK_TYPE_CAPTION, tx, STRIP_CAPTION_Y, age, TOK_COLOR_TEXT_PRIMARY);
+    }
+  } else {
+    const cpuInt = Math.round(STATE.cpuPercentAvg);
+    const cpuTx = drawText(TOK_TYPE_CAPTION, CPU_X, STRIP_CAPTION_Y, 'CPU', TOK_COLOR_TEXT_SECONDARY);
+    drawText(TOK_TYPE_CAPTION, cpuTx, STRIP_CAPTION_Y, cpuInt + '%', TOK_COLOR_TEXT_PRIMARY);
+  }
   let x = TOK_LAYOUT_HALF_SPLIT_X - DOTS_W / 2;
   for (let i = 0; i < PAGE_COUNT; i++, x += 12)
     gfx.fillSmoothRoundRect(x, STRIP_CY - 3, 6, 6, 3, i === STATE.currentPage ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_FILL_TRACK);
@@ -1156,6 +1169,15 @@ function pulseTick(nowMs) {
   return true;
 }
 
+// Stale data (pages.cpp twin): the last good poll is older than max(2 polls,
+// 1 min), or there has been none since load and this is the cached copy.
+const STALE_AFTER_MIN_MS = 60000;
+function dataStale() {
+  if (!STATE.haveData) return false;
+  if (STATE.lastFetchSuccessMs === 0) return true;
+  return performance.now() - STATE.lastFetchSuccessMs > Math.max(effectivePollMs() * 2, STALE_AFTER_MIN_MS);
+}
+
 function liveResetsInSec(baseSec) {
   if (baseSec < 0) return -1;
   const rem = baseSec - Math.floor((performance.now() - STATE.lastFetchOkMs) / 1000);
@@ -1181,7 +1203,7 @@ function drawLimitRow(x, r, y, label, percent) {
   const pw = textW(TOK_TYPE_NUMERAL_SM, pct);
   drawText(TOK_TYPE_BODY, x, y, fitText(TOK_TYPE_BODY, label, r - x - pw - TOK_SPACE_XS), TOK_COLOR_TEXT_PRIMARY);
   drawTextR(TOK_TYPE_NUMERAL_SM, r, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), pct,
-            percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
+            percent < 0 ? TOK_COLOR_TEXT_TERTIARY : dataStale() ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY);
   drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
 }
 
@@ -1488,7 +1510,8 @@ function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx,
   // +94: 10px of air above and below the ink.
   const top = cardY + TOK_SPACE_XS;
   const baseline = top + fontAscent(TOK_TYPE_NUMERAL_LG);
-  const xe = percent >= 0 ? drawText(TOK_TYPE_NUMERAL_LG, x, top, percent + '%', TOK_COLOR_DATA_USAGE)
+  const xe = percent >= 0 ? drawText(TOK_TYPE_NUMERAL_LG, x, top, percent + '%',
+                                     dataStale() ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_DATA_USAGE)
                           : drawText(TOK_TYPE_NUMERAL_LG, x, top, '--', TOK_COLOR_TEXT_TERTIARY);
   const lx = xe + TOK_SPACE_SM;
   drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);
@@ -2621,16 +2644,18 @@ function hitTest(x, y) {
   if (STATE.weatherPageOpen) return ['sheetAny', -1];  // no close glyph: tap anywhere
   if (STATE.devicePageOpen) return [closeHit ? 'close' : 'sheetAny', -1];
   const offline = !STATE.haveData;
-  if (!offline && STATE.currentPage === 0 && inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return ['weather', -1];
-  if (stripPage() && y >= STRIP_HIT_Y0) {
-    if (x >= HEALTH_HIT_X0 && x < HEALTH_HIT_X1) return ['health', -1];
-    if (x >= SETTINGS_HIT_X0 && x < SETTINGS_HIT_X1) return ['gear', -1];
-  }
+  // Page controls (design.md 9.2): shuffle, then the 56x40 strip targets, then
+  // the Weather card, which gives up its bottom corner to the gear.
   if (STATE.catShuffleSec < 0 && navCatLayout()) {
     const [cx, cy] = shuffleCentre(STATE.currentPage === MIXED_PAGE && !offline);
     const h = SHUFFLE_HIT / 2;
     if (inRect(x, y, cx - h, cy - h, cx + h, cy + h)) return ['shuffle', -1];
   }
+  if (stripPage() && y >= STRIP_HIT_Y0) {
+    if (x >= HEALTH_HIT_X0 && x < HEALTH_HIT_X1) return ['health', -1];
+    if (x >= SETTINGS_HIT_X0 && x < SETTINGS_HIT_X1) return ['gear', -1];
+  }
+  if (!offline && STATE.currentPage === 0 && inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return ['weather', -1];
   return ['half', -1];
 }
 const PRESSABLE = new Set(['sleep', 'close', 'row', 'cell', 'weather', 'health', 'gear', 'shuffle']);
@@ -3023,11 +3048,12 @@ function bangkokParts() {
   return out;
 }
 
-// Offline after OFFLINE_AFTER_MS of wall time without a successful poll --
-// main.cpp's networkTask rule, not a cycle count.
+// Offline after max(OFFLINE_AFTER_MS, 3 polls) of wall time without a
+// successful poll -- main.cpp's offlineAfterMs(), not a cycle count.
+function offlineAfterMs() { return Math.max(OFFLINE_AFTER_MS, effectivePollMs() * 3); }
 function markFetchFailed() {
   const now = performance.now();
-  if (now - STATE.lastFetchSuccessMs >= OFFLINE_AFTER_MS) STATE.haveData = false;
+  if (now - STATE.lastFetchSuccessMs >= offlineAfterMs()) STATE.haveData = false;
   else if (!STATE.haveData) STATE.haveData = loadCachedUsage();
 }
 
