@@ -42,7 +42,7 @@ header p { color: var(--text2); font-size: 13px; margin-top: 4px; max-width: 70c
 
 .layout {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);  /* minmax: a long JSON line scrolls in its pre, not the page */
   gap: 24px;
   align-items: start;
 }
@@ -214,15 +214,20 @@ pre {
           <option value="60000">60s</option>
           <option value="300000">5m</option>
         </select>
+        <label for="data-source">Data</label>
+        <select id="data-source" aria-label="Data source">
+          <option value="auto" selected>Server, else mock</option>
+          <option value="server">Server only</option>
+          <option value="mock">Mock only</option>
+        </select>
         <label class="toggle"><input type="checkbox" id="sim-offline"> Simulate server offline</label>
-        <label class="toggle"><input type="checkbox" id="mock-data"> Use mock data</label>
         <label class="toggle"><input type="checkbox" id="sim-sd-missing"> Simulate SD card missing</label>
         <button id="hourly-signal">Play hourly signal</button>
       </div>
       <div class="status-line">
         <span id="conn-status"><span class="dot bad"></span>not connected</span>
         <span id="fetch-status">no fetch yet</span>
-        <span id="page-status">page 1/6</span>
+        <span id="page-status">page 1/7</span>
       </div>
     </div>
 
@@ -3081,6 +3086,38 @@ const MOCK = {
   power: { on_ac: true, percent: 82, paused: false, battery_save: false, battery_save_manual: null, source: 'auto' },
 };
 
+// MOCK shifted to now (Bangkok time) so it reads as live data: each reset
+// lands where its countdown says, the hourly forecast starts at this hour and
+// the daily one tomorrow.
+function mockDoc() {
+  const doc = structuredClone(MOCK);
+  const bkkNow = Date.now() + 7 * 3600 * 1000;  // a Date's UTC fields = Bangkok wall time
+  const at = (sec) => new Date(bkkNow + sec * 1000);
+  const hm = (d) => String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+  const fmtReset = (d) => `${MON_ABBR_LIST[d.getUTCMonth()]} ${d.getUTCDate()}, ${hm(d)}`;
+  const lim = doc.limits;
+  lim.session.resets = hm(at(lim.session.resets_in_sec));
+  lim.week.resets = fmtReset(at(lim.week.resets_in_sec));
+  lim.week_model.resets = fmtReset(at(lim.week.resets_in_sec + 7 * 86400));
+  const now = at(0);
+  doc.weather.hourly.forEach((h, i) => { h.h = (now.getUTCHours() + i) % 24; });
+  doc.weather.daily.forEach((d, i) => { d.wd = (now.getUTCDay() + 1 + i) % 7; });
+  return doc;
+}
+
+// Where polls get their data (the Connection card's Data menu): 'auto' tries
+// the server and falls back to mock data, so the simulator runs with no
+// server at all; 'server' shows the real offline path; 'mock' never fetches.
+// ?data=auto|server|mock overrides the remembered choice.
+const DATA_SOURCE_KEY = 's3dashboard_v1_datasource';
+const DATA_SOURCES = ['auto', 'server', 'mock'];
+function initDataSource() {
+  const q = new URLSearchParams(location.search).get('data');
+  const v = DATA_SOURCES.includes(q) ? q : lsGet(DATA_SOURCE_KEY);
+  if (DATA_SOURCES.includes(v)) document.getElementById('data-source').value = v;
+}
+function dataSource() { return document.getElementById('data-source').value; }
+
 function saveLastUsageCache(doc) { lsSet(LAST_USAGE_KEY, JSON.stringify(doc)); }
 function loadCachedUsage() {
   try {
@@ -3193,12 +3230,13 @@ function markFetchFailed() {
 }
 
 let fetchInFlight = false;
+let lastMockReason = '';  // logs the switch to mock data once, not every poll
 async function fetchUsage() {
   if (fetchInFlight) return;
   fetchInFlight = true;
   STATE.lastPollMs = performance.now();
   const offline = document.getElementById('sim-offline').checked;
-  const mock = document.getElementById('mock-data').checked;
+  const source = dataSource();
   const ok = (detail) => {
     STATE.haveData = true;
     STATE.pollOkSeq++;  // one pace sweep (main.cpp's pollOkSeq)
@@ -3207,22 +3245,25 @@ async function fetchUsage() {
     STATE.connected = true;
     setConn(true, detail);
   };
+  // Mock data stands in for the server; it is never written to the
+  // last-usage cache, which (like the board's SD copy) holds real polls only.
+  const useMock = (reason) => {
+    applyData(mockDoc());
+    ok(reason);
+    if (reason !== lastMockReason) log('using mock data: ' + reason, 'ok');
+    lastMockReason = reason;
+  };
   try {
-    if (mock) {
-      applyData(MOCK);
-      saveLastUsageCache(MOCK);
-      ok('mock data');
-      log('applied mock data', 'ok');
-      return;
-    }
     if (offline) {
       STATE.wifiOk = false;
       STATE.connected = false;
       markFetchFailed();
       setConn(false, 'simulated offline');
       log('poll skipped: simulated offline', 'err');
+      lastMockReason = '';
       return;
     }
+    if (source === 'mock') { useMock('mock only'); return; }
     const url = document.getElementById('server-url').value.trim();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
@@ -3232,9 +3273,14 @@ async function fetchUsage() {
       const doc = await res.json();
       applyData(doc);
       saveLastUsageCache(doc);
+      lastMockReason = '';
       ok('ok, ' + new Date().toLocaleTimeString());
       log('fetched ' + fmtTokens(doc.today?.tokens ?? 0) + ' today / ' + fmtTokens(doc.week?.tokens ?? 0) + ' week', 'ok');
     } catch (err) {
+      if (source === 'auto') {
+        useMock('no server (' + (err.name === 'AbortError' ? 'timeout' : err.message) + ')');
+        return;
+      }
       STATE.wifiOk = false;
       STATE.connected = false;
       markFetchFailed();
@@ -3403,7 +3449,10 @@ canvas.addEventListener('keydown', (event) => {
 document.getElementById('poll-now').addEventListener('click', fetchUsage);
 document.getElementById('poll-interval').addEventListener('change', restartPollTimer);
 document.getElementById('sim-offline').addEventListener('change', fetchUsage);
-document.getElementById('mock-data').addEventListener('change', fetchUsage);
+document.getElementById('data-source').addEventListener('change', (e) => {
+  lsSet(DATA_SOURCE_KEY, e.target.value);
+  fetchUsage();
+});
 document.getElementById('sim-sd-missing').addEventListener('change', () => { if (!navTransitionActive()) redrawScreen(); });
 let hourlyTestStartMs = 0;  // serial 'h' twin
 document.getElementById('hourly-signal').addEventListener('click', () => { hourlyTestStartMs = performance.now(); });
@@ -3482,6 +3531,7 @@ if (!window.S3_FONTS) {
 } else {
   const slow = parseFloat(new URLSearchParams(location.search).get('slowmo'));
   if (slow > 1) motionTimeScale = slow;
+  initDataSource();
   loadWeatherCache();
   loadSettings();
   applyEffectiveBrightness(0);

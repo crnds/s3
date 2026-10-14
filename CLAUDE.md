@@ -111,7 +111,11 @@ composite on the panel, so grab after transitions settle.
 Headless sim screenshot: `~/node_modules/playwright` is gone, so use the
 Playwright MCP. It blocks `file://`, so serve the repo first
 (`python3 -m http.server 8765`, then open `http://127.0.0.1:8765/simulator-s3.html`;
-the CORS error from `/api/usage` is expected and the sim runs on its fallback).
+the CORS error from `/api/usage` is expected). The sim needs no server: its
+Connection card's Data menu defaults to "Server, else mock", which falls back to
+the built-in `MOCK` document shifted to the current time (`mockDoc()`), and
+`?data=mock` skips the fetch entirely (`?data=server` shows the real offline
+path). It also runs opened straight from disk (`file://`).
 The MCP only writes screenshots under `~/s3`, so save them to `.playwright-mcp/`
 (untracked) and delete it afterwards. To set data and the page, `browser_evaluate`
 `Object.assign(STATE, {currentPage: 0, btcPrice: 82893, ...}); render();`.
