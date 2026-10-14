@@ -13,7 +13,7 @@ TE-synced full-frame present, native-rate cat GIFs and page slides.
 
 ```
 Mac laptop                                   S3 board (on WiFi)
-~/cyd/server/usage_server.py ──/api/usage──▶ src/*.cpp (polls every 20s, 6 pages)
+~/cyd/server/usage_server.py ──/api/usage──▶ src/*.cpp (polls every 20s, 7 pages)
 (unchanged; the S3 is just a second client)   simulator-s3.html = browser twin
 ```
 
@@ -185,12 +185,12 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   the slowest present (~23ms slide, ~30ms sheet, ~12 frames) and the longest
   gap between composites, counted from the slide's start so it includes
   composing the incoming page (~65ms onto a media page).
-- **Media pages load after the slide lands.** A slide onto GIF/MOVIE/MIXED
-  never opens or decodes: `preparePage()` stages the page with
+- **Media pages load after the slide lands.** A slide onto GIF/MOVIE/MIXED/
+  OVERVIEW never opens or decodes: `preparePage()` stages the page with
   `gifPlayerStagePage()` (the page's poster -- its last screen, captured from
-  `prevFrame` as a slide leaves it, three 300KB PSRAM buffers -- or the plate
-  before a first visit, plus the overlays; the mixed page's left column is
-  redrawn live), and `loop()` skips the whole cat-mode branch while
+  `prevFrame` as a slide leaves it, four lazily allocated 300KB PSRAM buffers --
+  or the plate before a first visit, plus the overlays; a pane page's static
+  half is redrawn live), and `loop()` skips the whole cat-mode branch while
   `navPageTransitionActive()`. The first pass after landing opens a fresh clip
   and decodes it in one tick. A theme change invalidates the posters
   (`navInvalidatePosters()`). A first-frame decode in the slide cost the movie
@@ -226,13 +226,15 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   straight from memory-mapped flash, so cats need no card and no `sdMutex`
   (`cats_embed.h` is the interface). RAW-mode decode composited into `gifCanvas`
   (GIF-sized RGB565 in PSRAM), then blitted into `frame` — 1:1 centred on the
-  full-screen cat page, or **cover-fit** (nearest-sampled, uniform scale
-  computed once per GIF open, cropped to fill — never stretched) into the
-  mixed page's 328px pane (the right column). Compositing on a GIF-owned canvas is what keeps
-  transparency/disposal right under the resize and the overlays. Frame delays
+  full-screen cat page, or **cover-fit** (uniform scale computed once per GIF
+  open, cropped to fill — never stretched) into a pane: the mixed page's 328px
+  right column (nearest-sampled) or the Overview's 150x89 cat cell (below half
+  scale, the mean of four samples per pixel, or it shimmers). Compositing on a
+  GIF-owned canvas is what keeps transparency/disposal right under the resize
+  and the overlays. Frame delays
   are honoured
   as-is (no 12fps ceiling). A layout flip under an open GIF (going
-  offline/online on the mixed page) reopens it for the new layout.
+  offline/online on a pane page) reopens it for the new layout.
   **Never present between a close and the next decoded frame.** Opening
   clears the canvas/pane to black, so a reopen (loop end, next cat, layout
   flip) is deferred via `nextOpenIsLoop` and done in the same `gifTick()` as
@@ -240,6 +242,12 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   Presenting in between is the one-frame black flash users see at a loop.
   Movies read the SD in 8KB blocks (`readNextFrame`; the overshoot past a
   frame's FFD9 is carried to the next frame, still no `seek()`): 6.5 -> 9.6 fps.
+- **Pane pages (Mixed, Overview; `catPanePage()` / `catPaneRect()`,
+  pages.cpp).** Media pages with a static half: `render()` returns early for
+  them, and `loop()` redraws `drawMediaPageStatic()` (everything but the pane,
+  plus the strip) once a second around the playing GIF. The Overview
+  (design.md 7.5) is a 3x3 grid of the cards in miniature; its weather cell
+  opens the Weather sheet. Offline both show the full-screen cat.
 - **Fonts (`fonts.cpp`):** VLW preloaded once into `lgfx::VLWfont` objects;
   `drawText/drawTextR/drawTextC(FontId, …)` are the only text API — no
   `setTextSize`/`print` built-in font anywhere. ASCII only (server

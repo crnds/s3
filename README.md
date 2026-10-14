@@ -3,7 +3,7 @@
 Claude Code token-usage dashboard for the **JC3248W535EN** (Guition 3.5″
 ESP32-S3, 480×320 touch) — the big-screen sibling of [`~/cyd`](../cyd).
 
-Six pages in a carousel:
+Seven pages in a carousel:
 
 | # | Page | |
 |---|---|---|
@@ -13,6 +13,7 @@ Six pages in a carousel:
 | 4 | Movies | `.mjpeg` playback from the SD card's `/movies/` |
 | 5 | Status + cats | the limits column beside a cat pane |
 | 6 | Note | the limits column beside the note from `http://127.0.0.1:8787/` |
+| 7 | Overview | the cards in miniature on a 3×3 grid: 5h, week, clock, date, month calendar, BTC, weather (tap → Weather sheet), a cat GIF and the note |
 
 Tap the right half for the next page and the left half for the previous one, or
 swipe; pages slide. The status strip along the bottom has two buttons: the

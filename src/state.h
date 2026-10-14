@@ -84,12 +84,12 @@ extern volatile uint32_t POLL_INTERVAL_MS;
 // ── SHARED CONSTANTS ───────────────────────────────────────
 // Internal linkage per TU (C++ global `const` default) — safe to define
 // identically in every file that includes this header; no ODR issue.
-const int PAGE_COUNT = 6;
+const int PAGE_COUNT = 7;
 // cfgBootPage sentinel: resume whichever page was on screen before the last
 // restart (cfgLastPage), rather than a fixed page. See the Boot Page setting.
 const int BOOT_PAGE_AUTO = -1;
 // Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
-// 3 Movies, 4 Status + cats, 5 Note.
+// 3 Movies, 4 Status + cats, 5 Note, 6 Overview.
 const int GIF_PAGE = 2;    // 3rd page: random cat GIFs from /cats/ on SD
 const int MOVIE_PAGE = 3;  // 4th page: random movies from /movies/ on SD (see movie_player.cpp)
 const int MIXED_PAGE = 4;  // 5th page: status + cats split
@@ -99,6 +99,10 @@ const int MIXED_PAGE = 4;  // 5th page: status + cats split
 // nothing here needs the per-frame decode loop or the partial-push path
 // those three require.
 const int NOTE_PAGE = 5;
+// 7th page: the cards in miniature on a 3x3 grid (design.md 7.5), one cell
+// of which plays the cat -- so, like MIXED_PAGE, a media page with a static
+// half that gif_player.cpp plays around (catPanePage()).
+const int OVERVIEW_PAGE = 6;
 // Note buffer. The server caps its copy at 480 chars (NOTE_MAX_CHARS); 512
 // leaves room for the NUL. The S3 pane (37 cols x 14 rows at size 1) could
 // show slightly more than that, but the server cap, not the pane, is the
@@ -138,6 +142,18 @@ const int WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;  // 2
 // sheet.
 const int WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
 const int WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
+
+// Overview page grid (design.md 7.5): 3 x 3 cells in the 464 x 284 content
+// area with 8px gutters -- 149 + 8 + 150 + 8 + 149 = 464, 89 + 8 + 90 + 8 + 89
+// = 284. Row by row: 5H, WK, clock / date, month calendar, BTC / weather,
+// cat, note.
+const int OV_COL_X[3] = {8, 165, 323}, OV_COL_W[3] = {149, 150, 149};
+const int OV_ROW_Y[3] = {8, 105, 203}, OV_ROW_H[3] = {89, 90, 89};
+// The cat cell (bottom-middle, the GIF player's pane on this page) and the
+// weather cell (bottom-left), whose whole box opens the Weather sheet -- bar
+// its bottom-left corner, which the Device Stats strip target takes first.
+const int OV_CAT_X0 = 165, OV_CAT_Y0 = 203, OV_CAT_W = 150, OV_CAT_H = 89;
+const int OV_WX_HIT_X0 = 8, OV_WX_HIT_X1 = 157, OV_WX_HIT_Y0 = 203, OV_WX_HIT_Y1 = 292;
 
 // Status strip targets (design.md 11.12): 56x40 each (touch.edge.min for a
 // bottom-edge target) -- the 20px strip, the 8px gap and the bottom 12px of the
@@ -501,12 +517,18 @@ void forgetWifiFromFlash();
 // Stats sheet) into `frame` and presents it. Settings has its own
 // renderSettings().
 void render();
-void drawMixedPageStatic();
 // Mixed page's cat pane = the right column (design.md 7.4): the GIF player
 // cover-fits the cat into it. Defined here so pages.cpp's placeholder and
-// gif_player.cpp agree.
+// gif_player.cpp agree. The Overview page's pane is its cat cell (OV_CAT_*).
 const int MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
 const int MIXED_GIF_Y0 = TOK_LAYOUT_CONTENT_Y0, MIXED_GIF_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+// The media pages with a static half around a cat pane: Mixed and Overview,
+// online only (offline, every page is the full-screen cat).
+bool catPanePage(bool offline);
+// The cat's box on a catPanePage().
+void catPaneRect(int& x, int& y, int& w, int& h);
+// A catPanePage()'s static half: everything but the pane, plus the strip.
+void drawMediaPageStatic();
 // System corner glyphs, drawn LAST on every screen (design.md 11.21).
 // overMedia puts each occupied slot on a color.plate backing.
 void drawSystemCorner(bool overMedia);
@@ -532,7 +554,7 @@ void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, 
                     FontId titleFont = TOK_TYPE_HEADLINE, uint16_t titleColor = TOK_COLOR_TEXT_PRIMARY);
 // The shuffle button's centre for the current media layout (full screen or
 // the mixed pane).
-void shuffleCentre(bool mixed, int& cx, int& cy);
+void shuffleCentre(bool offline, int& cx, int& cy);
 // The two usage windows, and the pace projection: seconds until the limit at
 // the window's average rate so far, or -1 when unknown or the reset lands
 // first. Shared by the pace flag and networkTask's sound alerts.

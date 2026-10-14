@@ -588,12 +588,12 @@ void loop() {
     // the slide lands -- a decode here would cost the slide its frame rate.
   } else if (catMode) {
     if (gifTick(offline)) needPresent = true;
-    if (currentPage == MIXED_PAGE && !offline) {
-      static uint32_t lastMixedRenderMs = 0;
-      if (now - lastMixedRenderMs >= 1000) {
-        lastMixedRenderMs = now;
+    if (catPanePage(offline)) {
+      static uint32_t lastStaticRenderMs = 0;
+      if (now - lastStaticRenderMs >= 1000) {
+        lastStaticRenderMs = now;
         lockState();
-        drawMixedPageStatic();
+        drawMediaPageStatic();
         unlockState();
         gifPlayerRedrawOverlays(offline);
         needPresent = false;

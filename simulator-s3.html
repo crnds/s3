@@ -246,13 +246,14 @@ pre {
 // are design.md's tokens -- the TOKENS block mirrors src/tokens.h line for line.
 const SCREEN_W = 480, SCREEN_H = 320;
 const POLL_DEFAULT_MS = 20000;
-const PAGE_COUNT = 6;
+const PAGE_COUNT = 7;
 // Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
-// 3 Movies, 4 Status + cats, 5 Note.
+// 3 Movies, 4 Status + cats, 5 Note, 6 Overview.
 const GIF_PAGE = 2;    // cat GIFs on the device (placeholder here -- see drawGifPage)
 const MOVIE_PAGE = 3;  // movies on the device (placeholder here -- see drawGifPage)
 const MIXED_PAGE = 4;  // limits column + cats pane
 const NOTE_PAGE = 5;   // limits column + note pane (an ordinary render() page)
+const OVERVIEW_PAGE = 6;  // the cards on a 3x3 grid, one cell the cats (a media page, like MIXED)
 const OFFLINE_AFTER_MS = 180000;  // wall-clock floor, like main.cpp -- never a poll-cycle count
 const BOOT_PAGE_AUTO = -1;
 
@@ -408,6 +409,12 @@ const SHUFFLE_DISC_R = 16, SHUFFLE_HIT = 48;
 const SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W, SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
 const MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
 const MIXED_GIF_Y0 = TOK_LAYOUT_CONTENT_Y0, MIXED_GIF_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+// Overview grid (design.md 7.5): 149 + 8 + 150 + 8 + 149 = 464, 89 + 8 + 90 + 8 + 89 = 284.
+const OV_COL_X = [8, 165, 323], OV_COL_W = [149, 150, 149];
+const OV_ROW_Y = [8, 105, 203], OV_ROW_H = [89, 90, 89];
+// Row by row: 5H, WK, clock / date, month calendar, BTC / weather, cat, note.
+const OV_CAT_X0 = 165, OV_CAT_Y0 = 203, OV_CAT_W = 150, OV_CAT_H = 89;
+const OV_WX_HIT_X0 = 8, OV_WX_HIT_X1 = 157, OV_WX_HIT_Y0 = 203, OV_WX_HIT_Y1 = 292;
 const NIGHT_MODE_DIM_VALUE = 64;
 
 const SHIFT_ORBIT = [[0,0],[1,0],[2,0],[2,-1],[2,-2],[1,-2],[0,-2],[0,-1]];
@@ -903,8 +910,9 @@ const SETTINGS = [
   { label: 'Theme', subtitle: 'Dark or light appearance', hint: '', kind: ROW_NAV, cols: 2, count: 2,
     values: [0, 1], valueLabels: ['Dark', 'Light'], getCurrent: getCurrentTheme, apply: applyTheme },
   { label: 'Boot page', subtitle: 'Page shown after a restart', hint: 'Auto resumes the last page shown',
-    kind: ROW_NAV, cols: 4, count: 7, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5],
-    valueLabels: ['Auto', 'Status', 'Usage', 'Cats', 'Movies', 'Status + cats', 'Note'],
+    // 'Mixed' is Status + cats: its full name (110px) fits only a 3-column cell.
+    kind: ROW_NAV, cols: 4, count: 8, values: [BOOT_PAGE_AUTO, 0, 1, 2, 3, 4, 5, 6],
+    valueLabels: ['Auto', 'Status', 'Usage', 'Cats', 'Movies', 'Mixed', 'Note', 'Overview'],
     getCurrent: getCurrentBootPage, apply: applyBootPage },
   { label: 'Cat shuffle', subtitle: 'How long each cat plays', hint: 'Off plays each cat to its end; Fixed keeps one',
     kind: ROW_NAV, cols: 5, count: 5, values: [-1, 0, 5, 10, 30], valueLabels: ['Fixed', 'Off', '5s', '10s', '30s'],
@@ -970,6 +978,7 @@ function fmtCountdownDHM(sec) {
 function fmtKB(bytes) { return (bytes / 1024).toFixed(1) + 'KB'; }
 function fmtGB(bytes) { return (bytes / (1024 ** 3)).toFixed(1) + 'GB'; }
 const WDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WDAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // ── PRIMITIVES (pages.cpp twin) ───────────────────────────────
 function drawCardSurface(x, y, w, h, fill) {
@@ -1031,9 +1040,14 @@ function drawShuffleButton(cx, cy, pressed) {
   gfx.fillTriangle(cx + 8, cy - 4, cx + 5, cy - 7, cx + 5, cy - 1, c);
   gfx.fillTriangle(cx + 8, cy + 4, cx + 5, cy + 1, cx + 5, cy + 7, c);
 }
-function shuffleCentre(mixed) {
-  const x1 = mixed ? MIXED_GIF_X0 + MIXED_GIF_W : SCREEN_W;
-  const y1 = mixed ? MIXED_GIF_Y0 + MIXED_GIF_H : SCREEN_H;
+function shuffleCentre(offline) {
+  // 8px in from the media box's bottom-right: the full screen, or the pane.
+  let x1 = SCREEN_W, y1 = SCREEN_H;
+  if (catPanePage(offline)) {
+    const [px, py, pw, ph] = catPaneRect();
+    x1 = px + pw;
+    y1 = py + ph;
+  }
   return [x1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1, y1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1];
 }
 
@@ -1438,7 +1452,9 @@ const SHINE_BAND_R = 10;
 const SHINE_BAR_X = TOK_LAYOUT_COL_LEFT_X + TOK_SPACE_SM;
 const SHINE_BAR_W = TOK_LAYOUT_COL_LEFT_W - 2 * TOK_SPACE_SM;
 const SHINE_BAR_H = TOK_METER_SM;
+const shineBarX = [SHINE_BAR_X, SHINE_BAR_X];  // set by drawLimitCard (pace meter lefts)
 const shineBarY = [-1, -1], shineFillPx = [-1, -1], shinePrevCenter = [null, null];
+let shineBarW = SHINE_BAR_W;                   // set by drawLimitCard (the meters' width)
 let sweepStartMs = 0, sweepActive = false;
 function shineColor(i, center) {
   const d = Math.abs(i - center);
@@ -1454,27 +1470,30 @@ function drawShineStrip(barIdx, center, force) {
   for (let i = 2; i <= fillW - 3; i++) {
     const c = shineColor(i, center);
     if (prev !== null && c === shineColor(i, prev)) continue;
-    gfx.fillRect(SHINE_BAR_X + i, y, 1, SHINE_BAR_H, c);
+    gfx.fillRect(shineBarX[barIdx] + i, y, 1, SHINE_BAR_H, c);
     changed = true;
   }
   return changed;
 }
-function leftColumnPage() { return STATE.currentPage === 0 || STATE.currentPage === MIXED_PAGE || STATE.currentPage === NOTE_PAGE; }
+function limitCardsPage() {
+  const p = STATE.currentPage;
+  return p === 0 || p === MIXED_PAGE || p === NOTE_PAGE || p === OVERVIEW_PAGE;
+}
 function sweepCenter(nowMs) {
   const t = Math.min(1, (nowMs - sweepStartMs) / (TOK_MOTION_SWEEP_MS * motionTimeScale));
-  return -SHINE_BAND_R + Math.trunc(t * (SHINE_BAR_W + 2 * SHINE_BAND_R));
+  return -SHINE_BAND_R + Math.trunc(t * (shineBarW + 2 * SHINE_BAND_R));
 }
 function shineTick(nowMs) {
   // One sweep every TOK_MOTION_SWEEP_PERIOD_MS, measured start to start.
-  if (!sweepActive && !STATE.cfgReduceMotion && STATE.cfgShowCountdown && leftColumnPage() &&
+  if (!sweepActive && !STATE.cfgReduceMotion && STATE.cfgShowCountdown && limitCardsPage() &&
       (sweepStartMs === 0 || nowMs - sweepStartMs >= TOK_MOTION_SWEEP_PERIOD_MS * motionTimeScale)) {
     sweepActive = true; sweepStartMs = nowMs || 1;
     shinePrevCenter[0] = shinePrevCenter[1] = null;
   }
   if (!sweepActive) return false;
-  if (!leftColumnPage() || !STATE.cfgShowCountdown) { sweepActive = false; return false; }
+  if (!limitCardsPage() || !STATE.cfgShowCountdown) { sweepActive = false; return false; }
   const center = sweepCenter(nowMs);
-  const done = center >= SHINE_BAR_W + SHINE_BAND_R;
+  const done = center >= shineBarW + SHINE_BAND_R;
   let changed = false;
   for (let i = 0; i < 2; i++) if (drawShineStrip(i, center, false)) changed = true;
   if (done) sweepActive = false;
@@ -1503,9 +1522,11 @@ function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec, 
   const dur = formatPaceDur(currentPct, elapsedSec, remainingSec);
   if (dur && x2 + TOK_SPACE_HAIR + textW(TOK_TYPE_BODY, dur) <= xMax) drawText(TOK_TYPE_BODY, x2 + TOK_SPACE_HAIR, baseline - fontAscent(TOK_TYPE_BODY), dur, TOK_COLOR_TEXT_SECONDARY);
 }
-function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx, resets, inText) {
-  drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
-  const x = SHINE_BAR_X;
+// Compact (the Overview's 89px cells) puts both captions on one row.
+// countdown is '4h 03m' (no 'in'), '' when unknown.
+function drawLimitCard(cardX, cardY, cardW, cardH, compact, label, percent, ahead, elapsed, rem, pace, barIdx, resets, countdown) {
+  drawCard(cardX, cardY, cardW, cardH);
+  const x = cardX + TOK_SPACE_SM, w = cardW - 2 * TOK_SPACE_SM;
   // numeral.lg ink starts 6px below its line top and the last caption's ends at
   // +94: 10px of air above and below the ink.
   const top = cardY + TOK_SPACE_XS;
@@ -1515,25 +1536,39 @@ function drawLimitCard(cardY, label, percent, ahead, elapsed, rem, pace, barIdx,
                           : drawText(TOK_TYPE_NUMERAL_LG, x, top, '--', TOK_COLOR_TEXT_TERTIARY);
   const lx = xe + TOK_SPACE_SM;
   drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);
-  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem,
-                SHINE_BAR_X + SHINE_BAR_W);
+  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem, x + w);
   let y = top + fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_STACK_TIGHT;
-  drawMeter(x, y, SHINE_BAR_W, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
+  drawMeter(x, y, w, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
   y += TOK_METER_MD + TOK_SPACE_STACK_TIGHT;
   if (STATE.cfgShowCountdown) {
+    shineBarX[barIdx] = x;
     shineBarY[barIdx] = y;
-    shineFillPx[barIdx] = drawMeter(x, y, SHINE_BAR_W, SHINE_BAR_H, pace, TOK_COLOR_DATA_PACE);
+    shineBarW = w;
+    shineFillPx[barIdx] = drawMeter(x, y, w, SHINE_BAR_H, pace, TOK_COLOR_DATA_PACE);
     if (sweepActive) drawShineStrip(barIdx, sweepCenter(performance.now()), true);
     y += SHINE_BAR_H + TOK_SPACE_STACK_TIGHT;
   } else {
     shineBarY[barIdx] = -1; shineFillPx[barIdx] = -1;
   }
+  // Compact: the countdown right-aligned on the reset time's row, shortened
+  // on measured width (pages.cpp's twin).
+  let inText = countdown ? 'in ' + countdown : '';
+  let rightW = 0;
+  if (compact && inText) {
+    rightW = TOK_SPACE_SM + textW(TOK_TYPE_CAPTION, inText);
+    if (textW(TOK_TYPE_CAPTION, resets || '') + rightW > w) {
+      inText = countdown;
+      rightW = TOK_SPACE_SM + textW(TOK_TYPE_CAPTION, inText);
+    }
+  }
   // "Resets Thu 04:59" is 113px, 1 over the 112 inner: it drops the word.
-  const fitsWord = textW(TOK_TYPE_CAPTION, 'Resets ') + textW(TOK_TYPE_CAPTION, resets || '') <= SHINE_BAR_W;
+  const fitsWord = textW(TOK_TYPE_CAPTION, 'Resets ') + textW(TOK_TYPE_CAPTION, resets || '') + rightW <= w;
   const rx = fitsWord ? drawText(TOK_TYPE_CAPTION, x, y, 'Resets ', TOK_COLOR_TEXT_SECONDARY) : x;
   if (resets) drawText(TOK_TYPE_CAPTION, rx, y, resets, TOK_COLOR_TEXT_SECONDARY);
   else drawText(TOK_TYPE_CAPTION, rx, y, '--', TOK_COLOR_TEXT_TERTIARY);
-  if (inText) drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
+  if (!inText) return;
+  if (compact) drawTextR(TOK_TYPE_CAPTION, x + w, y, inText, TOK_COLOR_TEXT_SECONDARY);
+  else drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
 }
 // Twin of pages.cpp's weekResetWeekdayLabel(): "Oct 1, 04:59" -> "Thu 04:59".
 function weekResetWeekdayLabel(weekRem, resets) {
@@ -1542,7 +1577,8 @@ function weekResetWeekdayLabel(weekRem, resets) {
   if (weekRem < 0 || commaIdx < 0) return resets;
   return bangkokWeekdayAt(weekRem) + ' ' + resets.slice(commaIdx + 1).trimStart();
 }
-function drawLimitsColumn() {
+// The 5H and WK cards: the left column, or the Overview's two top-left cells.
+function drawLimitsColumn(overview = false) {
   const sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
   const weekRem = liveResetsInSec(STATE.weekResetsInSec);
   const sessionPace = elapsedPercentOfWindow(sessionRem, SESSION_WINDOW_SEC);
@@ -1551,10 +1587,14 @@ function drawLimitsColumn() {
   const weekAhead = STATE.weekPercent >= 0 && weekPace >= 0 && STATE.weekPercent > weekPace + 2;
   const sessionElapsed = sessionRem >= 0 ? SESSION_WINDOW_SEC - sessionRem : -1;
   const weekElapsed = weekRem >= 0 ? WEEK_WINDOW_SEC - weekRem : -1;
-  drawLimitCard(LIMIT5H_Y, '5H', STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem, sessionPace, 0,
-                STATE.sessionResets, sessionRem >= 0 ? 'in ' + fmtCountdown(sessionRem) : '');
-  drawLimitCard(LIMITWK_Y, 'WK', STATE.weekPercent, weekAhead, weekElapsed, weekRem, weekPace, 1,
-                weekResetWeekdayLabel(weekRem, STATE.weekResets), weekRem >= 0 ? 'in ' + fmtCountdownDHM(weekRem) : '');
+  const x0 = overview ? OV_COL_X[0] : TOK_LAYOUT_COL_LEFT_X, w0 = overview ? OV_COL_W[0] : TOK_LAYOUT_COL_LEFT_W;
+  const x1 = overview ? OV_COL_X[1] : TOK_LAYOUT_COL_LEFT_X, w1 = overview ? OV_COL_W[1] : TOK_LAYOUT_COL_LEFT_W;
+  const y0 = overview ? OV_ROW_Y[0] : LIMIT5H_Y, y1 = overview ? OV_ROW_Y[0] : LIMITWK_Y;
+  const h = overview ? OV_ROW_H[0] : LIMIT_CARD_H;
+  drawLimitCard(x0, y0, w0, h, overview, '5H', STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem, sessionPace, 0,
+                STATE.sessionResets, sessionRem >= 0 ? fmtCountdown(sessionRem) : '');
+  drawLimitCard(x1, y1, w1, h, overview, 'WK', STATE.weekPercent, weekAhead, weekElapsed, weekRem, weekPace, 1,
+                weekResetWeekdayLabel(weekRem, STATE.weekResets), weekRem >= 0 ? fmtCountdownDHM(weekRem) : '');
 }
 // Bitcoin logo (twin of pages.cpp's drawBtcLogo).
 const BTC_LOGO_R = 7;
@@ -1565,22 +1605,25 @@ function drawBtcLogo(cx, cy) {
     for (let c = 0; c < 5; c++)
       if (B[r][c] === 'X') gfx.fillRect(cx - 2 + c, cy - 4 + r, 1, 1, TOK_COLOR_BG_CANVAS);
 }
-function drawBtcCard() {
-  drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
-  const cy = BTC_Y + TOK_SPACE_SM + BTC_LOGO_R;
-  drawBtcLogo(SHINE_BAR_X + BTC_LOGO_R, cy);
+// The rows keep the 60px card's places in a taller box (the Overview cell):
+// the extra height goes to the bottom.
+function drawBtcCard(cardX = TOK_LAYOUT_COL_LEFT_X, cardY = BTC_Y, cardW = TOK_LAYOUT_COL_LEFT_W, cardH = BTC_CARD_H) {
+  drawCard(cardX, cardY, cardW, cardH);
+  const x = cardX + TOK_SPACE_SM, w = cardW - 2 * TOK_SPACE_SM;
+  const cy = cardY + TOK_SPACE_SM + BTC_LOGO_R;
+  drawBtcLogo(x + BTC_LOGO_R, cy);
   if (STATE.btcPrice >= 0 && STATE.btcChangePct !== null)
-    drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, cy - Math.trunc(fontLineH(TOK_TYPE_NUMERAL_SM) / 2),
+    drawTextR(TOK_TYPE_NUMERAL_SM, x + w, cy - Math.trunc(fontLineH(TOK_TYPE_NUMERAL_SM) / 2),
               fmtChangePct(STATE.btcChangePct),
               STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
   // numeral.lg ink ends 27px below its line top.
-  const baseline = BTC_Y + BTC_CARD_H - TOK_SPACE_SM - 27 + fontAscent(TOK_TYPE_NUMERAL_LG);
-  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_LG, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_NUMERAL_LG), '--', TOK_COLOR_TEXT_TERTIARY); return; }
+  const baseline = cardY + BTC_CARD_H - TOK_SPACE_SM - 27 + fontAscent(TOK_TYPE_NUMERAL_LG);
+  if (STATE.btcPrice < 0) { drawText(TOK_TYPE_NUMERAL_LG, x, baseline - fontAscent(TOK_TYPE_NUMERAL_LG), '--', TOK_COLOR_TEXT_TERTIARY); return; }
   const price = fmtBtc(STATE.btcPrice);
   let pf = TOK_TYPE_NUMERAL_LG;
-  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_MD;
-  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_SM;
-  drawText(pf, SHINE_BAR_X, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
+  if (textW(pf, price) > w) pf = TOK_TYPE_NUMERAL_MD;
+  if (textW(pf, price) > w) pf = TOK_TYPE_NUMERAL_SM;
+  drawText(pf, x, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
 }
 
 // ── NOTE PAGE (pages.cpp twin) ────────────────────────────────
@@ -1629,21 +1672,15 @@ function noteWordColor(s, a, b) {
   return hasDigit ? TOK_COLOR_CONTENT_SUN : null  /* note.number */;
 }
 
-function drawNotePane() {
-  drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
-  drawSectionLabel(NOTE_TX, NOTE_Y + TOK_SPACE_CARD_PAD, 'NOTE');
+// Word-wrapped, syntax-coloured STATE.note: glyph columns from tx, rows from
+// ty, widthPx wide, clipped at tyMax (exclusive). pages.cpp's drawNoteText.
+function drawNoteText(tx, ty, widthPx, tyMax, font) {
   const s = STATE.note || '';
-  const size = Math.min(3, Math.max(1, STATE.noteSize || 1));
-  const font = NOTE_FONTS[size - 1];
   const glyphW = glyphOf(font, '0').adv;
   const glyphH = fontLineH(font);
   const lineH = glyphH;
-  const cols = Math.floor(NOTE_TEXT_W / glyphW);
-  if (s.length === 0) {
-    drawEmptyState(NOTE_X + NOTE_W / 2, NOTE_Y, NOTE_H, 'No note yet', 'Edit at :8787/note', false);
-    return;
-  }
-  let y = NOTE_TY, col = 0, i = 0;
+  const cols = Math.floor(widthPx / glyphW);
+  let y = ty, col = 0, i = 0;
   const n = s.length;
   while (i < n) {
     let lineEnd = i;
@@ -1662,7 +1699,7 @@ function drawNotePane() {
       if (s[i] === ' ') {
         if (col > 0) col++;
         i++;
-        if (col >= cols) { y += lineH; col = 0; if (y + glyphH > NOTE_TY_MAX) return; }
+        if (col >= cols) { y += lineH; col = 0; if (y + glyphH > tyMax) return; }
         continue;
       }
       let wEnd = i;
@@ -1670,12 +1707,12 @@ function drawNotePane() {
       const wLen = wEnd - i;
       if (col > 0 && col + wLen > cols && wLen <= cols) {
         y += lineH; col = 0;
-        if (y + glyphH > NOTE_TY_MAX) return;
+        if (y + glyphH > tyMax) return;
         continue;
       }
       const wordColor = noteWordColor(s, i, wEnd);
       while (i < wEnd) {
-        if (col >= cols) { y += lineH; col = 0; if (y + glyphH > NOTE_TY_MAX) return; }
+        if (col >= cols) { y += lineH; col = 0; if (y + glyphH > tyMax) return; }
         let c;
         if (s[i] === '`') { inCode = !inCode; c = TOK_NOTE_CODE; }
         else if (inCode) c = TOK_NOTE_CODE;
@@ -1683,27 +1720,27 @@ function drawNotePane() {
         else if (lineColor) c = lineColor;
         else if (i === markerIdx) c = TOK_COLOR_ACCENT;  // note.marker
         else c = TOK_COLOR_TEXT_PRIMARY;  // note.text
-        drawChar(font, NOTE_TX + col * glyphW, y, s[i], c);
+        drawChar(font, tx + col * glyphW, y, s[i], c);
         col++; i++;
       }
     }
     i = lineEnd + 1;
     y += lineH; col = 0;
-    if (y + glyphH > NOTE_TY_MAX) return;
+    if (y + glyphH > tyMax) return;
   }
+}
+// The right column as one card: 'NOTE', then the text at the editor's size.
+function drawNotePane() {
+  drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
+  drawSectionLabel(NOTE_TX, NOTE_Y + TOK_SPACE_CARD_PAD, 'NOTE');
+  if (!STATE.note) {
+    drawEmptyState(NOTE_X + NOTE_W / 2, NOTE_Y, NOTE_H, 'No note yet', 'Edit at :8787/note', false);
+    return;
+  }
+  drawNoteText(NOTE_TX, NOTE_TY, NOTE_TEXT_W, NOTE_TY_MAX, NOTE_FONTS[Math.min(3, Math.max(1, STATE.noteSize || 1)) - 1]);
 }
 function drawNotePage() { drawLimitsColumn(); drawBtcCard(); drawNotePane(); }
 
-// Mixed page's static half (pages.cpp's drawMixedPageStatic).
-function drawMixedPageStatic() {
-  gfx.fillRect(0, 0, MIXED_GIF_X0, SCREEN_H, TOK_COLOR_BG_CANVAS);
-  gfx.fillRect(MIXED_GIF_X0, TOK_LAYOUT_CONTENT_Y1, SCREEN_W - MIXED_GIF_X0, SCREEN_H - TOK_LAYOUT_CONTENT_Y1, TOK_COLOR_BG_CANVAS);
-  gfx.fillRect(MIXED_GIF_X0 + MIXED_GIF_W, 0, SCREEN_W - MIXED_GIF_X0 - MIXED_GIF_W, SCREEN_H, TOK_COLOR_BG_CANVAS);
-  gfx.fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, MIXED_GIF_Y0, TOK_COLOR_BG_CANVAS);
-  drawLimitsColumn();
-  drawBtcCard();
-  drawStatusStrip();
-}
 
 // ── CLOCK ─────────────────────────────────────────────────────
 function drawTimerWedge(cx, cy, r, startAngle, endAngle) {
@@ -1799,30 +1836,64 @@ function drawAqiBar(x, y, w, aqi) {
   if (aqi < 0) { drawTextR(TOK_TYPE_LABEL, x + w - TOK_SPACE_SM, ty, '--', fg); return; }
   drawTextR(TOK_TYPE_LABEL, x + w - TOK_SPACE_SM, ty, String(aqi), fg);
 }
-function drawMonthGrid(x, y, year, mon, mday, wday) {
-  const dimOf = (m, yr) => new Date(Date.UTC(yr, m + 1, 0)).getUTCDate();
-  const first = (((wday - (mday - 1)) % 7) + 7) % 7;
-  const dim = dimOf(mon, year);
-  const prevDim = mon === 0 ? dimOf(11, year - 1) : dimOf(mon - 1, year);
-  const rows = Math.trunc((first + dim + 6) / 7);
-  const rowH = rows > 5 ? CAL_ROW_TALL : CAL_ROW;   // 6-row months squeeze to 17px so the grid stays ~100px tall
-  const lh = fontLineH(TOK_TYPE_CALENDAR);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < 7; c++) {
-      const d = r * 7 + c - first + 1;
-      const other = d < 1 || d > dim;
-      const shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
-      const cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * rowH + Math.trunc(rowH / 2);
-      let col = other ? TOK_COLOR_TEXT_TERTIARY
-              : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
-              : (c === 0 || c === 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
-      if (!other && d === mday) {
-        gfx.fillSmoothCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);
-        col = TOK_COLOR_TEXT_PRIMARY;
-      }
-      drawTextC(TOK_TYPE_CALENDAR, cx, cy - Math.trunc(lh / 2), String(shown), col);
-    }
+function daysInMonth(m, yr) { return new Date(Date.UTC(yr, m + 1, 0)).getUTCDate(); }
+// One calendar day centred on (cx, cy): day d of month `mon` (d < 1 or past
+// the month's end = a neighbouring month's day), in weekday column c.
+function drawCalendarDay(cx, cy, year, mon, d, c, mday) {
+  const dim = daysInMonth(mon, year);
+  const prevDim = mon === 0 ? daysInMonth(11, year - 1) : daysInMonth(mon - 1, year);
+  const other = d < 1 || d > dim;
+  const shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
+  let col = other ? TOK_COLOR_TEXT_TERTIARY
+          : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
+          : (c === 0 || c === 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
+  if (!other && d === mday) {
+    gfx.fillSmoothCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);
+    col = TOK_COLOR_TEXT_PRIMARY;
   }
+  drawTextC(TOK_TYPE_CALENDAR, cx, cy - Math.trunc(fontLineH(TOK_TYPE_CALENDAR) / 2), String(shown), col);
+}
+function firstWeekdayOfMonth(mday, wday) { return (((wday - (mday - 1)) % 7) + 7) % 7; }
+function monthGridRows(year, mon, mday, wday) {
+  return Math.trunc((firstWeekdayOfMonth(mday, wday) + daysInMonth(mon, year) + 6) / 7);
+}
+// colW-wide columns; rows rowH tall, or rowH6 in a 6-row month.
+function drawMonthGrid(x, y, colW, rowH, rowH6, year, mon, mday, wday) {
+  const first = firstWeekdayOfMonth(mday, wday);
+  const rows = monthGridRows(year, mon, mday, wday);
+  if (rows > 5) rowH = rowH6;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < 7; c++)
+      drawCalendarDay(x + c * colW + Math.trunc(colW / 2), y + r * rowH + Math.trunc(rowH / 2), year, mon, r * 7 + c - first + 1, c, mday);
+}
+// Forecast columns (the status strip, the Overview's weather cell) from the
+// label row's top iy: label caption 17, the glyph centred 34 down, the
+// temperature 51 down, 68 in all.
+const WX_GLYPH_DY = 17 + 6 + 11, WX_TEMP_DY = 17 + 12 + 22, WX_ROWS_H = WX_TEMP_DY + 17;
+// "Now" (a 44px column from x) and, past a 1px divider, the next `hours` hours.
+function drawWeatherNowAndHours(x, iy, hours) {
+  const nowCx = x + 22;
+  drawTextC(TOK_TYPE_CAPTION, nowCx, iy, 'Now', TOK_COLOR_ACCENT);
+  drawWeatherIcon(nowCx, iy + WX_GLYPH_DY, STATE.weatherCode, 1.2);
+  drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, iy + WX_TEMP_DY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
+  gfx.fillRect(x + 44, iy, 1, WX_ROWS_H, TOK_COLOR_TEXT_TERTIARY);
+  for (let i = 0; i < hours; i++) {
+    const idx = i + 1;
+    const cx = x + 44 + i * 24 + 12;
+    const have = STATE.weatherHourly.length > idx;
+    const hr = have ? STATE.weatherHourly[idx] : null;
+    drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? String(hr.h).padStart(2, '0') : '--',
+              have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
+    drawWeatherIcon(cx, iy + WX_GLYPH_DY, have ? hr.code : -1, 0.9);
+    drawTemp(TOK_TYPE_NUMERAL_SM, cx, iy + WX_TEMP_DY, have ? hr.tempC : 0, have);
+  }
+}
+// The 5H window's reset as a wall-clock [hour, minute], or null.
+function sessionResetTime(hour, minute, second) {
+  const rem = liveResetsInSec(STATE.sessionResetsInSec);
+  if (rem < 0) return null;
+  const totalSec = (hour * 3600 + minute * 60 + second + rem) % 86400;
+  return [Math.floor(totalSec / 3600), Math.floor((totalSec % 3600) / 60)];
 }
 function drawStatusPage() {
   drawLimitsColumn();
@@ -1834,15 +1905,8 @@ function drawStatusPage() {
 
   const bkk = bangkokParts();
   const hour = parseInt(bkk.hour, 10), minute = parseInt(bkk.minute, 10), second = parseInt(bkk.second, 10);
-  const sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
-  const haveReset = sessionRem >= 0;
-  let resetHour = 0, resetMinute = 0;
-  if (haveReset) {
-    const totalSec = (hour * 3600 + minute * 60 + second + sessionRem) % 86400;
-    resetHour = Math.floor(totalSec / 3600);
-    resetMinute = Math.floor((totalSec % 3600) / 60);
-  }
-  drawAnalogClock(CLOCK_CX, CLOCK_CY, CLOCK_R, hour, minute, second, haveReset, resetHour, resetMinute);
+  const reset = sessionResetTime(hour, minute, second);
+  drawAnalogClock(CLOCK_CX, CLOCK_CY, CLOCK_R, hour, minute, second, !!reset, reset ? reset[0] : 0, reset ? reset[1] : 0);
 
   // Digital time (type.clock) centred under the dial.
   drawTextC(TOK_TYPE_CLOCK, CLOCK_CX, DIGITAL_Y, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), TOK_COLOR_TEXT_PRIMARY);
@@ -1853,33 +1917,101 @@ function drawStatusPage() {
   const wdEnd = drawText(TOK_TYPE_TITLE, CAL_X, numY, bkk.weekday, TOK_COLOR_ACCENT);
   drawText(TOK_TYPE_TITLE, wdEnd + TOK_SPACE_SM, numY, String(parseInt(bkk.day, 10)), TOK_COLOR_TEXT_PRIMARY);
   drawText(TOK_TYPE_CAPTION, CAL_X, CAL_BASE_Y + 1, `${bkk.month} ${bkk.year}`, TOK_COLOR_TEXT_SECONDARY);
-  drawMonthGrid(CAL_GRID_X, CAL_GRID_Y, parseInt(bkk.year, 10),
+  // 6-row months squeeze to 17px rows so the grid stays ~100px tall.
+  drawMonthGrid(CAL_GRID_X, CAL_GRID_Y, CAL_COL, CAL_ROW, CAL_ROW_TALL, parseInt(bkk.year, 10),
                 ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(bkk.month),
                 parseInt(bkk.day, 10), WDAY_ABBR.indexOf(bkk.weekday));
   if (STATE.cfgShowAqi) drawAqiBar(CAL_X, CAL_BAR_Y, CAL_BAR_W, STATE.aqi);
 
   const ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;
   const iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;
-  const glyphCy = iy + 17 + 6 + 11, lowY = iy + 17 + 12 + 22;
+  const lowY = iy + WX_TEMP_DY;
   drawText(TOK_TYPE_NUMERAL_SM, ix, iy, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : '--',
            STATE.weatherHigh > -900 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   drawText(TOK_TYPE_NUMERAL_SM, ix, lowY, STATE.weatherLow > -900 ? String(STATE.weatherLow) : '--',
            STATE.weatherLow > -900 ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
-  const nowCx = ix + 20 + 22;
-  drawTextC(TOK_TYPE_CAPTION, nowCx, iy, 'Now', TOK_COLOR_ACCENT);
-  drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2);
-  drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, lowY, Math.round(STATE.weatherTempC), STATE.weatherTempC > -900);
-  gfx.fillRect(ix + 64, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_TERTIARY);
-  for (let i = 0; i < 10; i++) {
-    const idx = i + 1;
-    const cx = ix + 64 + i * 24 + 12;
-    const have = STATE.weatherHourly.length > idx;
-    const hr = have ? STATE.weatherHourly[idx] : null;
-    drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? String(hr.h).padStart(2, '0') : '--',
-              have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
-    drawWeatherIcon(cx, glyphCy, have ? hr.code : -1, 0.9);
-    drawTemp(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? hr.tempC : 0, have);
-  }
+  drawWeatherNowAndHours(ix + 20, iy, 10);
+}
+
+// ── OVERVIEW PAGE (pages.cpp twin, design.md 7.5) ─────────────
+const OV_CLOCK_R = 30;
+const OV_CLOCK_CX = OV_COL_X[2] + TOK_SPACE_SM + OV_CLOCK_R;   // 361
+const OV_CLOCK_CY = OV_ROW_Y[0] + Math.trunc(OV_ROW_H[0] / 2);  // 52
+const OV_CAL_COL = 19, OV_CAL_ROW = 14, OV_CAL_ROW6 = 13;
+function drawOverviewClock(bkk) {
+  drawCard(OV_COL_X[2], OV_ROW_Y[0], OV_COL_W[2], OV_ROW_H[0]);
+  const tx = OV_CLOCK_CX + OV_CLOCK_R + 1 + TOK_SPACE_SM;   // 400
+  const ty = OV_CLOCK_CY - Math.trunc(fontLineH(TOK_TYPE_CLOCK) / 2);
+  const hour = parseInt(bkk.hour, 10), minute = parseInt(bkk.minute, 10), second = parseInt(bkk.second, 10);
+  const reset = sessionResetTime(hour, minute, second);
+  drawAnalogClock(OV_CLOCK_CX, OV_CLOCK_CY, OV_CLOCK_R, hour, minute, second, !!reset, reset ? reset[0] : 0, reset ? reset[1] : 0);
+  drawText(TOK_TYPE_CLOCK, tx, ty, String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'), TOK_COLOR_TEXT_PRIMARY);
+}
+const MON_ABBR_LIST = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Date (hero readout, centred): the weekday in full (headline, accent), then
+// the day in type.display with "Oct 2026" (caption) on its baseline.
+function drawOverviewDate(bkk) {
+  const x = OV_COL_X[0], y = OV_ROW_Y[1];
+  drawCard(x, y, OV_COL_W[0], OV_ROW_H[1]);
+  const tx = x + TOK_SPACE_SM;
+  const numY = y + 33;
+  const baseline = numY + fontAscent(TOK_TYPE_DISPLAY);
+  drawText(TOK_TYPE_HEADLINE, tx, y + 12, WDAY_FULL[WDAY_ABBR.indexOf(bkk.weekday)], TOK_COLOR_ACCENT);
+  const numEnd = drawText(TOK_TYPE_DISPLAY, tx, numY, String(parseInt(bkk.day, 10)), TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, numEnd + TOK_SPACE_SM, baseline - fontAscent(TOK_TYPE_CAPTION), `${bkk.month} ${bkk.year}`,
+           TOK_COLOR_TEXT_SECONDARY);
+}
+// Month calendar: the status page's month grid at 19px columns, centred.
+function drawOverviewCalendar(bkk) {
+  const x = OV_COL_X[1], y = OV_ROW_Y[1], w = OV_COL_W[1], h = OV_ROW_H[1];
+  drawCard(x, y, w, h);
+  const year = parseInt(bkk.year, 10), mon = MON_ABBR_LIST.indexOf(bkk.month);
+  const day = parseInt(bkk.day, 10), wday = WDAY_ABBR.indexOf(bkk.weekday);
+  const rows = monthGridRows(year, mon, day, wday);
+  const gridH = rows * (rows > 5 ? OV_CAL_ROW6 : OV_CAL_ROW);
+  drawMonthGrid(x + Math.trunc((w - 7 * OV_CAL_COL) / 2), y + Math.trunc((h - gridH) / 2), OV_CAL_COL, OV_CAL_ROW, OV_CAL_ROW6,
+                year, mon, day, wday);
+}
+function drawOverviewWeather() {
+  const bg = NAV.pressedId === 'weather' ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD;
+  drawCardSurface(OV_COL_X[0], OV_ROW_Y[2], OV_COL_W[0], OV_ROW_H[2], bg);
+  drawWeatherNowAndHours(OV_COL_X[0] + TOK_SPACE_CARD_PAD_COMPACT_H, OV_ROW_Y[2] + TOK_SPACE_CARD_PAD_COMPACT_V, 3);
+}
+function drawOverviewNote() {
+  const x = OV_COL_X[2], y = OV_ROW_Y[2], w = OV_COL_W[2], h = OV_ROW_H[2];
+  drawCard(x, y, w, h);
+  if (!STATE.note) { drawEmptyState(x + w / 2, y, h, 'No note yet', 'Edit at :8787/note', false); return; }
+  drawNoteText(x + TOK_SPACE_SM, y + TOK_SPACE_SM, w - 2 * TOK_SPACE_SM, y + h - TOK_SPACE_SM, TOK_TYPE_MONO_S);
+}
+function drawOverviewCells() {
+  const bkk = bangkokParts();
+  drawLimitsColumn(true);
+  drawOverviewClock(bkk);
+  drawOverviewDate(bkk);
+  drawOverviewCalendar(bkk);
+  drawBtcCard(OV_COL_X[2], OV_ROW_Y[1], OV_COL_W[2], OV_ROW_H[1]);
+  drawOverviewWeather();
+  drawOverviewNote();
+}
+
+// ── MEDIA PAGES WITH A STATIC HALF (Mixed, Overview) ──────────
+function catPanePage(offline) {
+  return !offline && (STATE.currentPage === MIXED_PAGE || STATE.currentPage === OVERVIEW_PAGE);
+}
+function catPaneRect() {
+  return STATE.currentPage === OVERVIEW_PAGE ? [OV_CAT_X0, OV_CAT_Y0, OV_CAT_W, OV_CAT_H]
+                                             : [MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H];
+}
+// Everything but the cat pane, plus the strip (pages.cpp's drawMediaPageStatic).
+function drawMediaPageStatic() {
+  const [px, py, pw, ph] = catPaneRect();
+  gfx.fillRect(0, 0, SCREEN_W, py, TOK_COLOR_BG_CANVAS);
+  gfx.fillRect(0, py + ph, SCREEN_W, SCREEN_H - py - ph, TOK_COLOR_BG_CANVAS);
+  gfx.fillRect(0, py, px, ph, TOK_COLOR_BG_CANVAS);
+  gfx.fillRect(px + pw, py, SCREEN_W - px - pw, ph, TOK_COLOR_BG_CANVAS);
+  if (STATE.currentPage === OVERVIEW_PAGE) drawOverviewCells();
+  else { drawLimitsColumn(); drawBtcCard(); }
+  drawStatusStrip();
 }
 
 // ── DEVICE STATS SHEET ────────────────────────────────────────
@@ -2017,23 +2149,25 @@ function drawResetPlate() {
   drawText(TOK_TYPE_HEADLINE, tx + gap, y + padY, b, TOK_COLOR_TEXT_PRIMARY);
 }
 function drawMediaOverlays(offline) {
-  const mixed = STATE.currentPage === MIXED_PAGE && !offline;
-  if (!mixed) drawResetPlate();
+  const pane = catPanePage(offline);
+  if (!pane) drawResetPlate();
   const movie = STATE.currentPage === MOVIE_PAGE && !offline;
   if (STATE.catShuffleSec < 0 && (!movie || moviesAvailable())) {
-    const [cx, cy] = shuffleCentre(mixed);
+    const [cx, cy] = shuffleCentre(offline);
     drawShuffleButton(cx, cy, NAV.pressedId === 'shuffle');
   }
-  drawSystemCorner(true);
+  // The Overview's corner sits over its clock card, not over the cat.
+  drawSystemCorner(!(pane && STATE.currentPage === OVERVIEW_PAGE));
 }
 function drawGifPage(offline) {
-  const mixed = STATE.currentPage === MIXED_PAGE && !offline;
   const movie = STATE.currentPage === MOVIE_PAGE && !offline;
-  if (mixed) {
+  if (catPanePage(offline)) {
     gfx.fillScreen(TOK_COLOR_BG_CANVAS);
-    drawMixedPageStatic();
-    drawCardSurface(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_SURFACE_CARD);
-    drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H, 'Cats play here', 'Cover-fit GIFs on the device', false);
+    drawMediaPageStatic();
+    const [px, py, pw, ph] = catPaneRect();
+    drawCardSurface(px, py, pw, ph, TOK_COLOR_SURFACE_CARD);
+    drawEmptyState(px + pw / 2, py, ph, 'Cats play here',
+                   STATE.currentPage === OVERVIEW_PAGE ? 'GIFs on the device' : 'Cover-fit GIFs on the device', false);
   } else if (movie) {
     // Deliberate non-twin, same as the cats placeholder below: no real MJPEG
     // decode in the browser either (CLAUDE.md's "Deliberate non-twins").
@@ -2409,7 +2543,7 @@ const NAV = {
   G: null, vt: makeVelocity(), lastUpMs: -1e9, wasDown: false,
 };
 const LIST_VIEW_H = SCREEN_H - TOK_LAYOUT_HEADER_H;
-function isCatPage(p) { return p === GIF_PAGE || p === MOVIE_PAGE || p === MIXED_PAGE; }
+function isCatPage(p) { return p === GIF_PAGE || p === MOVIE_PAGE || p === MIXED_PAGE || p === OVERVIEW_PAGE; }
 function navCatLayout() { return isCatPage(STATE.currentPage) || !STATE.haveData; }
 function navTransitionActive() { return NAV.tKind !== null; }
 function navSheetOpen() { return STATE.weatherPageOpen || STATE.devicePageOpen || STATE.settingsScreen !== 'off'; }
@@ -2647,7 +2781,7 @@ function hitTest(x, y) {
   // Page controls (design.md 9.2): shuffle, then the 56x40 strip targets, then
   // the Weather card, which gives up its bottom corner to the gear.
   if (STATE.catShuffleSec < 0 && navCatLayout()) {
-    const [cx, cy] = shuffleCentre(STATE.currentPage === MIXED_PAGE && !offline);
+    const [cx, cy] = shuffleCentre(offline);
     const h = SHUFFLE_HIT / 2;
     if (inRect(x, y, cx - h, cy - h, cx + h, cy + h)) return ['shuffle', -1];
   }
@@ -2656,6 +2790,7 @@ function hitTest(x, y) {
     if (x >= SETTINGS_HIT_X0 && x < SETTINGS_HIT_X1) return ['gear', -1];
   }
   if (!offline && STATE.currentPage === 0 && inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return ['weather', -1];
+  if (!offline && STATE.currentPage === OVERVIEW_PAGE && inRect(x, y, OV_WX_HIT_X0, OV_WX_HIT_Y0, OV_WX_HIT_X1, OV_WX_HIT_Y1)) return ['weather', -1];
   return ['half', -1];
 }
 const PRESSABLE = new Set(['sleep', 'close', 'row', 'cell', 'weather', 'health', 'gear', 'shuffle']);
@@ -3188,7 +3323,7 @@ function describeScreen() {
   if (STATE.weatherPageOpen) return 'WEATHER (tap to close)';
   if (STATE.devicePageOpen) return 'DEVICE STATS (tap to close)';
   if (!STATE.haveData) return 'OFFLINE (cat GIFs)';
-  const names = ['status', 'usage', 'cats', 'movies', 'status + cats', 'note'];
+  const names = ['status', 'usage', 'cats', 'movies', 'status + cats', 'note', 'overview'];
   let s = `page ${STATE.currentPage + 1}/${PAGE_COUNT} (${names[STATE.currentPage]})`;
   if (STATE.shiftX || STATE.shiftY) s += ` · shift (${STATE.shiftX},${STATE.shiftY})`;
   if (motionTimeScale > 1) s += ` · slow motion x${motionTimeScale}`;
@@ -3324,7 +3459,7 @@ function tick() {
       render();
       needPresent = false;
       lastAmbientMs = now;
-    } else if ((!navCatLayout() || STATE.currentPage === MIXED_PAGE) &&
+    } else if ((!navCatLayout() || catPanePage(!STATE.haveData)) &&
                now - lastAmbientMs >= TOK_MOTION_AMBIENT_TICK_MS * motionTimeScale) {
       // Ambient motion on one shared 8 Hz tick (main.cpp twin, motion.ambient.tick).
       lastAmbientMs = now;
