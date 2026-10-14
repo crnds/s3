@@ -34,14 +34,16 @@ static bool ensureBuffers() {
 }
 
 // ── CAT MODE ───────────────────────────────────────────────
-// "Cat mode" now covers all three full-bleed media pages (cats, movies, and
-// the mixed cats pane) -- the name predates MOVIE_PAGE and isn't worth
+// "Cat mode" now covers all four media pages (cats, movies, and the mixed and
+// Overview pages' cat panes) -- the name predates MOVIE_PAGE and isn't worth
 // renaming everywhere it's used, but isCatPage()/navCatLayout() are the
 // single gate every caller below keys off, so widening this one check is
 // enough: gif_player.cpp's entry points (gifTick and friends) each dispatch
 // internally to movie_player.cpp when currentPage == MOVIE_PAGE.
 static bool prevCatMode = false;
-static bool isCatPage(int p) { return p == GIF_PAGE || p == MOVIE_PAGE || p == MIXED_PAGE; }
+static bool isCatPage(int p) {
+  return p == GIF_PAGE || p == MOVIE_PAGE || p == MIXED_PAGE || p == OVERVIEW_PAGE;
+}
 bool navCatLayout() { return isCatPage(currentPage) || !STATE.haveData; }
 void navSyncCatMode(bool catMode) {
   if (catMode == prevCatMode) return;
@@ -56,9 +58,12 @@ void navSyncCatMode(bool catMode) {
 // it while the player stays closed; the player opens and decodes only once the
 // slide has landed (loop() gates gifTick on navPageTransitionActive()), so a
 // slide never waits on, or shares its frames with, a GIF/MJPEG decode.
-static uint16_t* poster[3] = {nullptr, nullptr, nullptr};  // GIF_PAGE, MOVIE_PAGE, MIXED_PAGE
-static bool posterValid[3] = {false, false, false};
-static int posterSlot(int p) { return isCatPage(p) ? p - GIF_PAGE : -1; }
+static const int POSTER_N = 4;
+static uint16_t* poster[POSTER_N] = {};  // GIF_PAGE, MOVIE_PAGE, MIXED_PAGE, OVERVIEW_PAGE
+static bool posterValid[POSTER_N] = {};
+static int posterSlot(int p) {
+  return p == OVERVIEW_PAGE ? 3 : (p == GIF_PAGE || p == MOVIE_PAGE || p == MIXED_PAGE) ? p - GIF_PAGE : -1;
+}
 
 static void capturePoster(int page) {
   int i = posterSlot(page);
@@ -69,9 +74,11 @@ static void capturePoster(int page) {
   posterValid[i] = true;
 }
 
-// A theme change recolours the canvas round the media (the mixed pane's
-// corners, the overlays' plates), so a poster from before it is stale.
-void navInvalidatePosters() { posterValid[0] = posterValid[1] = posterValid[2] = false; }
+// A theme change recolours the canvas round the media (a pane's corners, the
+// overlays' plates), so a poster from before it is stale.
+void navInvalidatePosters() {
+  for (int i = 0; i < POSTER_N; i++) posterValid[i] = false;
+}
 
 // Compose currentPage into `frame` without presenting. Cat pages are staged
 // (poster or plate + overlays), not played: see MEDIA POSTERS above.
@@ -96,9 +103,9 @@ static void redrawScreen() {
   if (weatherPageOpen || devicePageOpen) { render(); return; }
   if (navCatLayout()) {
     bool offline = !STATE.haveData;
-    if (currentPage == MIXED_PAGE && !offline) {
+    if (catPanePage(offline)) {
       lockState();
-      drawMixedPageStatic();
+      drawMediaPageStatic();
       unlockState();
     }
     gifPlayerRedrawOverlays(offline);
@@ -594,7 +601,7 @@ static Target hitTest(int32_t x, int32_t y, int& idx) {
   // card under them -- the Weather card -- gives up its bottom corner.
   if (catShuffleFixed && navCatLayout()) {
     int cx, cy;
-    shuffleCentre(currentPage == MIXED_PAGE && !offline, cx, cy);
+    shuffleCentre(offline, cx, cy);
     int h = SHUFFLE_HIT / 2;
     if (inRect(x, y, cx - h, cy - h, cx + h, cy + h)) return TG_SHUFFLE;
   }
@@ -604,6 +611,8 @@ static Target hitTest(int32_t x, int32_t y, int& idx) {
   }
   if (!offline && currentPage == 0 &&
       inRect(x, y, WEATHER_HIT_X0, WEATHER_HIT_Y0, WEATHER_HIT_X1, WEATHER_HIT_Y1)) return TG_WEATHER;
+  if (!offline && currentPage == OVERVIEW_PAGE &&
+      inRect(x, y, OV_WX_HIT_X0, OV_WX_HIT_Y0, OV_WX_HIT_X1, OV_WX_HIT_Y1)) return TG_WEATHER;
   return TG_HALF;
 }
 

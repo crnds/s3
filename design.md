@@ -751,6 +751,51 @@ What the migration does to page 0:
 - The 5h/week shine strip geometry follows the new meter width (`SHINE_BAR_W`: 148 instead
   of 208).
 
+### 7.5 Reference layout: Overview page on the 3×3 grid
+
+Page 7 (`OVERVIEW_PAGE`) shows the cards in miniature: nine cells in the content area,
+8 px gutters, read row by row. Columns x 8 / 165 / 323 at 149 / 150 / 149 wide (149 + 8 + 150
++ 8 + 149 = 464 ✓); rows y 8 / 105 / 203 at 89 / 90 / 89 tall (89 + 8 + 90 + 8 + 89 = 284 ✓).
+`state.h`'s `OV_COL_X/W`, `OV_ROW_Y/H`. The status strip and hairline are unchanged.
+
+```
+x: 8          156 165         314 323          471
+y: 8  +-----------+ +-----------+ +--------[b][a]+
+      |57%  5H    | |86% WK !14h| |  .--.         |
+      |======     | |=========  | | ( r30 ) 17:09 |
+      |=======    | |=====      | |  '--'         |
+      |03:19 in 1h| |Sun 04 3d12| |               |
+   96 +-----------+ +-----------+ +---------------+
+  105 +-----------+ +-----------+ +---------------+
+      |Wednesday  | | . 1 2 3 4 | |(B)       +2%  |
+      |           | |5 6 ... 11 | |109,432        |
+      |14 Oct 2026| |12 (14) .. | |               |
+  194 +-----------+ +-----------+ +---------------+
+  203 +-----------+ +-----------+ +---------------+
+      |Now| 18 19 | |           | |# Ship v2      |
+      | * | *  *  | |  cat GIF  | |- TODO flash   |
+      |34 | 33 32 | |       (S) | |12:30          |
+  291 +-----------+ +-----------+ +---------------+
+```
+
+All cells take 8 px pads (the weather cell its compact 8 / 12). Widths are measured with the
+firmware glyph advances.
+
+| Cell | Internal budget (px) |
+|---|---|
+| 5H / WK limit | The limit card, compact: numeral.lg % + label + pace flag (its projection drops at the content edge: `99% 5H ! 167h` = 138 > 133), meter.md, the pace meter (with the sweep), then **one** caption row, the reset time left and the countdown right-aligned. The row shortens on measured width: `Resets 16:30` + `in 4h 03m` (157) → `16:30` + `in 4h 03m` (108) → `Thu 04:59` + `6d 16h` (121). Vertical: 4 + 33 + 4 + 8 + 4 + 6 + 4 + 17 = 80 of 89. |
+| Clock | Analog dial r 30 (with the reset wedge and radius) at (361, 52), and `17:09` in type.clock (61 px) from x 400, centred on the dial. The dial's ink above y 40 ends at x 388 and the time's ink starts at y 44: both clear of the corner slots (§7.3). |
+| Date | A hero readout, so centred (§7.2 rule 5): the weekday in full in headline + accent (the current-item marker; `Wednesday` = 98 px), then the day in type.display (`28` = 52 px) with `Oct 2026` in caption on its baseline (52 + 8 + 61 = 121 of 133). 17 px of air above and below the ink. |
+| Month calendar | The Status page's month grid (no header; the date card names the month) at 7 × 19 = 133 px, rows 14 px (5 rows = 70 of 74 inner), 13 px in a 6-row month (78, into the pads). A figure, so centred in the card. Same day colours, holidays and today's accent disc (r 8). |
+| BTC | The BTC card's two rows in their 60 px places; the extra 30 px go to the bottom (§7.2 rule 5). `1,234,567` stays numeral.lg (133 px inner). |
+| Weather (tappable → Weather sheet) | Now (44, glyph 1.2), a 1 px divider, the next 3 hours × 24 (glyph 0.9): 117 of 125 inner, the status strip's rows (caption 17, glyph, caption 17). Pressed = `surface.raised`. Its bottom-left corner (x < 56, y ≥ 280) goes to the Device Stats strip target (§9.6). |
+| Cat | The media pane (§11.20) at x 165..314, y 203..291, cover-fit; corners `radius.lg` onto `bg.canvas`. At about 3:1 the blit takes the mean of four samples per pixel. The shuffle button (Fixed only) sits 8 px in from the cell's bottom-right, centre (290, 267), hit x 266..313. |
+| Note | The note in `mono.s` at any editor size, 19 columns × 4 rows, no label, wrap + clip. Empty: "No note yet" / "Edit at :8787/note". |
+
+The cat cell makes this a media page: like Status + cats, its static half (the eight cards
+and the strip) is redrawn around the playing pane once a second (`drawMediaPageStatic`), and
+offline it shows the full-screen cat.
+
 ---
 
 ## 8. Shape, stroke and depth
@@ -1258,9 +1303,9 @@ excluded on purpose are listed in §11.23.
 ### 11.11 Page indicator
 
 - **Purpose:** wayfinding in the carousel: *where am I, how many are there, which way now.*
-- **Anatomy:** 6 dots, 6 px across, 6 px gaps (66 px wide), centred at x 240
+- **Anatomy:** 7 dots, 6 px across, 6 px gaps (78 px wide), centred at x 240
   in the status strip. The current dot is `text.primary`; the others are `fill.track`.
-  It replaces the `1 / 6` text.
+  It replaces the `1 / 7` text.
 - **Behaviour:** not a target. It updates on the commit present of a page change,
   before the slide starts.
 
@@ -1384,10 +1429,12 @@ excluded on purpose are listed in §11.23.
 ### 11.20 Media pane (cats)
 
 - **Purpose:** full-bleed or pane-filling animated content. It is also the offline screen.
-- **Anatomy:** the GIF (cover-fit in a pane, 1:1 centred full-screen), plus overlays on plates:
+- **Anatomy:** the GIF (cover-fit in a pane -- the Status + cats right column or the Overview's
+  cat cell, §7.5 -- or 1:1 centred full-screen), plus overlays on plates:
   - the reset readout, bottom-left: **headline** text (one weight up from body, §8.4) on a
-    `color.plate` box with 8 / 6 padding (today's `drawSessionResetOverlay`)
-  - the system corner glyphs on plates
+    `color.plate` box with 8 / 6 padding (today's `drawSessionResetOverlay`), full-screen only
+  - the system corner glyphs on plates (bare on the Overview, where the corner sits over the
+    clock card)
   - the **media control** (only while Cat Shuffle is Fixed): a **shuffle icon button**,
     bottom-right of the media area, glyph on a 32 px plate disc, hit box 48 × 48.
     It **replaces the invisible middle-third and left-half "next cat" zones.**
@@ -1424,7 +1471,7 @@ settings, overlays and media. Sleep is checked first in hit-testing (§9.2).
 | **Text input field** | No keyboard, and a 3.5-inch single-touch keyboard is error-prone. Text is entered in a browser: the AP portal for Wi-Fi, and `note.html` for the note. |
 | **Slider** | Discrete presets (≤8) tap more reliably than dragging a thumb at 30 Hz with no velocity from the controller, and they map exactly to stored values. Revisit only for a setting that truly needs a continuum. |
 | **Toggle switch** | The toggle row's labelled On/Off pill (§11.7) does the same job in one tap and doesn't rely on colour or a knob position. |
-| **Tab bar** | Six peer pages would cost 44 px on every page, or 16% of the height. The carousel, page dots and tap halves cover navigation. |
+| **Tab bar** | Seven peer pages would cost 44 px on every page, or 16% of the height. The carousel, page dots and tap halves cover navigation. |
 | **Dialog / alert** | The arm pattern (§11.9) is the only confirmation. Modal dialogs would teach tap-through. |
 | **Skeleton or shimmer loaders** | Shimmer is continuous full-frame motion (§1). Use `--` placeholders (§13.4). |
 | **Tooltip, hover card, context menu** | There's no hover and long press is reserved. |
@@ -1737,7 +1784,7 @@ Hourly chime, Claude ding, Alerts, Mute when asleep, Mute at night).
 | Reduce Motion cross-fade | About the same as a slide (blend inside the rotate copy) | A gentler equivalent, not the removal of feedback. |
 | Swipe paging | +300 KB PSRAM (the neighbour page, shared with the lean), about 30 presents a second while dragging | 1:1 direct manipulation. Tap halves stay primary. |
 | Momentum scroll and rubber band | Velocity ring buffer, plus about 30 presents a second while coasting (d = 0.995 keeps coasts short) | Settings is about 3.3 screens long; a hard stop at the ends reads as frozen. |
-| Continuous shine sweep (**deprecated**) | About 30 presents a second forever on 3 of 6 pages, which keeps the CPU duty and bus busy | Replaced by one sweep per poll. |
+| Continuous shine sweep (**deprecated**) | About 30 presents a second forever on 3 of 7 pages, which keeps the CPU duty and bus busy | Replaced by one sweep per poll. |
 | Progress hairline at 1 px/present, floored at ~30 Hz | About 24 presents a second at the default 20 s poll, same as an uncapped naive fill | Every present shows real 1 px progress -- the smoothest this hairline can be -- while the floor still protects the loop from a 5 s poll's 96 px/s. |
 | Blinking status dot (**deprecated**) | A present every second | Replaced by a steady dot plus a per-poll pulse. |
 | Size-specific tracking and optical sizing | No extra flash (the advances change and the font count stays the same); a `make_vlw.py` run and simulator atlas regeneration; Inter 4 `opsz` source | Apple-style type that changes shape with size. The real cost is the parity round-trip, not memory. |
@@ -1969,8 +2016,8 @@ shot compared pixel for pixel (`CLAUDE.md` → Commands).
   use the dense single-line variant (§11.6): with label-above rows, four projects and a readable
   trend card don't both fit in 284 px. Saved boot / last page values from the 7-page layout are
   shifted once at boot (`migratePageIndices`, NVS marker `pages_v2`).
-- **Boot page grid** puts its second row (3 cells) on the 3-column width, so
-  "Status + cats" (110 px of headline) fits its cell.
+- **Boot page grid** is 4 + 4 cells of 110 px (Auto and the seven pages). "Status + cats"
+  (110 px of headline) doesn't fit one, so the grid labels it **Mixed**.
 - **Reduce Motion** also turns off the drags that would move a surface (page swipe,
   drag to dismiss, swipe back). Each has a tap equivalent, and a cross-fade can't
   track a finger. List scrolling stays.

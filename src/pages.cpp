@@ -12,6 +12,9 @@
 static const char* const WDAY_ABBR[7] = {
   "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
 };
+static const char* const WDAY_FULL[7] = {
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+};
 static const char* const MON_ABBR[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
@@ -258,10 +261,15 @@ void drawShuffleButton(int cx, int cy, bool pressed) {
   g->fillTriangle(cx + 8, cy + 4, cx + 5, cy + 1, cx + 5, cy + 7, c);
 }
 
-void shuffleCentre(bool mixed, int& cx, int& cy) {
+void shuffleCentre(bool offline, int& cx, int& cy) {
   // 8px in from the media box's bottom-right: the full screen, or the pane.
-  int x1 = mixed ? MIXED_GIF_X0 + MIXED_GIF_W : SCREEN_W;
-  int y1 = mixed ? MIXED_GIF_Y0 + MIXED_GIF_H : SCREEN_H;
+  int x1 = SCREEN_W, y1 = SCREEN_H;
+  if (catPanePage(offline)) {
+    int px, py, pw, ph;
+    catPaneRect(px, py, pw, ph);
+    x1 = px + pw;
+    y1 = py + ph;
+  }
   cx = x1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1;
   cy = y1 - TOK_SPACE_SM - SHUFFLE_DISC_R - 1;
 }
@@ -797,14 +805,17 @@ static void drawTemp(FontId f, int cx, int y, int t, bool have) {
 }
 
 // ── PACE SWEEP (motion.sweep) ──────────────────────────────
-// One light band every 3s across the green pace fills of the
-// shared left column (status, mixed, note pages), then still: it means
-// "fresh data". Constant speed, 600 ms. Twin of simulator-s3.html's.
+// One light band every 3s across the green pace fills of the limit cards
+// (the shared left column of the status, mixed and note pages, and the
+// Overview's 5H / WK cells), then still: it means "fresh data". Constant
+// speed, 600 ms. Twin of simulator-s3.html's.
 static const int SHINE_BAND_R = 10;
 static const int SHINE_BAR_X = TOK_LAYOUT_COL_LEFT_X + TOK_SPACE_SM;   // 16 (the 128px column takes 8px side pads)
 static const int SHINE_BAR_W = TOK_LAYOUT_COL_LEFT_W - 2 * TOK_SPACE_SM;  // 112
 static const int SHINE_BAR_H = TOK_METER_SM;
+static int shineBarX[2] = {SHINE_BAR_X, SHINE_BAR_X};  // set by drawLimitCard (pace meter lefts)
 static int shineBarY[2] = {-1, -1};           // set by drawLimitCard (pace meter tops)
+static int shineBarW = SHINE_BAR_W;           // set by drawLimitCard (the meters' width)
 static volatile int shineFillPx[2] = {-1, -1};  // fill widths cached under stateMutex
 static uint32_t sweepStartMs = 0;
 static bool sweepActive = false;
@@ -828,34 +839,34 @@ static bool drawShineStrip(int barIdx, int center, bool force) {
   for (int i = 2; i <= fillW - 3; i++) {
     uint16_t c = shineColor(i, center);
     if (prev != INT_MIN && c == shineColor(i, prev)) continue;
-    g->fillRect(SHINE_BAR_X + i, y, 1, SHINE_BAR_H, c);
+    g->fillRect(shineBarX[barIdx] + i, y, 1, SHINE_BAR_H, c);
     changed = true;
   }
   return changed;
 }
 
-static bool leftColumnPage() {
-  return currentPage == 0 || currentPage == MIXED_PAGE || currentPage == NOTE_PAGE;
+static bool limitCardsPage() {
+  return currentPage == 0 || currentPage == MIXED_PAGE || currentPage == NOTE_PAGE || currentPage == OVERVIEW_PAGE;
 }
 
 static int sweepCenter(uint32_t nowMs) {
   float t = (float)(nowMs - sweepStartMs) / (TOK_MOTION_SWEEP_MS * motionTimeScale);
   if (t > 1.0f) t = 1.0f;
-  return -SHINE_BAND_R + (int)(t * (SHINE_BAR_W + 2 * SHINE_BAND_R));
+  return -SHINE_BAND_R + (int)(t * (shineBarW + 2 * SHINE_BAND_R));
 }
 
 bool shineTick(uint32_t nowMs) {
   // One sweep every TOK_MOTION_SWEEP_PERIOD_MS, measured start to start.
-  if (!sweepActive && !cfgReduceMotion && cfgShowCountdown && leftColumnPage() &&
+  if (!sweepActive && !cfgReduceMotion && cfgShowCountdown && limitCardsPage() &&
       (sweepStartMs == 0 || nowMs - sweepStartMs >= TOK_MOTION_SWEEP_PERIOD_MS * motionTimeScale)) {
     sweepActive = true;
     sweepStartMs = nowMs ? nowMs : 1;
     shinePrevCenter[0] = shinePrevCenter[1] = INT_MIN;
   }
   if (!sweepActive) return false;
-  if (!leftColumnPage() || !cfgShowCountdown) { sweepActive = false; return false; }
+  if (!limitCardsPage() || !cfgShowCountdown) { sweepActive = false; return false; }
   int center = sweepCenter(nowMs);
-  bool done = center >= SHINE_BAR_W + SHINE_BAND_R;
+  bool done = center >= shineBarW + SHINE_BAND_R;
   bool changed = false;
   for (int i = 0; i < 2; i++)
     if (drawShineStrip(i, center, false)) changed = true;
@@ -914,11 +925,13 @@ static void drawPaceFlag(int x, int baseline, bool ahead, int currentPct, long e
 
 // One limit card (design.md 7.4): numeral.lg % + label (+ flag), the paired
 // meter (usage over pace), then two caption lines -- when it resets, and in
-// how long.
-static void drawLimitCard(int cardY, const char* label, int percent, bool ahead, long elapsed, long rem,
-                          int pace, int barIdx, const char* resets, const String& inText) {
-  drawCard(TOK_LAYOUT_COL_LEFT_X, cardY, TOK_LAYOUT_COL_LEFT_W, LIMIT_CARD_H);
-  const int x = SHINE_BAR_X;
+// how long. Compact (the Overview's 89px cells, design.md 7.5) puts both on
+// one caption row. countdown is "4h 03m" (no "in"), "" when unknown.
+static void drawLimitCard(int cardX, int cardY, int cardW, int cardH, bool compact, const char* label,
+                          int percent, bool ahead, long elapsed, long rem, int pace, int barIdx,
+                          const char* resets, const String& countdown) {
+  drawCard(cardX, cardY, cardW, cardH);
+  const int x = cardX + TOK_SPACE_SM, w = cardW - 2 * TOK_SPACE_SM;  // 8px side pads
   // numeral.lg ink starts 6px below its line top and the last caption's ends at
   // +94: 10px of air above and below the ink.
   const int top = cardY + TOK_SPACE_XS;
@@ -931,16 +944,17 @@ static void drawLimitCard(int cardY, const char* label, int percent, bool ahead,
   else xe = drawText(TOK_TYPE_NUMERAL_LG, x, top, "--", TOK_COLOR_TEXT_TERTIARY);
   int lx = xe + TOK_SPACE_SM;
   drawSectionLabel(lx, baseline - fontAscent(TOK_TYPE_LABEL), label);
-  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem,
-                SHINE_BAR_X + SHINE_BAR_W);
+  drawPaceFlag(lx + textW(TOK_TYPE_LABEL, label) + TOK_SPACE_XS, baseline, ahead, percent, elapsed, rem, x + w);
 
   int y = top + fontLineH(TOK_TYPE_NUMERAL_LG) + TOK_SPACE_STACK_TIGHT;
-  drawMeter(x, y, SHINE_BAR_W, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
+  drawMeter(x, y, w, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
   y += TOK_METER_MD + TOK_SPACE_STACK_TIGHT;
   // The pace meter is optional (Settings > Pace bars); off, the space closes up.
   if (cfgShowCountdown) {
+    shineBarX[barIdx] = x;
     shineBarY[barIdx] = y;
-    shineFillPx[barIdx] = drawMeter(x, y, SHINE_BAR_W, SHINE_BAR_H, pace, TOK_COLOR_DATA_PACE);
+    shineBarW = w;
+    shineFillPx[barIdx] = drawMeter(x, y, w, SHINE_BAR_H, pace, TOK_COLOR_DATA_PACE);
     if (sweepActive) drawShineStrip(barIdx, sweepCenter(millis()), true);
     y += SHINE_BAR_H + TOK_SPACE_STACK_TIGHT;
   } else {
@@ -948,12 +962,26 @@ static void drawLimitCard(int cardY, const char* label, int percent, bool ahead,
     shineFillPx[barIdx] = -1;
   }
 
+  // Compact: the countdown right-aligned on the reset time's row. Measured
+  // fit, shortest last: "Resets 16:30 .. in 4h 03m" (157px) -> "16:30 .. in
+  // 4h 03m" (108) -> "Thu 04:59 .. 6d 16h" (121, the week's).
+  String inText = countdown.length() ? "in " + countdown : String("");
+  int rightW = 0;
+  if (compact && inText.length()) {
+    rightW = TOK_SPACE_SM + textW(TOK_TYPE_CAPTION, inText);
+    if (textW(TOK_TYPE_CAPTION, resets) + rightW > w) {
+      inText = countdown;
+      rightW = TOK_SPACE_SM + textW(TOK_TYPE_CAPTION, inText);
+    }
+  }
   // "Resets Thu 04:59" is 113px, 1 over the 112 inner: it drops the word.
-  const bool fitsWord = textW(TOK_TYPE_CAPTION, "Resets ") + textW(TOK_TYPE_CAPTION, resets) <= SHINE_BAR_W;
+  const bool fitsWord = textW(TOK_TYPE_CAPTION, "Resets ") + textW(TOK_TYPE_CAPTION, resets) + rightW <= w;
   int rx = fitsWord ? drawText(TOK_TYPE_CAPTION, x, y, "Resets ", TOK_COLOR_TEXT_SECONDARY) : x;
   if (resets[0] != '\0') drawText(TOK_TYPE_CAPTION, rx, y, resets, TOK_COLOR_TEXT_SECONDARY);
   else drawText(TOK_TYPE_CAPTION, rx, y, "--", TOK_COLOR_TEXT_TERTIARY);
-  if (inText.length()) drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
+  if (!inText.length()) return;
+  if (compact) drawTextR(TOK_TYPE_CAPTION, x + w, y, inText, TOK_COLOR_TEXT_SECONDARY);
+  else drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
 }
 
 // Week reset label: the server's "Oct 1, 04:59" with the date swapped for the
@@ -973,7 +1001,8 @@ static String weekResetWeekdayLabel(long weekRem, const char* resets) {
   return String(WDAY_ABBR[ti.tm_wday]) + " " + t;
 }
 
-static void drawLimitsColumn() {
+// The 5H and WK cards: the left column, or the Overview's two top-left cells.
+static void drawLimitsColumn(bool overview = false) {
   long sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
   long weekRem = liveResetsInSec(STATE.weekResetsInSec);
   String weekResetLabel = weekResetWeekdayLabel(weekRem, STATE.weekResets);
@@ -989,12 +1018,14 @@ static void drawLimitsColumn() {
   long sessionElapsed = sessionRem >= 0 ? SESSION_WINDOW_SEC - sessionRem : -1;
   long weekElapsed = weekRem >= 0 ? WEEK_WINDOW_SEC - weekRem : -1;
 
-  drawLimitCard(LIMIT5H_Y, "5H", STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem,
-                sessionPace, 0, STATE.sessionResets,
-                sessionRem >= 0 ? "in " + fmtCountdown(sessionRem) : String(""));
-  drawLimitCard(LIMITWK_Y, "WK", STATE.weekPercent, weekAhead, weekElapsed, weekRem,
-                weekPace, 1, weekResetLabel.c_str(),
-                weekRem >= 0 ? "in " + fmtCountdownDHM(weekRem) : String(""));
+  const int x0 = overview ? OV_COL_X[0] : TOK_LAYOUT_COL_LEFT_X, w0 = overview ? OV_COL_W[0] : TOK_LAYOUT_COL_LEFT_W;
+  const int x1 = overview ? OV_COL_X[1] : TOK_LAYOUT_COL_LEFT_X, w1 = overview ? OV_COL_W[1] : TOK_LAYOUT_COL_LEFT_W;
+  const int y0 = overview ? OV_ROW_Y[0] : LIMIT5H_Y, y1 = overview ? OV_ROW_Y[0] : LIMITWK_Y;
+  const int h = overview ? OV_ROW_H[0] : LIMIT_CARD_H;
+  drawLimitCard(x0, y0, w0, h, overview, "5H", STATE.sessionPercent, sessionAhead, sessionElapsed, sessionRem,
+                sessionPace, 0, STATE.sessionResets, sessionRem >= 0 ? fmtCountdown(sessionRem) : String(""));
+  drawLimitCard(x1, y1, w1, h, overview, "WK", STATE.weekPercent, weekAhead, weekElapsed, weekRem,
+                weekPace, 1, weekResetLabel.c_str(), weekRem >= 0 ? fmtCountdownDHM(weekRem) : String(""));
 }
 
 // Bitcoin logo: 15px orange disc with a black (bg.canvas) pixel-drawn B and two ticks
@@ -1020,26 +1051,30 @@ static void drawBtcLogo(int cx, int cy) {
 // BTC (compact card), two rows with 8px of air between and around the ink: the
 // logo and the 24h change (right-aligned to the content edge; green up, red
 // down, the sign carries it without colour), then the price in numeral.lg on
-// the full 112px inner width. A price too wide for it steps down to md, then sm.
-static void drawBtcCard() {
-  drawCard(TOK_LAYOUT_COL_LEFT_X, BTC_Y, TOK_LAYOUT_COL_LEFT_W, BTC_CARD_H);
-  const int cy = BTC_Y + TOK_SPACE_SM + BTC_LOGO_R;
-  drawBtcLogo(SHINE_BAR_X + BTC_LOGO_R, cy);
+// the full inner width (112px in the left column). A price too wide for it
+// steps down to md, then sm. The rows keep the 60px card's places in a taller
+// box (the Overview cell): the extra height goes to the bottom (design.md 7.2).
+static void drawBtcCard(int cardX = TOK_LAYOUT_COL_LEFT_X, int cardY = BTC_Y,
+                        int cardW = TOK_LAYOUT_COL_LEFT_W, int cardH = BTC_CARD_H) {
+  drawCard(cardX, cardY, cardW, cardH);
+  const int x = cardX + TOK_SPACE_SM, w = cardW - 2 * TOK_SPACE_SM;
+  const int cy = cardY + TOK_SPACE_SM + BTC_LOGO_R;
+  drawBtcLogo(x + BTC_LOGO_R, cy);
   if (STATE.btcPrice >= 0 && !isnan(STATE.btcChangePct))
-    drawTextR(TOK_TYPE_NUMERAL_SM, SHINE_BAR_X + SHINE_BAR_W, cy - fontLineH(TOK_TYPE_NUMERAL_SM) / 2,
+    drawTextR(TOK_TYPE_NUMERAL_SM, x + w, cy - fontLineH(TOK_TYPE_NUMERAL_SM) / 2,
               fmtChangePct(STATE.btcChangePct),
               STATE.btcChangePct < 0 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_STATUS_SUCCESS);
   // numeral.lg ink ends 27px below its line top.
-  const int baseline = BTC_Y + BTC_CARD_H - TOK_SPACE_SM - 27 + fontAscent(TOK_TYPE_NUMERAL_LG);
+  const int baseline = cardY + BTC_CARD_H - TOK_SPACE_SM - 27 + fontAscent(TOK_TYPE_NUMERAL_LG);
   if (STATE.btcPrice < 0) {
-    drawText(TOK_TYPE_NUMERAL_LG, SHINE_BAR_X, baseline - fontAscent(TOK_TYPE_NUMERAL_LG), "--", TOK_COLOR_TEXT_TERTIARY);
+    drawText(TOK_TYPE_NUMERAL_LG, x, baseline - fontAscent(TOK_TYPE_NUMERAL_LG), "--", TOK_COLOR_TEXT_TERTIARY);
     return;
   }
   String price = fmtBtc(STATE.btcPrice);
   FontId pf = TOK_TYPE_NUMERAL_LG;
-  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_MD;
-  if (textW(pf, price) > SHINE_BAR_W) pf = TOK_TYPE_NUMERAL_SM;
-  drawText(pf, SHINE_BAR_X, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
+  if (textW(pf, price) > w) pf = TOK_TYPE_NUMERAL_MD;
+  if (textW(pf, price) > w) pf = TOK_TYPE_NUMERAL_SM;
+  drawText(pf, x, baseline - fontAscent(pf), price, TOK_COLOR_TEXT_PRIMARY);
 }
 
 // ── NOTE PAGE (NOTE_PAGE) ──────────────────────────────────
@@ -1122,27 +1157,17 @@ static uint16_t noteWordColor(const char* s, int a, int b) {
   return hasDigit ? TOK_NOTE_NUMBER : 0;
 }
 
-// Word-wrapped, syntax-coloured render of STATE.note into the right-hand pane.
-// Overflow past NOTE_TY_MAX is simply not drawn ("wrap + clip").
-// Caller holds stateMutex; this must not re-lock.
-static void drawNotePane() {
-  drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
-  drawSectionLabel(NOTE_TX, NOTE_Y + TOK_SPACE_CARD_PAD, "NOTE");
-
+// Word-wrapped, syntax-coloured render of STATE.note: glyph columns from tx,
+// rows from ty, widthPx wide. Overflow past tyMax (exclusive) is simply not
+// drawn ("wrap + clip"). Caller holds stateMutex; this must not re-lock.
+static void drawNoteText(int tx, int ty, int widthPx, int tyMax, FontId font) {
   const char* s = STATE.note;
-  const int size = constrain(STATE.noteSize, 1, 3);
-  const FontId font = NOTE_FONTS[size - 1];
   const int glyphW = FONT_ADV[font]['0' - 0x20];  // monospace: every advance is equal
   const int glyphH = fontLineH(font);
   const int lineH = glyphH;
-  const int cols = NOTE_TEXT_W / glyphW;
+  const int cols = widthPx / glyphW;
 
-  if (s[0] == '\0') {
-    drawEmptyState(NOTE_X + NOTE_W / 2, NOTE_Y, NOTE_H, "No note yet", "Edit at :8787/note", false);
-    return;
-  }
-
-  int y = NOTE_TY;
+  int y = ty;
   int col = 0;
   const int n = strlen(s);
   int i = 0;
@@ -1175,7 +1200,7 @@ static void drawNotePane() {
         i++;
         if (col >= cols) {
           y += lineH; col = 0;
-          if (y + glyphH > NOTE_TY_MAX) return;
+          if (y + glyphH > tyMax) return;
         }
         continue;
       }
@@ -1189,7 +1214,7 @@ static void drawNotePane() {
       // row. A word longer than a whole row is hard-broken below instead.
       if (col > 0 && col + wLen > cols && wLen <= cols) {
         y += lineH; col = 0;
-        if (y + glyphH > NOTE_TY_MAX) return;
+        if (y + glyphH > tyMax) return;
         continue;  // re-test on the new row
       }
 
@@ -1198,7 +1223,7 @@ static void drawNotePane() {
       while (i < wEnd) {
         if (col >= cols) {  // hard break inside an over-long word
           y += lineH; col = 0;
-          if (y + glyphH > NOTE_TY_MAX) return;
+          if (y + glyphH > tyMax) return;
         }
         uint16_t c;
         if (s[i] == '`') {
@@ -1215,7 +1240,7 @@ static void drawNotePane() {
         } else {
           c = TOK_NOTE_TEXT;
         }
-        drawChar(font, NOTE_TX + col * glyphW, y, s[i], c);
+        drawChar(font, tx + col * glyphW, y, s[i], c);
         col++; i++;
       }
     }
@@ -1223,8 +1248,19 @@ static void drawNotePane() {
     // ── end of source line (an empty line consumes a row, as an editor implies) ──
     i = lineEnd + 1;  // step over the '\n'
     y += lineH; col = 0;
-    if (y + glyphH > NOTE_TY_MAX) return;
+    if (y + glyphH > tyMax) return;
   }
+}
+
+// The right column as one card: "NOTE", then the text at the editor's size.
+static void drawNotePane() {
+  drawCard(NOTE_X, NOTE_Y, NOTE_W, NOTE_H);
+  drawSectionLabel(NOTE_TX, NOTE_Y + TOK_SPACE_CARD_PAD, "NOTE");
+  if (STATE.note[0] == '\0') {
+    drawEmptyState(NOTE_X + NOTE_W / 2, NOTE_Y, NOTE_H, "No note yet", "Edit at :8787/note", false);
+    return;
+  }
+  drawNoteText(NOTE_TX, NOTE_TY, NOTE_TEXT_W, NOTE_TY_MAX, NOTE_FONTS[constrain(STATE.noteSize, 1, 3) - 1]);
 }
 
 // Page 6: the shared left column, with the note pane where the cats go.
@@ -1234,18 +1270,6 @@ static void drawNotePage() {
   drawNotePane();
 }
 
-// Mixed page's static half: left column + strip. The right pane belongs to
-// the GIF player (gif_player.cpp cover-fits the cat there).
-void drawMixedPageStatic() {
-  g->fillRect(0, 0, MIXED_GIF_X0, SCREEN_H, TOK_COLOR_BG_CANVAS);
-  g->fillRect(MIXED_GIF_X0, TOK_LAYOUT_CONTENT_Y1, SCREEN_W - MIXED_GIF_X0, SCREEN_H - TOK_LAYOUT_CONTENT_Y1,
-              TOK_COLOR_BG_CANVAS);
-  g->fillRect(MIXED_GIF_X0 + MIXED_GIF_W, 0, SCREEN_W - MIXED_GIF_X0 - MIXED_GIF_W, SCREEN_H, TOK_COLOR_BG_CANVAS);
-  g->fillRect(MIXED_GIF_X0, 0, MIXED_GIF_W, MIXED_GIF_Y0, TOK_COLOR_BG_CANVAS);
-  drawLimitsColumn();
-  drawBtcCard();
-  drawStatusStrip();
-}
 
 // ── ANALOG CLOCK (design.md 11.18) ─────────────────────────
 // Filled pace wedge from the hour hand clockwise to the reset angle.
@@ -1394,36 +1418,85 @@ static bool isThaiHoliday(int year, int mon, int d) {
   return false;
 }
 
-static void drawMonthGrid(int x, int y, int year, int mon, int mday, int wday) {
+static int daysInMonth(int m, int yr) {
   static const uint8_t DIM[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-  auto dimOf = [&](int m, int yr) {
-    bool leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
-    return (int)DIM[m] + (m == 1 && leap ? 1 : 0);
-  };
-  const int first = (((wday - (mday - 1)) % 7) + 7) % 7;   // weekday of the 1st
-  const int dim = dimOf(mon, year);
-  const int prevDim = mon == 0 ? dimOf(11, year - 1) : dimOf(mon - 1, year);
-  const int rows = (first + dim + 6) / 7;
-  const int rowH = rows > 5 ? CAL_ROW_TALL : CAL_ROW;   // 6-row months squeeze to 17px so the grid stays ~100px tall
-  const int lh = fontLineH(TOK_TYPE_CALENDAR);
-  for (int r = 0; r < rows; r++) {
-    for (int c = 0; c < 7; c++) {
-      int d = r * 7 + c - first + 1;
-      bool other = d < 1 || d > dim;
-      int shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
-      int cx = x + c * CAL_COL + CAL_COL / 2, cy = y + r * rowH + rowH / 2;
-      uint16_t col = other ? TOK_COLOR_TEXT_TERTIARY
-                   : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
-                   : (c == 0 || c == 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
-      if (!other && d == mday) {
-        aaFillCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);
-        col = TOK_COLOR_TEXT_PRIMARY;
-      }
-      char nb[4];
-      snprintf(nb, sizeof(nb), "%d", shown);
-      drawTextC(TOK_TYPE_CALENDAR, cx, cy - lh / 2, nb, col);
-    }
+  bool leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+  return (int)DIM[m] + (m == 1 && leap ? 1 : 0);
+}
+
+// One calendar day centred on (cx, cy): day d of month `mon` (d < 1 or past
+// the month's end = a neighbouring month's day), in weekday column c.
+static void drawCalendarDay(int cx, int cy, int year, int mon, int d, int c, int mday) {
+  const int dim = daysInMonth(mon, year);
+  const int prevDim = mon == 0 ? daysInMonth(11, year - 1) : daysInMonth(mon - 1, year);
+  bool other = d < 1 || d > dim;
+  int shown = d < 1 ? prevDim + d : d > dim ? d - dim : d;
+  uint16_t col = other ? TOK_COLOR_TEXT_TERTIARY
+               : isThaiHoliday(year, mon, d) ? TOK_COLOR_HOLIDAY
+               : (c == 0 || c == 6) ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY;
+  if (!other && d == mday) {
+    aaFillCircle(cx, cy, CAL_DISC_R, TOK_COLOR_ACCENT);
+    col = TOK_COLOR_TEXT_PRIMARY;
   }
+  char nb[4];
+  snprintf(nb, sizeof(nb), "%d", shown);
+  drawTextC(TOK_TYPE_CALENDAR, cx, cy - fontLineH(TOK_TYPE_CALENDAR) / 2, nb, col);
+}
+
+static int firstWeekdayOfMonth(int mday, int wday) { return (((wday - (mday - 1)) % 7) + 7) % 7; }
+static int monthGridRows(int year, int mon, int mday, int wday) {
+  return (firstWeekdayOfMonth(mday, wday) + daysInMonth(mon, year) + 6) / 7;
+}
+
+// colW-wide columns; rows rowH tall, or rowH6 in a 6-row month.
+static void drawMonthGrid(int x, int y, int colW, int rowH, int rowH6, int year, int mon, int mday, int wday) {
+  const int first = firstWeekdayOfMonth(mday, wday);
+  const int rows = monthGridRows(year, mon, mday, wday);
+  if (rows > 5) rowH = rowH6;
+  for (int r = 0; r < rows; r++)
+    for (int c = 0; c < 7; c++)
+      drawCalendarDay(x + c * colW + colW / 2, y + r * rowH + rowH / 2, year, mon, r * 7 + c - first + 1, c, mday);
+}
+
+// Forecast columns (the status strip, the Overview's weather cell) from the
+// label row's top iy: label caption 17, the glyph centred 34 down, the
+// temperature 51 down, 68 in all.
+static const int WX_GLYPH_DY = 17 + 6 + 11, WX_TEMP_DY = 17 + 12 + 22, WX_ROWS_H = WX_TEMP_DY + 17;
+
+// "Now" (a 44px column from x) and, past a 1px divider, the next `hours` hours
+// in 24px columns.
+static void drawWeatherNowAndHours(int x, int iy, int hours) {
+  // "Now": the current-item marker is accent.
+  const int nowCx = x + 22;
+  drawTextC(TOK_TYPE_CAPTION, nowCx, iy, "Now", TOK_COLOR_ACCENT);
+  drawWeatherIcon(nowCx, iy + WX_GLYPH_DY, STATE.weatherCode, 1.2f);
+  drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, iy + WX_TEMP_DY, (int)round(STATE.weatherTempC), STATE.weatherTempC > -900);
+  // 1px divider on the now | next-hour column boundary, the content box's height.
+  g->fillRect(x + 44, iy, 1, WX_ROWS_H, TOK_COLOR_TEXT_TERTIARY);
+
+  // weatherHourly[] starts at the current hour (the "now" column), so the
+  // next hours are indices 1..hours. 24px columns take a 0.9 glyph (~18px).
+  for (int i = 0; i < hours; i++) {
+    int idx = i + 1;
+    int cx = x + 44 + i * 24 + 12;
+    bool have = STATE.weatherHourlyCount > idx;
+    char hbuf[4];
+    if (have) snprintf(hbuf, sizeof(hbuf), "%02d", STATE.weatherHourly[idx].hour);
+    drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? hbuf : "--",
+              have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
+    drawWeatherIcon(cx, iy + WX_GLYPH_DY, have ? STATE.weatherHourly[idx].code : -1, 0.9f);
+    drawTemp(TOK_TYPE_NUMERAL_SM, cx, iy + WX_TEMP_DY, have ? STATE.weatherHourly[idx].tempC : 0, have);
+  }
+}
+
+// The 5H window's reset as a wall-clock time, for the analog clocks' wedge.
+static bool sessionResetTime(const struct tm& t, int& hour, int& minute) {
+  long rem = liveResetsInSec(STATE.sessionResetsInSec);
+  if (rem < 0) return false;
+  long totalSec = ((long)t.tm_hour * 3600 + t.tm_min * 60 + t.tm_sec + rem) % 86400;
+  hour = totalSec / 3600;
+  minute = (totalSec % 3600) / 60;
+  return true;
 }
 
 static void drawStatusPage() {
@@ -1438,14 +1511,8 @@ static void drawStatusPage() {
   struct tm timeinfo;
   bool haveTime = haveLocalTime(&timeinfo);
 
-  long sessionRem = liveResetsInSec(STATE.sessionResetsInSec);
-  bool haveReset = haveTime && sessionRem >= 0;
   int resetHour = 0, resetMinute = 0;
-  if (haveReset) {
-    long totalSec = ((long)timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec + sessionRem) % 86400;
-    resetHour = totalSec / 3600;
-    resetMinute = (totalSec % 3600) / 60;
-  }
+  bool haveReset = haveTime && sessionResetTime(timeinfo, resetHour, resetMinute);
 
   if (haveTime) {
     drawAnalogClock(CLOCK_CX, CLOCK_CY, CLOCK_R, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
@@ -1474,7 +1541,8 @@ static void drawStatusPage() {
     char my[12];
     snprintf(my, sizeof(my), "%s %d", MON_ABBR[timeinfo.tm_mon], timeinfo.tm_year + 1900);
     drawText(TOK_TYPE_CAPTION, CAL_X, CAL_BASE_Y + 1, my, TOK_COLOR_TEXT_SECONDARY);
-    drawMonthGrid(CAL_GRID_X, CAL_GRID_Y, timeinfo.tm_year + 1900, timeinfo.tm_mon,
+    // 6-row months squeeze to 17px rows so the grid stays ~100px tall.
+    drawMonthGrid(CAL_GRID_X, CAL_GRID_Y, CAL_COL, CAL_ROW, CAL_ROW_TALL, timeinfo.tm_year + 1900, timeinfo.tm_mon,
                   timeinfo.tm_mday, timeinfo.tm_wday);
   } else {
     drawText(TOK_TYPE_TITLE, CAL_X, CAL_BASE_Y - fontAscent(TOK_TYPE_TITLE), "--", TOK_COLOR_TEXT_TERTIARY);
@@ -1486,34 +1554,140 @@ static void drawStatusPage() {
   // (design.md 11.1's exception); the whole card is still the target.
   const int ix = TOK_LAYOUT_COL_RIGHT_X + TOK_SPACE_CARD_PAD_COMPACT_H;   // 156
   const int iy = WEATHER_CARD_Y + TOK_SPACE_CARD_PAD_COMPACT_V;           // 216
-  const int glyphCy = iy + 17 + 6 + 11;                                     // 250
-  const int lowY = iy + 17 + 12 + 22;                                        // 267
+  const int lowY = iy + WX_TEMP_DY;                                          // 267
   drawText(TOK_TYPE_NUMERAL_SM, ix, iy, STATE.weatherHigh > -900 ? String(STATE.weatherHigh) : String("--"),
            STATE.weatherHigh > -900 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   drawText(TOK_TYPE_NUMERAL_SM, ix, lowY, STATE.weatherLow > -900 ? String(STATE.weatherLow) : String("--"),
            STATE.weatherLow > -900 ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
 
-  // "Now": the current-item marker is accent.
-  const int nowCx = ix + 20 + 22;
-  drawTextC(TOK_TYPE_CAPTION, nowCx, iy, "Now", TOK_COLOR_ACCENT);
-  drawWeatherIcon(nowCx, glyphCy, STATE.weatherCode, 1.2f);
-  drawTemp(TOK_TYPE_NUMERAL_SM, nowCx, lowY, (int)round(STATE.weatherTempC), STATE.weatherTempC > -900);
-  // 1px divider on the now | next-hour column boundary, the content box's height.
-  g->fillRect(ix + 64, iy, 1, WEATHER_CARD_H - 2 * TOK_SPACE_CARD_PAD_COMPACT_V, TOK_COLOR_TEXT_TERTIARY);
+  drawWeatherNowAndHours(ix + 20, iy, 10);
+}
 
-  // Next 10 hours: weatherHourly[] starts at the current hour (the "now"
-  // column), so indices 1..10. 24px columns take a 0.9 glyph (~18px).
-  for (int i = 0; i < 10; i++) {
-    int idx = i + 1;
-    int cx = ix + 64 + i * 24 + 12;
-    bool have = STATE.weatherHourlyCount > idx;
-    char hbuf[4];
-    if (have) snprintf(hbuf, sizeof(hbuf), "%02d", STATE.weatherHourly[idx].hour);
-    drawTextC(TOK_TYPE_NUMERAL_SM, cx, iy, have ? hbuf : "--",
-              have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY);
-    drawWeatherIcon(cx, glyphCy, have ? STATE.weatherHourly[idx].code : -1, 0.9f);
-    drawTemp(TOK_TYPE_NUMERAL_SM, cx, lowY, have ? STATE.weatherHourly[idx].tempC : 0, have);
+// ── OVERVIEW PAGE (OVERVIEW_PAGE, design.md 7.5) ───────────
+// The cards in miniature on a 3x3 grid (state.h's OV_*), row by row: 5H, WK,
+// clock / date, month calendar, BTC / weather, cat, note. The cat cell is the GIF
+// player's pane, so the page draws as drawMediaPageStatic(), like Mixed.
+// Every cell takes 8px pads (the weather cell its compact 8 / 12).
+static const int OV_CLOCK_R = 30;
+static const int OV_CLOCK_CX = OV_COL_X[2] + TOK_SPACE_SM + OV_CLOCK_R;   // 361
+static const int OV_CLOCK_CY = OV_ROW_Y[0] + OV_ROW_H[0] / 2;              // 52
+// Month grid: 7 x 19 = 133 of the 134 inner; 14px rows (5 rows = 70 of the
+// 74 inner), 13 in a 6-row month (78: into the pads, 6px each side).
+static const int OV_CAL_COL = 19, OV_CAL_ROW = 14, OV_CAL_ROW6 = 13;
+
+// Clock: the dial (r 30, with the reset wedge and radius) and, 8px right of
+// it, the digital time centred on the dial. The time's ink starts below y 40
+// and the dial's above it stays left of x 396: both clear of the corner slots.
+static void drawOverviewClock(bool haveTime, const struct tm& t) {
+  drawCard(OV_COL_X[2], OV_ROW_Y[0], OV_COL_W[2], OV_ROW_H[0]);
+  const int tx = OV_CLOCK_CX + OV_CLOCK_R + 1 + TOK_SPACE_SM;                // 400
+  const int ty = OV_CLOCK_CY - fontLineH(TOK_TYPE_CLOCK) / 2;
+  if (!haveTime) {
+    aaRing(OV_CLOCK_CX, OV_CLOCK_CY, OV_CLOCK_R, 2, TOK_COLOR_TEXT_TERTIARY);
+    drawText(TOK_TYPE_CLOCK, tx, ty, "--:--", TOK_COLOR_TEXT_TERTIARY);
+    return;
   }
+  int resetHour = 0, resetMinute = 0;
+  bool haveReset = sessionResetTime(t, resetHour, resetMinute);
+  drawAnalogClock(OV_CLOCK_CX, OV_CLOCK_CY, OV_CLOCK_R, t.tm_hour, t.tm_min, t.tm_sec,
+                  haveReset, resetHour, resetMinute);
+  char hm[8];
+  snprintf(hm, sizeof(hm), "%02d:%02d", t.tm_hour, t.tm_min);
+  drawText(TOK_TYPE_CLOCK, tx, ty, hm, TOK_COLOR_TEXT_PRIMARY);
+}
+
+// Date (hero readout, so centred in the card): the weekday in full (headline,
+// accent -- the current-item marker), then the day of the month in type.display
+// with "Oct 2026" (caption) on its baseline. 17px of air above and below the ink.
+static void drawOverviewDate(bool haveTime, const struct tm& t) {
+  const int x = OV_COL_X[0], y = OV_ROW_Y[1];
+  drawCard(x, y, OV_COL_W[0], OV_ROW_H[1]);
+  const int tx = x + TOK_SPACE_SM;
+  const int numY = y + 33;                                   // display ink y+42..72
+  const int baseline = numY + fontAscent(TOK_TYPE_DISPLAY);
+  if (!haveTime) {
+    drawText(TOK_TYPE_DISPLAY, tx, numY, "--", TOK_COLOR_TEXT_TERTIARY);
+    return;
+  }
+  drawText(TOK_TYPE_HEADLINE, tx, y + 12, WDAY_FULL[t.tm_wday], TOK_COLOR_ACCENT);
+  char nb[4];
+  snprintf(nb, sizeof(nb), "%d", t.tm_mday);
+  const int numEnd = drawText(TOK_TYPE_DISPLAY, tx, numY, nb, TOK_COLOR_TEXT_PRIMARY);
+  char my[12];
+  snprintf(my, sizeof(my), "%s %d", MON_ABBR[t.tm_mon], t.tm_year + 1900);
+  drawText(TOK_TYPE_CAPTION, numEnd + TOK_SPACE_SM, baseline - fontAscent(TOK_TYPE_CAPTION), my,
+           TOK_COLOR_TEXT_SECONDARY);
+}
+
+// Month calendar: the status page's month grid at 19px columns, centred in
+// the card (a figure, not text, so it is the exception to top-anchoring).
+static void drawOverviewCalendar(bool haveTime, const struct tm& t) {
+  const int x = OV_COL_X[1], y = OV_ROW_Y[1], w = OV_COL_W[1], h = OV_ROW_H[1];
+  drawCard(x, y, w, h);
+  if (!haveTime) return;
+  const int year = t.tm_year + 1900;
+  const int rows = monthGridRows(year, t.tm_mon, t.tm_mday, t.tm_wday);
+  const int gridH = rows * (rows > 5 ? OV_CAL_ROW6 : OV_CAL_ROW);
+  drawMonthGrid(x + (w - 7 * OV_CAL_COL) / 2, y + (h - gridH) / 2, OV_CAL_COL, OV_CAL_ROW, OV_CAL_ROW6,
+                year, t.tm_mon, t.tm_mday, t.tm_wday);
+}
+
+// Weather (compact card, tappable -> Weather sheet): Now and the next 3 hours.
+static void drawOverviewWeather() {
+  const uint16_t bg = (pressedId == PRESS_WEATHER) ? TOK_COLOR_SURFACE_RAISED : TOK_COLOR_SURFACE_CARD;
+  drawCardSurface(OV_COL_X[0], OV_ROW_Y[2], OV_COL_W[0], OV_ROW_H[2], bg);
+  drawWeatherNowAndHours(OV_COL_X[0] + TOK_SPACE_CARD_PAD_COMPACT_H, OV_ROW_Y[2] + TOK_SPACE_CARD_PAD_COMPACT_V, 3);
+}
+
+// Note: the text in mono.s whatever the editor's size (19 x 4), no label.
+static void drawOverviewNote() {
+  const int x = OV_COL_X[2], y = OV_ROW_Y[2], w = OV_COL_W[2], h = OV_ROW_H[2];
+  drawCard(x, y, w, h);
+  if (STATE.note[0] == '\0') {
+    drawEmptyState(x + w / 2, y, h, "No note yet", "Edit at :8787/note", false);
+    return;
+  }
+  drawNoteText(x + TOK_SPACE_SM, y + TOK_SPACE_SM, w - 2 * TOK_SPACE_SM, y + h - TOK_SPACE_SM, TOK_TYPE_MONO_S);
+}
+
+static void drawOverviewCells() {
+  struct tm t;
+  bool haveTime = haveLocalTime(&t);
+  drawLimitsColumn(true);
+  drawOverviewClock(haveTime, t);
+  drawOverviewDate(haveTime, t);
+  drawOverviewCalendar(haveTime, t);
+  drawBtcCard(OV_COL_X[2], OV_ROW_Y[1], OV_COL_W[2], OV_ROW_H[1]);
+  drawOverviewWeather();
+  drawOverviewNote();
+}
+
+// ── MEDIA PAGES WITH A STATIC HALF (Mixed, Overview) ───────
+bool catPanePage(bool offline) {
+  return !offline && (currentPage == MIXED_PAGE || currentPage == OVERVIEW_PAGE);
+}
+
+void catPaneRect(int& x, int& y, int& w, int& h) {
+  if (currentPage == OVERVIEW_PAGE) { x = OV_CAT_X0; y = OV_CAT_Y0; w = OV_CAT_W; h = OV_CAT_H; }
+  else { x = MIXED_GIF_X0; y = MIXED_GIF_Y0; w = MIXED_GIF_W; h = MIXED_GIF_H; }
+}
+
+// Everything but the cat pane, which belongs to the GIF player
+// (gif_player.cpp cover-fits the cat there), plus the strip.
+void drawMediaPageStatic() {
+  int px, py, pw, ph;
+  catPaneRect(px, py, pw, ph);
+  g->fillRect(0, 0, SCREEN_W, py, TOK_COLOR_BG_CANVAS);
+  g->fillRect(0, py + ph, SCREEN_W, SCREEN_H - py - ph, TOK_COLOR_BG_CANVAS);
+  g->fillRect(0, py, px, ph, TOK_COLOR_BG_CANVAS);
+  g->fillRect(px + pw, py, SCREEN_W - px - pw, ph, TOK_COLOR_BG_CANVAS);
+  if (currentPage == OVERVIEW_PAGE) {
+    drawOverviewCells();
+  } else {
+    drawLimitsColumn();
+    drawBtcCard();
+  }
+  drawStatusStrip();
 }
 
 // ── DEVICE STATS SHEET ─────────────────────────────────────
@@ -1676,7 +1850,8 @@ void render() {
   // The media pages are animated frame-by-frame by gifTick() in loop(), not
   // drawn here (unless a sheet is up over them); offline is also gifTick()'s.
   bool sheet = weatherPageOpen || devicePageOpen;
-  if (!sheet && (currentPage == GIF_PAGE || currentPage == MOVIE_PAGE || currentPage == MIXED_PAGE)) return;
+  if (!sheet && (currentPage == GIF_PAGE || currentPage == MOVIE_PAGE || currentPage == MIXED_PAGE ||
+                 currentPage == OVERVIEW_PAGE)) return;
   uint32_t startUs = micros();
   // Hold the lock across all STATE reads, release before the present.
   lockState();

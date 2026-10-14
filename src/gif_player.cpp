@@ -1,4 +1,4 @@
-// CATS / GIF_PAGE and the MIXED_PAGE cat pane: random cat GIFs, played
+// CATS / GIF_PAGE and the MIXED_PAGE / OVERVIEW_PAGE cat panes: random cat GIFs, played
 // endlessly (and full-screen on any page while offline -- the cats ARE the
 // offline screen, regardless of currentPage: see gifTick()'s top). The GIFs
 // are linked into the firmware image (cats/*.gif -> cats_embed.h, built by
@@ -9,8 +9,8 @@
 // MOVIE_PAGE (random .mjpeg playback from /movies/) is a sibling module,
 // movie_player.cpp, with its own decoder/canvas -- but it shares this file's
 // integration points rather than getting its own nav.cpp/main.cpp wiring.
-// nav.cpp's isCatPage()/navCatLayout() treat GIF_PAGE/MOVIE_PAGE/MIXED_PAGE
-// as one "cat mode" (a pre-existing name that predates movies), so every
+// nav.cpp's isCatPage()/navCatLayout() treat GIF_PAGE/MOVIE_PAGE/MIXED_PAGE/
+// OVERVIEW_PAGE as one "cat mode" (a pre-existing name that predates movies), so every
 // caller here -- gifTick() and the five gifPlayer* entry points below --
 // dispatches to movie_player.cpp's equivalents whenever currentPage ==
 // MOVIE_PAGE && online, and otherwise runs unchanged. Offline always falls
@@ -20,8 +20,8 @@
 // What changed from the CYD player: every GIF frame is composited in RAW mode
 // into gifCanvas, a GIF-sized RGB565 canvas in PSRAM, and only then copied
 // into `frame` -- 1:1 on the full-screen cat page, or cover-fit (uniform
-// scale, cropped to fill, never stretched) into the mixed page's right-column
-// pane (x 188..471). Overlays (reset plate, shuffle button, corner glyphs)
+// scale, cropped to fill, never stretched) into a pane: the mixed page's right
+// column, or the Overview's cat cell (catPaneRect()). Overlays (reset plate, shuffle button, corner glyphs)
 // always sit on solid plates: nothing is drawn over media without one
 // (design.md 11.20).
 // Compositing on a canvas that belongs to the GIF (rather than straight onto
@@ -45,7 +45,10 @@ static bool gifPlaceholderDrawn = false;
 static uint32_t gifNextFrameMs = 0;
 static uint32_t gifOpenedAtMs = 0;   // when the current GIF opened; used by the shuffle-interval cutoff
 static int currentCatIndex = -1;     // currently open cat GIF index
-static bool gifMixedMode = false;    // layout the current GIF was opened for
+// Layout the current GIF was opened for: the page whose pane it fills
+// (MIXED_PAGE / OVERVIEW_PAGE), or -1 for full screen; and that pane.
+static int gifPaneLayout = -1;
+static int paneX = 0, paneY = 0, paneW = 0, paneH = 0;
 static uint32_t gifFrames = 0;       // decoded-frame counter for the fps log
 // Set when a GIF has ended and should replay (Cat Shuffle FIXED, or an
 // interval that hasn't elapsed yet) rather than hand over to a random cat.
@@ -57,19 +60,21 @@ static uint16_t* gifCanvas = nullptr;
 static int canvasW = 0, canvasH = 0;
 // Bounding box of canvas pixels touched by the current frame (inclusive).
 static int dirtyX0, dirtyY0, dirtyX1, dirtyY1;
-// Where the canvas lands in `frame`: full-screen 1:1 offset, or the mixed
-// pane's origin (cover-fit always fills the whole pane, so no centering
-// offset is needed there -- see mixedScale/mixedSrcOffX/Y below).
+// Where the canvas lands in `frame`: full-screen 1:1 offset, or the pane's
+// origin (cover-fit always fills the whole pane, so no centering offset is
+// needed there -- see paneScale/paneSrcOffX/Y below).
 static int destX = 0, destY = 0;
-// Mixed-pane cover-fit, computed once per GIF open (openCatAtIndex): the
-// single scale factor (same on both axes, so the aspect ratio never
-// distorts) that makes the canvas cover the MIXED_GIF_W x MIXED_GIF_H pane,
-// plus the canvas-space top-left of the visible (uncropped) window. Whichever
-// axis has leftover after the other is scaled to fit gets cropped -- usually
-// the sides, since fit_cats.py enlarges every cat to touch the full-screen
-// page's height first.
-static float mixedScale = 1.0f;
-static float mixedSrcOffX = 0.0f, mixedSrcOffY = 0.0f;
+// Pane cover-fit, computed once per GIF open (openCatAtIndex): the single
+// scale factor (same on both axes, so the aspect ratio never distorts) that
+// makes the canvas cover the paneW x paneH pane, plus the canvas-space
+// top-left of the visible (uncropped) window. Whichever axis has leftover
+// after the other is scaled to fit gets cropped -- usually the sides, since
+// fit_cats.py enlarges every cat to touch the full-screen page's height first.
+static float paneScale = 1.0f;
+static float paneSrcOffX = 0.0f, paneSrcOffY = 0.0f;
+
+// The layout the current page wants: its pane's page, or -1 (full screen).
+static int wantPaneLayout(bool offline) { return catPanePage(offline) ? currentPage : -1; }
 
 static inline void markDirty(int x0, int x1, int y) {
   if (x0 < dirtyX0) dirtyX0 = x0;
@@ -122,24 +127,35 @@ static void GIFDraw(GIFDRAW* pDraw) {
 
 // ── CANVAS -> FRAME ────────────────────────────────────────
 // Round the cat's display area (radius.lg): the screen-wide cat's corners go
-// to the letterbox plate, the mixed pane's to the page canvas. Clipped to the
+// to the letterbox plate, a pane's to the page canvas. Clipped to the
 // pixels a blit just rewrote, since re-blending an edge pixel darkens it;
 // openCatAtIndex() masks the freshly cleared area once, unclipped, so corners
 // a GIF never redraws are still round.
 static void maskCatCorners(int clipX, int clipY, int clipW, int clipH) {
   g->setClipRect(clipX, clipY, clipW, clipH);
-  if (gifMixedMode)
-    aaMaskRoundCorners(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
+  if (gifPaneLayout >= 0)
+    aaMaskRoundCorners(paneX, paneY, paneW, paneH, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
   else
     aaMaskRoundCorners(destX, destY, canvasW, canvasH, TOK_RADIUS_LG, TOK_COLOR_PLATE);
   g->clearClipRect();
 }
 
+// Mean of four big-endian RGB565 pixels (the canvas's and the frame's order).
+static inline uint16_t avg4(uint16_t a, uint16_t b, uint16_t c, uint16_t d) {
+  a = __builtin_bswap16(a); b = __builtin_bswap16(b); c = __builtin_bswap16(c); d = __builtin_bswap16(d);
+  uint16_t r = ((a >> 11) + (b >> 11) + (c >> 11) + (d >> 11) + 2) >> 2;
+  uint16_t gg = (((a >> 5) & 63) + ((b >> 5) & 63) + ((c >> 5) & 63) + ((d >> 5) & 63) + 2) >> 2;
+  uint16_t bl = ((a & 31) + (b & 31) + (c & 31) + (d & 31) + 2) >> 2;
+  return __builtin_bswap16((uint16_t)((r << 11) | (gg << 5) | bl));
+}
+
+static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+
 // Copy the frame's dirty box from the canvas into `frame`.
 static void blitDirty() {
   if (dirtyX1 < 0) return;
   uint16_t* fb = (uint16_t*)frame.getBuffer();
-  if (!gifMixedMode) {
+  if (gifPaneLayout < 0) {
     for (int y = dirtyY0; y <= dirtyY1; y++) {
       int dy = destY + y;
       if (dy < 0 || dy >= SCREEN_H) continue;
@@ -152,32 +168,38 @@ static void blitDirty() {
     maskCatCorners(destX + dirtyX0, destY + dirtyY0, dirtyX1 - dirtyX0 + 1, dirtyY1 - dirtyY0 + 1);
     return;
   }
-  // Cover-fit into the mixed pane: nearest-sample the canvas through the
-  // open-time scale/crop (mixedScale/mixedSrcOffX/Y), touching only the
-  // destination pixels whose nearest source pixel falls in this frame's
-  // dirty box. Nearest-neighbour, not a box average: the scale here is
-  // rarely a clean ratio (it depends on each GIF's own aspect ratio), and at
-  // this pane size the aliasing is not visible.
-  float invScale = 1.0f / mixedScale;
-  int dstX0 = (int)floorf((dirtyX0 - mixedSrcOffX) * mixedScale);
-  int dstX1 = (int)ceilf((dirtyX1 + 1 - mixedSrcOffX) * mixedScale) - 1;
-  int dstY0 = (int)floorf((dirtyY0 - mixedSrcOffY) * mixedScale);
-  int dstY1 = (int)ceilf((dirtyY1 + 1 - mixedSrcOffY) * mixedScale) - 1;
+  // Cover-fit into the pane: sample the canvas through the open-time
+  // scale/crop (paneScale/paneSrcOffX/Y), touching only the destination
+  // pixels whose source footprint meets this frame's dirty box (rounded out
+  // a pixel, for the 4-tap footprint below). The scale is rarely a clean
+  // ratio (it depends on each GIF's own aspect ratio). At the mixed pane's
+  // ~1.3:1 nearest-neighbour aliasing is not visible; the Overview cell's
+  // ~3:1 shimmers with it, so below half scale each pixel is the mean of four
+  // samples at the quarter points of its footprint.
+  float invScale = 1.0f / paneScale;
+  int dstX0 = (int)floorf((dirtyX0 - 1 - paneSrcOffX) * paneScale);
+  int dstX1 = (int)ceilf((dirtyX1 + 2 - paneSrcOffX) * paneScale) - 1;
+  int dstY0 = (int)floorf((dirtyY0 - 1 - paneSrcOffY) * paneScale);
+  int dstY1 = (int)ceilf((dirtyY1 + 2 - paneSrcOffY) * paneScale) - 1;
   if (dstX0 < 0) dstX0 = 0;
   if (dstY0 < 0) dstY0 = 0;
-  if (dstX1 >= MIXED_GIF_W) dstX1 = MIXED_GIF_W - 1;
-  if (dstY1 >= MIXED_GIF_H) dstY1 = MIXED_GIF_H - 1;
+  if (dstX1 >= paneW) dstX1 = paneW - 1;
+  if (dstY1 >= paneH) dstY1 = paneH - 1;
+  const bool superSample = paneScale < 0.5f;
   for (int py = dstY0; py <= dstY1; py++) {
-    int sy = (int)(mixedSrcOffY + (py + 0.5f) * invScale);
-    if (sy < 0) sy = 0;
-    if (sy >= canvasH) sy = canvasH - 1;
-    const uint16_t* srow = gifCanvas + sy * canvasW;
     uint16_t* drow = fb + (destY + py) * SCREEN_W + destX;
+    if (!superSample) {
+      const uint16_t* srow = gifCanvas + clampi((int)(paneSrcOffY + (py + 0.5f) * invScale), 0, canvasH - 1) * canvasW;
+      for (int px = dstX0; px <= dstX1; px++)
+        drow[px] = srow[clampi((int)(paneSrcOffX + (px + 0.5f) * invScale), 0, canvasW - 1)];
+      continue;
+    }
+    const uint16_t* r0 = gifCanvas + clampi((int)(paneSrcOffY + (py + 0.25f) * invScale), 0, canvasH - 1) * canvasW;
+    const uint16_t* r1 = gifCanvas + clampi((int)(paneSrcOffY + (py + 0.75f) * invScale), 0, canvasH - 1) * canvasW;
     for (int px = dstX0; px <= dstX1; px++) {
-      int sx = (int)(mixedSrcOffX + (px + 0.5f) * invScale);
-      if (sx < 0) sx = 0;
-      if (sx >= canvasW) sx = canvasW - 1;
-      drow[px] = srow[sx];
+      int sx0 = clampi((int)(paneSrcOffX + (px + 0.25f) * invScale), 0, canvasW - 1);
+      int sx1 = clampi((int)(paneSrcOffX + (px + 0.75f) * invScale), 0, canvasW - 1);
+      drow[px] = avg4(r0[sx0], r0[sx1], r1[sx0], r1[sx1]);
     }
   }
   if (dstX1 >= dstX0 && dstY1 >= dstY0)
@@ -191,16 +213,17 @@ static void blitDirty() {
 // with movie_player.cpp (declared in state.h) since MOVIE_PAGE uses the same
 // overlays, just counting movies instead of cats.
 void drawMediaOverlays(bool offline) {
-  bool mixed = (currentPage == MIXED_PAGE && !offline);
-  if (!mixed) drawResetPlate();
+  bool pane = catPanePage(offline);
+  if (!pane) drawResetPlate();
   bool onMoviePage = (currentPage == MOVIE_PAGE && !offline);
   int count = onMoviePage ? movieCount : catCount;
   if (catShuffleFixed && count > 0) {
     int cx, cy;
-    shuffleCentre(mixed, cx, cy);
+    shuffleCentre(offline, cx, cy);
     drawShuffleButton(cx, cy, pressedId == PRESS_SHUFFLE);
   }
-  drawSystemCorner(true);
+  // The Overview's corner sits over its clock card, not over the cat.
+  drawSystemCorner(!(pane && currentPage == OVERVIEW_PAGE));
 }
 
 // Empty state for a build with no cats (design.md 13.4; tools/embed_cats.py
@@ -209,12 +232,13 @@ void drawMediaOverlays(bool offline) {
 static bool drawGifPlaceholder(bool offline) {
   if (gifPlaceholderDrawn) return false;
   gifPlaceholderDrawn = true;
-  bool mixedMode = (currentPage == MIXED_PAGE && !offline);
-  if (mixedMode) {
-    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_BG_CANVAS);
-    drawCardSurface(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_SURFACE_CARD);
-    drawEmptyState(MIXED_GIF_X0 + MIXED_GIF_W / 2, MIXED_GIF_Y0, MIXED_GIF_H,
-                   "No cats yet", "Add GIFs to cats/ and rebuild", false);
+  if (catPanePage(offline)) {
+    int px, py, pw, ph;
+    catPaneRect(px, py, pw, ph);
+    g->fillRect(px, py, pw, ph, TOK_COLOR_BG_CANVAS);
+    drawCardSurface(px, py, pw, ph, TOK_COLOR_SURFACE_CARD);
+    drawEmptyState(px + pw / 2, py, ph, "No cats yet",
+                   currentPage == OVERVIEW_PAGE ? "Add GIFs and rebuild" : "Add GIFs to cats/ and rebuild", false);
   } else {
     g->fillScreen(TOK_COLOR_BG_CANVAS);
     drawEmptyState(SCREEN_W / 2, 0, SCREEN_H, "No cats yet", "Add GIFs to cats/ and rebuild", false,
@@ -225,7 +249,7 @@ static bool drawGifPlaceholder(bool offline) {
 }
 
 // Open a cat GIF by index, laid out for the current page (full-screen 1:1,
-// or 2x down into the mixed pane), and clear where it will draw.
+// or cover-fit into the page's pane), and clear where it will draw.
 static bool openCatAtIndex(int index, bool resetOpenedTime) {
   if (catCount == 0 || !gif || !gifCanvas || index < 0 || index >= catCount) return false;
   gif->begin(GIF_PALETTE_RGB565_BE);  // big-endian RGB565 = the sprite's own byte order
@@ -235,18 +259,19 @@ static bool openCatAtIndex(int index, bool resetOpenedTime) {
   canvasH = min(gif->getCanvasHeight(), SCREEN_H);
   memset(gifCanvas, 0, (size_t)canvasW * canvasH * 2);
   bool offline = !STATE.haveData;
-  gifMixedMode = (currentPage == MIXED_PAGE && !offline);
-  if (gifMixedMode) {
+  gifPaneLayout = wantPaneLayout(offline);
+  if (gifPaneLayout >= 0) {
+    catPaneRect(paneX, paneY, paneW, paneH);
     // Cover fit: the larger of the two axis ratios wins, so the pane is
     // always fully covered and the other axis crops instead of letterboxing.
     // Same scale on both axes -- the aspect ratio is never distorted.
-    mixedScale = max((float)MIXED_GIF_W / canvasW, (float)MIXED_GIF_H / canvasH);
-    float visW = MIXED_GIF_W / mixedScale, visH = MIXED_GIF_H / mixedScale;
-    mixedSrcOffX = (canvasW - visW) / 2.0f;
-    mixedSrcOffY = (canvasH - visH) / 2.0f;
-    destX = MIXED_GIF_X0;
-    destY = MIXED_GIF_Y0;
-    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_PLATE);  // clear only the pane
+    paneScale = max((float)paneW / canvasW, (float)paneH / canvasH);
+    float visW = paneW / paneScale, visH = paneH / paneScale;
+    paneSrcOffX = (canvasW - visW) / 2.0f;
+    paneSrcOffY = (canvasH - visH) / 2.0f;
+    destX = paneX;
+    destY = paneY;
+    g->fillRect(paneX, paneY, paneW, paneH, TOK_COLOR_PLATE);  // clear only the pane
   } else {
     destX = (SCREEN_W - canvasW) / 2;
     destY = (SCREEN_H - canvasH) / 2;
@@ -282,10 +307,9 @@ bool gifTick(bool offline) {
   if (catCount == 0 || !gif || !gifCanvas) return drawGifPlaceholder(offline);
   uint32_t now = millis();
 
-  // Layout flipped under an open GIF (went offline / came back while on the
-  // mixed page): reopen it for the new layout.
-  bool wantMixed = (currentPage == MIXED_PAGE && !offline);
-  if (gifOpen && wantMixed != gifMixedMode) {
+  // Layout flipped under an open GIF (went offline / came back while on a
+  // pane page): reopen it for the new layout.
+  if (gifOpen && wantPaneLayout(offline) != gifPaneLayout) {
     closeGif();
     nextOpenIsLoop = true;   // same cat, new layout
     gifNextFrameMs = now;    // and decode it this tick, see below
@@ -376,7 +400,7 @@ void gifPlayerExitCatMode() {
 }
 
 // Force the next gifTick() to open a fresh (random) GIF -- page changes onto
-// GIF_PAGE/MIXED_PAGE, and the shuffle media control. On MOVIE_PAGE, hand
+// GIF_PAGE/MIXED_PAGE/OVERVIEW_PAGE, and the shuffle media control. On MOVIE_PAGE, hand
 // this over to the movie player's equivalent instead (its own random-pick
 // state is separate from the GIF path's).
 void gifPlayerResetForPageChange() {
@@ -395,18 +419,20 @@ void gifPlayerStagePage(bool offline, const uint16_t* poster) {
   if (currentPage == MOVIE_PAGE && !offline) { moviePlayerStagePage(offline, poster); return; }
   gifPlayerResetForPageChange();
   if (catCount == 0 || !gif || !gifCanvas) { drawGifPlaceholder(offline); return; }
-  bool mixed = (currentPage == MIXED_PAGE && !offline);
+  bool pane = catPanePage(offline);
   if (poster) {
     memcpy(frame.getBuffer(), poster, (size_t)SCREEN_W * SCREEN_H * 2);
-  } else if (mixed) {
-    g->fillRect(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_COLOR_PLATE);
-    aaMaskRoundCorners(MIXED_GIF_X0, MIXED_GIF_Y0, MIXED_GIF_W, MIXED_GIF_H, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
+  } else if (pane) {
+    int px, py, pw, ph;
+    catPaneRect(px, py, pw, ph);
+    g->fillRect(px, py, pw, ph, TOK_COLOR_PLATE);
+    aaMaskRoundCorners(px, py, pw, ph, TOK_RADIUS_LG, TOK_COLOR_BG_CANVAS);
   } else {
     g->fillScreen(TOK_COLOR_PLATE);
   }
-  if (mixed) {  // the live half, over a poster's stale one (it leaves the pane alone)
+  if (pane) {  // the live half, over a poster's stale one (it leaves the pane alone)
     lockState();
-    drawMixedPageStatic();
+    drawMediaPageStatic();
     unlockState();
   }
   drawMediaOverlays(offline);
@@ -420,24 +446,24 @@ void gifPlayerPrimeFrame(bool offline) {
   gifTick(offline);
 }
 
-// Re-blit the whole open canvas into `frame` (plus the mixed page's static
+// Re-blit the whole open canvas into `frame` (plus a pane page's static
 // half and the overlays) -- a sheet or a cancelled page lean overwrote it.
 // With no GIF open (between cats, or none on the card) it falls back to a
 // fresh open, which clears and decodes in one tick.
 void gifPlayerRepaint(bool offline) {
   if (currentPage == MOVIE_PAGE && !offline) { moviePlayerRepaint(offline); return; }
-  bool mixed = (currentPage == MIXED_PAGE && !offline);
-  if (mixed) {
+  bool pane = catPanePage(offline);
+  if (pane) {
     lockState();
-    drawMixedPageStatic();
+    drawMediaPageStatic();
     unlockState();
   }
-  if (!gif || !gifOpen || gifMixedMode != mixed || !gifCanvas) {
+  if (!gif || !gifOpen || gifPaneLayout != wantPaneLayout(offline) || !gifCanvas) {
     gifPlayerResetForPageChange();
     gifPlayerPrimeFrame(offline);
     return;
   }
-  if (!mixed) g->fillScreen(TOK_COLOR_PLATE);
+  if (!pane) g->fillScreen(TOK_COLOR_PLATE);
   dirtyX0 = 0; dirtyY0 = 0; dirtyX1 = canvasW - 1; dirtyY1 = canvasH - 1;
   blitDirty();
   drawMediaOverlays(offline);
