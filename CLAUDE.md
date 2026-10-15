@@ -26,7 +26,8 @@ The Mac side lives in `~/cyd` and is **not** duplicated here — for server,
 exceptions are the browser pages, which live here while their servers stay
 in `~/cyd` and serve them by absolute path:
 
-- **`server.html`** — control panel (status, on/off, battery save, logs),
+- **`server.html`** — control panel (status, on/off, battery save, firmware
+  OTA: build & publish, install on board, each board's build; logs),
   served by `~/cyd/server/control_server.py` at `http://127.0.0.1:8788/`
   (`HTML_PATH`).
 - **`note.html`** — Note page editor, served by
@@ -77,7 +78,10 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 PIO=pio                                  # Homebrew's /opt/homebrew/bin/pio (older setups: ~/.pio-venv/bin/pio)
 $PIO run                                 # build (first run downloads pioarduino)
 $PIO run -t upload                       # flash over native USB (port auto-detected)
+$PIO run -t publish                      # build and offer it to the board over WiFi (OTA, below)
 $PIO device monitor                      # serial log (baud is irrelevant on native USB)
+python3 tools/size_check.py              # CI's size gate on the last build (--update after planned growth)
+node tools/sim_check.mjs                 # CI's sim goldens (--update after a deliberate UI change)
 python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
                                          # drive the board over serial, save shots/*.ppm
 python3 tools/make_vlw.py                # regenerate fonts (firmware + sim) after editing FONTS
@@ -111,7 +115,8 @@ composite on the panel, so grab after transitions settle.
 Headless sim screenshot: `~/node_modules/playwright` is gone, so use the
 Playwright MCP. It blocks `file://`, so serve the repo first
 (`python3 -m http.server 8765`, then open `http://127.0.0.1:8765/simulator-s3.html`;
-the CORS error from `/api/usage` is expected). The sim needs no server: its
+the usage server allows loopback origins, so it polls real data when that is
+running). The sim needs no server: its
 Connection card's Data menu defaults to "Server, else mock", which falls back to
 the built-in `MOCK` document shifted to the current time (`mockDoc()`), and
 `?data=mock` skips the fetch entirely (`?data=server` shows the real offline
@@ -123,6 +128,23 @@ To compare pixel for pixel, read the canvas with `getImageData` in the same
 evaluate rather than cropping a screenshot.
 The `#screen` box is 486×326 = 480×320 canvas + 3px border; crop 3px to
 compare against a board grab pixel-for-pixel.
+
+**CI** (`.github/workflows/ci.yml`, every push): the `firmware` job builds
+with `config.example.h` and runs `tools/size_check.py` -- fail past 75% of the
+app slot, or past `tools/size_baseline.json` + 32KB (planned growth updates
+the baseline in the same commit). The `simulator` job runs
+`tools/sim_check.mjs`: `simulator-s3.html?fixture=default` (frozen clock and
+data from `tests/fixtures/default.json`, no polling, `window.simFixture.show()`)
+draws every page and sheet in both themes and compares each with
+`tests/golden/default/*.png` (per-channel tolerance 2 for blending
+differences between machines; failures leave actual + diff PNGs in
+`tests/out/`). **Any visible UI change updates the goldens in the same
+commit.** Playwright is pinned to 1.63.0 with no package.json: locally
+`npm install --no-save playwright@1.63.0 && npx playwright install chromium`
+(node_modules/ is gitignored), or point `NODE_PATH` at an install. Goldens
+made on the Mac pass on Linux within the tolerance; if they ever drift, run
+the workflow by hand with `update_goldens` and commit its artifact. Native
+tests (O4) and the tokenizer corpus (O5) get CI steps when they exist.
 
 A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
 Git remote is `origin` (github.com/crnds/s3). `docs/`, `shots/` and `config.h`
@@ -252,6 +274,29 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   plus the strip) once a second around the playing GIF. The Overview
   (design.md 7.5) is a 3x3 grid of the cards in miniature; its weather cell
   opens the Weather sheet. Offline both show the full-screen cat.
+- **OTA (`ota.cpp`, roadmap O9).** `pio run -t publish` (`tools/ota_publish.py`)
+  copies the build to `~/.cyd_firmware/s3.bin`; `~/cyd`'s usage server announces
+  it in `/api/usage` as `firmware.s3.{sha256,size}` and serves it at
+  `/firmware/s3.bin` (to this Mac and to boards that poll it). The sha256 is the
+  image digest esptool appends -- what `esp_partition_get_sha256()` returns for
+  the running app -- so offered == running means up to date, no version
+  numbers. networkTask downloads into the idle slot of `default_16MB.csv`,
+  checks the slot holds the announced digest, and restarts. A new build boots
+  `PENDING_VERIFY` and is confirmed only by its first good live poll
+  (`extern "C" verifyRollbackLater()` returns true -- a C++-mangled definition
+  silently leaves the core's weak one, which confirms at boot); a crash before
+  that, or 10 min without a good poll, and the bootloader rolls back. NVS
+  `s3ota`: `seen` (auto update installs only a build it hasn't acted on, so a
+  dev build flashed over USB isn't replaced by an older publish -- that shows
+  "Update ready" instead), `try` (until confirmed), `bad` (rolled back: auto
+  skips it), `req` (the last control-panel install request acted on). Every
+  poll sends `X-S3-Firmware: <running digest>` and `X-S3-OTA: <state>;
+  auto=<0|1>; req=<id>`, which `server.html`'s Firmware panel shows; its
+  "Install on board" puts `firmware.s3.install: <id>` in the offer, which the
+  board acts on once per id whatever Auto update says (and even for a build it
+  skipped). A download that stalls is retried twice. Settings > Firmware: the
+  state summary, Auto update (`ota_auto`, default on) and Update now. Serial `[ota]` lines and `/diag_log.csv`
+  `ota_*` events trace each step. USB flashing always still works.
 - **Fonts (`fonts.cpp`):** VLW preloaded once into `lgfx::VLWfont` objects;
   `drawText/drawTextR/drawTextC(FontId, …)` are the only text API — no
   `setTextSize`/`print` built-in font anywhere. ASCII only (server

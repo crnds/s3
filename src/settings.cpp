@@ -79,7 +79,7 @@ const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT] = {
   "night_mode", "screen_rotation", "show_countdown", "battery_save", "show_aqi",
   "hourly_flash", "show_progress", "last_page", "reduce_motion", "high_contrast",
   "light_mode", "sound_level", "tap_level", "hourly_chime", "claude_ding", "sound_alerts",
-  "mute_sleep", "mute_night"
+  "mute_sleep", "mute_night", "ota_auto"
 };
 
 void queueConfigSave(uint8_t keyId, int32_t value) {
@@ -347,6 +347,7 @@ BOOL_SETTING(ClaudeDing, cfgClaudeDing, CFGKEY_CLAUDE_DING)
 BOOL_SETTING(SoundAlerts, cfgSoundAlerts, CFGKEY_SOUND_ALERTS)
 BOOL_SETTING(MuteSleep, cfgMuteSleep, CFGKEY_MUTE_SLEEP)
 BOOL_SETTING(MuteNight, cfgMuteNight, CFGKEY_MUTE_NIGHT)
+BOOL_SETTING(OtaAuto, cfgOtaAuto, CFGKEY_OTA_AUTO)
 static int getCurrentShowProgress() { return cfgShowProgress ? 1 : 0; }
 static void applyShowProgress(int v) { cfgShowProgress = (v != 0); queueConfigSave(CFGKEY_SHOW_PROGRESS, v); }
 static int getCurrentReduceMotion() { return cfgReduceMotion ? 1 : 0; }
@@ -379,6 +380,37 @@ static const SettingDef SOUND_ROWS[] = {
 };
 static const int SOUND_ROW_COUNT = sizeof(SOUND_ROWS) / sizeof(SOUND_ROWS[0]);
 
+// Settings > Firmware (OTA, ota.cpp). The summary is otaState; networkTask
+// does the install, so Update now only raises pendingOtaInstall -- or, with
+// nothing to install, swaps the "Updating..." toast for the reason.
+static const char* firmwareSummary() {
+  static char buf[20];
+  switch (otaState) {
+    case OTA_CURRENT: return "Up to date";
+    case OTA_AVAILABLE: return "Update ready";
+    case OTA_INSTALLING: snprintf(buf, sizeof(buf), "Updating %d%%", (int)otaProgress); return buf;
+    case OTA_FAILED: return "Update failed";
+    case OTA_ROLLED_BACK: return "Rolled back";
+    default: return "None published";
+  }
+}
+static const char* const UPDATE_LABELS[1] = {"Update"};
+static void applyUpdateNow(int v) {
+  const char* why = otaState == OTA_CURRENT ? "Already up to date"
+                  : otaState == OTA_NONE ? "No build published"
+                  : otaState == OTA_INSTALLING ? "Already updating" : nullptr;
+  if (!why) { pendingOtaInstall = true; return; }
+  snprintf(toastText, sizeof(toastText), "%s", why);  // replaces "Updating..."
+  renderSettings();
+}
+static const SettingDef FIRMWARE_ROWS[] = {
+  { "Auto update", "", "", ROW_TOGGLE, 2, 2,
+    ONOFF_VALUES, ONOFF_LABELS, getCurrentOtaAuto, applyOtaAuto, nullptr },
+  { "Update now", "Install the build the Mac offers", "Tap twice to update and restart", ROW_ACTION, 1, 1,
+    ACTION_VALUES, UPDATE_LABELS, getCurrentNone, applyUpdateNow, "Updating..." },
+};
+static const int FIRMWARE_ROW_COUNT = sizeof(FIRMWARE_ROWS) / sizeof(FIRMWARE_ROWS[0]);
+
 // Ordered by frequency of use (design.md 13.3): display, then content, then
 // system, then accessibility, and the destructive actions last.
 static const SettingDef SETTINGS[] = {
@@ -410,6 +442,8 @@ static const SettingDef SETTINGS[] = {
     BATTERY_SAVE_VALUES, BATTERY_SAVE_LABELS, getCurrentBatterySave, applyBatterySave, nullptr },
   { "Pixel shift", "Anti-retention orbit interval", "", ROW_NAV, 4, 4,
     PIXEL_SHIFT_VALUES, PIXEL_SHIFT_LABELS, getCurrentPixelShift, applyPixelShift, nullptr },
+  { "Firmware", "", "", ROW_SECTION, 0, 0,
+    nullptr, nullptr, nullptr, nullptr, nullptr, FIRMWARE_ROWS, FIRMWARE_ROW_COUNT, firmwareSummary },
   { "Reduce motion", "", "", ROW_TOGGLE, 2, 2,
     ONOFF_VALUES, ONOFF_LABELS, getCurrentReduceMotion, applyReduceMotion, nullptr },
   { "Increase contrast", "", "", ROW_TOGGLE, 2, 2,

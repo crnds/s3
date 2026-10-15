@@ -1745,7 +1745,7 @@ required.
 - The list rows show current values (§11.7), so reading a setting takes zero taps.
 - Order the list by frequency of use: first display (Brightness, Night mode, Rotation, Theme), then content
   (Boot page, Cat shuffle, Pace bars, Show AQI, Hourly signal, Poll progress),
-  then system (Poll interval, Battery save, Pixel shift), and **destructive actions last**
+  then system (Poll interval, Battery save, Pixel shift, Firmware), and **destructive actions last**
   (Forget Wi-Fi, Restart). Today, Restart and Forget Wi-Fi sit in the middle of the list.
 
 **Sections.** A row of kind *section* (chevron + a short summary of its state, like "Level 3") opens a

@@ -16,6 +16,7 @@
   --accent: #F4620E;
   --good: #22c55e;
   --bad: #f43f5e;
+  --warn: #f59e0b;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.2);
 }
@@ -139,6 +140,18 @@ h1 span { color: var(--muted); font-weight: 400; }
 .power-reset-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .power-reset-link:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
 .power-reset-link[hidden] { display: none; }
+
+/* Firmware (OTA) panel: reuses the power-row layout, client rows and log box */
+.power-toggle.armed { background: var(--bad); color: #2a0610; border-color: transparent; }
+.fw-boards { margin-top: 12px; }
+.client-row .tag.good { color: var(--good); }
+.client-row .tag.warn { color: var(--warn); }
+.client-row .tag.bad { color: var(--bad); }
+.client-row .digest { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; color: var(--text2); }
+.fw-build { margin-top: 12px; }
+.fw-build summary { cursor: pointer; color: var(--text2); font-size: 0.85rem; padding: 4px 0; }
+.fw-build summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fw-build .log-box { height: 180px; margin-top: 8px; }
 
 main { max-width: 960px; margin: 0 auto; display: grid; gap: 16px; }
 
@@ -345,6 +358,25 @@ footer {
     </dl>
   </section>
 
+  <section class="panel" aria-label="Firmware updates">
+    <h2>Firmware (OTA)</h2>
+    <div class="power-row">
+      <div class="power-status">
+        <div class="value dim" id="v-fw">—</div>
+        <div class="sub" id="s-fw">S3 board · published builds from <code>pio run -t publish</code></div>
+      </div>
+      <button type="button" class="power-toggle off" id="fw-publish-btn" disabled
+              aria-label="Build the S3 firmware and publish it to the board">Build &amp; publish</button>
+      <button type="button" class="power-toggle off" id="fw-install-btn" disabled
+              aria-label="Tell the board to install the published build now">Install on board</button>
+    </div>
+    <div class="fw-boards" id="fw-boards"></div>
+    <details class="fw-build" id="fw-build">
+      <summary id="fw-build-summary">Build output</summary>
+      <div class="log-box" id="fw-build-log">(no build since the control server started)</div>
+    </details>
+  </section>
+
   <section class="panel" aria-label="Diagnostics">
     <h2>Diagnostics</h2>
     <div id="checks"></div>
@@ -382,12 +414,22 @@ const CONTROL_BASE = location.protocol === 'file:'
   : location.origin;
 const POLL_MS = 4000;
 const BOARD_STALE_SEC = 60;   // board polls every 20s; 60s missed = worry
+const FAST_POLL_MS = 1500;    // while a build runs or an install is on its way
+const ARM_MS = 4000;          // "Install on board" second-click window
+// The board's OTA states (X-S3-OTA, src/ota.cpp) as the panel words them.
+const OTA_LABELS = {
+  'none': ['No build offered', ''], 'current': ['Up to date', 'good'],
+  'available': ['Update ready', 'warn'], 'installing': ['Installing', 'warn'],
+  'failed': ['Update failed', 'bad'], 'rolled-back': ['Rolled back', 'bad'],
+};
 
 const STATE = {
   status: null,
   controlUp: false,
   busy: false,
   batteryBusy: false,
+  fwBusy: false,          // a publish / install POST is in flight
+  installArmedUntil: 0,   // first click of "Install on board" arms it until then
 };
 
 function escapeHtml(s) {
@@ -411,6 +453,12 @@ function fmtTokens(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return String(n);
 }
+
+function fmtBytes(n) {
+  return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : Math.round(n / 1024) + ' KB';
+}
+
+function fmtDigest(sha) { return sha ? sha.slice(0, 12) : '—'; }
 
 function generatedAgeSec(iso) {
   if (!iso) return null;
@@ -485,6 +533,131 @@ async function postBatterySave(enabled) {
   STATE.batteryBusy = false;
   render();
   setTimeout(fetchStatus, 400);
+}
+
+async function postFirmware(action) {
+  if (STATE.fwBusy) return;
+  STATE.fwBusy = true;
+  STATE.installArmedUntil = 0;
+  render();
+  const logEl = document.getElementById('action-log');
+  logEl.className = 'action-log';
+  logEl.textContent = action === 'publish' ? 'Starting build…' : 'Asking the board to install…';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const resp = await fetch(CONTROL_BASE + '/api/firmware/' + action, { method: 'POST', signal: ctrl.signal });
+    const doc = await resp.json();
+    logEl.textContent = doc.detail || (doc.ok ? 'done' : 'failed');
+    if (!doc.ok) logEl.className = 'action-log err';
+    if (doc.ok && action === 'publish') document.getElementById('fw-build').open = true;
+  } catch (err) {
+    logEl.textContent = 'Control server unreachable: ' + err.message;
+    logEl.className = 'action-log err';
+  } finally {
+    clearTimeout(timer);
+  }
+  STATE.fwBusy = false;
+  fetchStatus();
+}
+
+// Two clicks: the board restarts once it has installed the build.
+function onInstallClick() {
+  if (Date.now() < STATE.installArmedUntil) { postFirmware('install'); return; }
+  STATE.installArmedUntil = Date.now() + ARM_MS;
+  const logEl = document.getElementById('action-log');
+  logEl.className = 'action-log';
+  logEl.textContent = 'Click "Install now" again: the board installs on its next poll and restarts.';
+  render();
+  setTimeout(render, ARM_MS + 50);
+}
+
+// One board's row: what it runs, against what's published.
+// Digests decide "up to date": the board's own state word lags a poll after a
+// restart (it reports "none" until its first poll has run).
+function fwBoardState(b, offer, request) {
+  if (offer && b.sha256 === offer.sha256) return OTA_LABELS.current;
+  // Downloaded since its last report: a board installing doesn't poll.
+  if (offer && b.download_sec != null && b.download_sec <= b.last_report_sec)
+    return ['Installing · downloaded ' + fmtAgo(b.download_sec), 'warn'];
+  if (offer && request) return ['Install requested · next poll', 'warn'];
+  return OTA_LABELS[b.ota] || [b.ota || 'unknown', ''];
+}
+
+function renderFirmware(st) {
+  const fw = st.firmware || {};
+  const build = st.build || {};
+  const val = document.getElementById('v-fw');
+  const sub = document.getElementById('s-fw');
+  const pubBtn = document.getElementById('fw-publish-btn');
+  const instBtn = document.getElementById('fw-install-btn');
+  const offer = fw.offer || null;
+  const boards = fw.boards || [];
+
+  if (fw.error) {
+    val.textContent = 'unavailable';
+    val.className = 'value dim';
+    sub.textContent = fw.error;
+  } else if (build.running) {
+    val.textContent = 'Building… ' + (build.elapsed_sec || 0) + 's';
+    val.className = 'value';
+    sub.textContent = 'pio run -t publish in ~/s3';
+  } else if (!offer) {
+    val.textContent = 'Nothing published';
+    val.className = 'value dim';
+    sub.textContent = 'Build & publish, or run pio run -t publish in ~/s3';
+  } else {
+    const pct = fw.slot_bytes ? ' (' + (100 * offer.size / fw.slot_bytes).toFixed(1) + '% of the slot)' : '';
+    const upToDate = boards.length > 0 && boards.every(b => b.sha256 === offer.sha256);
+    val.textContent = boards.length === 0 ? 'No board reporting' : upToDate ? 'Up to date' : 'Update pending';
+    val.className = 'value ' + (upToDate ? 'good' : boards.length ? '' : 'dim');
+    sub.textContent = 'Published ' + fmtDigest(offer.sha256) + ' · ' + fmtBytes(offer.size) + pct + ' · ' +
+      fmtAgo(generatedAgeSec(offer.published));
+  }
+
+  // Build & publish
+  pubBtn.disabled = STATE.fwBusy || !!build.running || !!fw.error;
+  pubBtn.textContent = build.running ? 'Building…' : 'Build & publish';
+  pubBtn.onclick = () => postFirmware('publish');
+
+  // Install on board: only when a reporting board isn't running the published build.
+  const behind = offer && boards.some(b => b.sha256 !== offer.sha256 && b.last_report_sec <= BOARD_STALE_SEC);
+  const armed = Date.now() < STATE.installArmedUntil;
+  instBtn.disabled = STATE.fwBusy || !!build.running || !behind || !!fw.request;
+  instBtn.textContent = fw.request ? 'Install requested' : armed ? 'Install now' : 'Install on board';
+  instBtn.className = 'power-toggle ' + (armed && !instBtn.disabled ? 'armed' : behind ? 'on' : 'off');
+  instBtn.onclick = onInstallClick;
+
+  document.getElementById('fw-boards').innerHTML = boards.length === 0
+    ? '<div class="client-row"><span style="color:var(--muted)">no S3 board has reported its build yet' +
+      ' (it does on every poll, once it runs OTA-capable firmware)</span></div>'
+    : boards.map(b => {
+        const [label, cls] = fwBoardState(b, offer, fw.request);
+        return '<div class="client-row' + (b.last_report_sec <= BOARD_STALE_SEC ? ' fresh' : '') + '">' +
+          '<span>' + escapeHtml(b.ip) + '</span>' +
+          '<span class="digest" title="' + escapeHtml(b.sha256) + '">' + escapeHtml(fmtDigest(b.sha256)) + '</span>' +
+          '<span class="tag ' + cls + '">' + escapeHtml(label) + '</span>' +
+          '<span class="tag">' + (b.auto === false ? 'auto off' : 'auto on') + '</span>' +
+          '<span class="ago">' + fmtAgo(b.last_report_sec) + '</span>' +
+        '</div>';
+      }).join('');
+
+  // Build output
+  const summary = document.getElementById('fw-build-summary');
+  const logBox = document.getElementById('fw-build-log');
+  if (build.running) {
+    summary.textContent = 'Build output · running ' + (build.elapsed_sec || 0) + 's';
+  } else if (build.finished_ago_sec != null) {
+    const ok = build.code === 0 && !build.error;
+    const digest = build.digest ? build.digest.replace(/^Image digest (\w+).*$/, '$1') : '';
+    summary.textContent = 'Build output · ' + (ok ? 'published ' + digest : 'failed') + ' · ' +
+      fmtAgo(build.finished_ago_sec);
+  }
+  if (build.lines && build.lines.length) {
+    const atEnd = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 4;
+    logBox.textContent = build.lines.join('\n') + (build.error ? '\n' + build.error : '');
+    if (atEnd) logBox.scrollTop = logBox.scrollHeight;
+  }
 }
 
 // ── RENDER ─────────────────────────────────────────────────
@@ -627,6 +800,8 @@ function render() {
     bsResetBtn.onclick = isOverridden ? () => postBatterySave(null) : null;
   }
 
+  renderFirmware(st);
+
   // Diagnostics checklist
   const age = ep.up ? generatedAgeSec(ep.generated_at) : null;
   const powerOn = !!(ep.power && ep.power.battery_save);
@@ -674,8 +849,16 @@ function render() {
 }
 
 // ── BOOT ───────────────────────────────────────────────────
-fetchStatus();
-setInterval(fetchStatus, POLL_MS);
+// Faster while a build runs or a board is about to install, so both show live.
+function scheduleNext() {
+  const st = STATE.status;
+  const fw = st && st.firmware;
+  const busy = st && ((st.build && st.build.running) || (fw && (fw.request ||
+    (fw.boards || []).some(b => b.download_sec != null && b.download_sec <= b.last_report_sec))));
+  document.getElementById('refresh-note').textContent = 'refreshing every ' + (busy ? '1.5s' : '4s');
+  setTimeout(() => fetchStatus().then(scheduleNext), busy ? FAST_POLL_MS : POLL_MS);
+}
+fetchStatus().then(scheduleNext);
 </script>
 </body>
 </html>

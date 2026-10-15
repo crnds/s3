@@ -132,12 +132,12 @@ void loadRuntimeConfig() {
   if (p.isKey(CONFIG_KEY_NAMES[CFGKEY_TAP_VOL])) {
     cfgTapVol = constrain(p.getInt(CONFIG_KEY_NAMES[CFGKEY_TAP_VOL]), SOUND_VOL_OFF, SOUND_VOL_MAX);
   }
-  const struct { int key; bool* var; } soundSwitches[] = {
+  const struct { int key; bool* var; } switches[] = {
     {CFGKEY_HOURLY_CHIME, &cfgHourlyChime}, {CFGKEY_CLAUDE_DING, &cfgClaudeDing},
     {CFGKEY_SOUND_ALERTS, &cfgSoundAlerts}, {CFGKEY_MUTE_SLEEP, &cfgMuteSleep},
-    {CFGKEY_MUTE_NIGHT, &cfgMuteNight},
+    {CFGKEY_MUTE_NIGHT, &cfgMuteNight}, {CFGKEY_OTA_AUTO, &cfgOtaAuto},
   };
-  for (const auto& sw : soundSwitches)
+  for (const auto& sw : switches)
     if (p.isKey(CONFIG_KEY_NAMES[sw.key])) *sw.var = p.getInt(CONFIG_KEY_NAMES[sw.key]) != 0;
   p.end();
   applyThemeTokens();  // includes applyContrast()
