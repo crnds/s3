@@ -3131,6 +3131,7 @@ function mockDoc() {
 // every run and compares them with tests/golden/. Needs http(s), not file://.
 const FIXTURE_NAME = new URLSearchParams(location.search).get('fixture');
 let simClockMs = null;  // a fixture's frozen wall clock (epoch ms), else live
+const FIXTURE_PERF_MS = 600000;  // a fixture's frozen performance.now()
 function simNowMs() { return simClockMs ?? Date.now(); }
 const FIXTURE_SCREENS = ['page0', 'page1', 'page2', 'page3', 'page4', 'page5', 'page6', 'weather', 'device', 'settings'];
 async function startFixture(name) {
@@ -3138,7 +3139,11 @@ async function startFixture(name) {
   if (!res.ok) throw new Error('fixture ' + name + ': HTTP ' + res.status);
   const fx = await res.json();
   simClockMs = Date.parse(fx.clock);
-  const frozen = Math.max(1, performance.now());
+  // A fixed instant, not the load time: the status dot's pulse is a function
+  // of performance.now(), so a load-time value made its alpha depend on how
+  // fast the page loaded. 10 min is a whole number of pulse periods (full
+  // opacity) and safely past every boot-time guard.
+  const frozen = FIXTURE_PERF_MS;
   Object.defineProperty(performance, 'now', { value: () => frozen });
   Object.assign(STATE, fx.settings || {});
   applyData(fx.usage);
