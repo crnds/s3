@@ -14,3 +14,7 @@ __pycache__/
 *.pyc
 .DS_Store
 shots/
+# tools/sim_check.mjs: Playwright installed ad hoc (no package.json), failure output
+node_modules/
+tests/out/
+.playwright-mcp/

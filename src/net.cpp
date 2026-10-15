@@ -196,6 +196,10 @@ static JsonDocument usageFilter() {
   f["epoch"] = true;  // NTP fallback — see applyUsageDoc's time-sync block
   // Mac power / battery-save. Only battery_save is acted on.
   f["power"]["battery_save"] = true;
+  // The published OTA build (ota.cpp).
+  f["firmware"]["s3"]["sha256"] = true;
+  f["firmware"]["s3"]["size"] = true;
+  f["firmware"]["s3"]["install"] = true;
   return f;
 }
 
@@ -318,6 +322,10 @@ static bool applyUsageDoc(const JsonDocument& doc, bool fromNetwork) {
       applyEffectivePoll();
     }
   }
+  // OTA offer: live polls only, like battery_save (an SD copy is old news).
+  if (fromNetwork)
+    otaNoteOffer(doc["firmware"]["s3"]["sha256"] | "", doc["firmware"]["s3"]["size"] | 0,
+                 doc["firmware"]["s3"]["install"] | 0u);
   return true;
 }
 
@@ -479,6 +487,12 @@ static void appendArchiveRow(const JsonDocument& doc) {
   f.close();
 }
 
+bool serverUrl(const char* path, String& out) {
+  if (!serverIpValid) return false;
+  out = String("http://") + serverIp.toString() + ":" + String(cfgServerPort) + path;
+  return true;
+}
+
 bool fetchUsage() {
   uint32_t startUs = micros();  // diagnostic timing only, see comment at the end of this function
   wifiOk = WiFi.status() == WL_CONNECTED;
@@ -503,6 +517,9 @@ bool fetchUsage() {
     http.setConnectTimeout(3000);  // cap the TCP connect, not just the read
     http.setTimeout(5000);
     http.begin(url);
+    // The build this board runs and its OTA state, for the Mac's control panel.
+    http.addHeader("X-S3-Firmware", otaRunningSha());
+    http.addHeader("X-S3-OTA", otaReport());
     code = http.GET();
     if (code == 200) {
       payload = http.getString();

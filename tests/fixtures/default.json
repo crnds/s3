@@ -1,0 +1,46 @@
+{
+  "clock": "2026-10-14T17:09:30+07:00",
+  "settings": {},
+  "usage": {
+    "today": { "tokens": 2573012, "cost": 2.31 },
+    "week": { "tokens": 351668302, "cost": 228.27 },
+    "active_now": true,
+    "projects": [
+      { "name": "ampypay-eunite", "tokens": 178178755 },
+      { "name": "org-chart", "tokens": 145575128 },
+      { "name": "autoclaude", "tokens": 15567872 },
+      { "name": "iief-thai", "tokens": 5286431 },
+      { "name": "fsfi-thai", "tokens": 3970315 }
+    ],
+    "trend": [118891173, 158279627, 0, 0, 55363947, 17326402, 2573012],
+    "limits": {
+      "session": { "percent": 57, "resets": "18:39", "resets_in_sec": 5400 },
+      "week": { "percent": 86, "resets": "Oct 18, 05:09", "resets_in_sec": 302400 },
+      "week_model": { "name": "Fable", "percent": 58, "resets": "Oct 25, 05:09" },
+      "credits": { "used": 0.41, "limit": 10.0, "percent": 4 }
+    },
+    "context": { "tokens": 80000, "percent": 40 },
+    "btc": { "price": 109432, "changePct": 2.31 },
+    "aqi": { "aqi": 81 },
+    "note": {
+      "text": "# SPRINT 6\n> shipped 2026-08-26\n\n- TODO wire the note pane\n* DONE server /api/note\n+ OK boot page picker\n\nbudget $1,200 / 50% used\nrun `arduino-cli compile --fqbn esp32`\nsupercalifragilisticexpialidocious",
+      "size": 1
+    },
+    "weather": {
+      "tempC": 34, "code": 3, "high": 35, "low": 26, "condition": "Overcast",
+      "hourly": [
+        { "h": 17, "tempC": 34, "code": 3 }, { "h": 18, "tempC": 33, "code": 2 }, { "h": 19, "tempC": 32, "code": 0 },
+        { "h": 20, "tempC": 31, "code": 0 }, { "h": 21, "tempC": 30, "code": 0 }, { "h": 22, "tempC": 29, "code": 2 },
+        { "h": 23, "tempC": 29, "code": 3 }, { "h": 0, "tempC": 28, "code": 61 }, { "h": 1, "tempC": 28, "code": 61 },
+        { "h": 2, "tempC": 27, "code": 3 }, { "h": 3, "tempC": 27, "code": 2 }
+      ],
+      "daily": [
+        { "wd": 4, "high": 35, "low": 26, "code": 51 }, { "wd": 5, "high": 35, "low": 27, "code": 95 },
+        { "wd": 6, "high": 35, "low": 26, "code": 95 }, { "wd": 0, "high": 34, "low": 26, "code": 95 },
+        { "wd": 1, "high": 32, "low": 25, "code": 51 }
+      ]
+    },
+    "power": { "on_ac": true, "percent": 82, "paused": false, "battery_save": false, "battery_save_manual": null, "source": "auto" },
+    "firmware": {}
+  }
+}

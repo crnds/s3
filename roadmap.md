@@ -7,7 +7,7 @@ performance and engineering optimisation, in one prioritised list.
 | | |
 |---|---|
 | **Owner** | dusit.n (primary user) |
-| **Status** | v0.3, 2026-10-14: roadmap review — O7 and O9 pulled forward, O14 (settings backup) added, clock trust folded into P6, CYD smoke test added to §15 |
+| **Status** | v0.4, 2026-10-14: O8 (CI) and O9 (OTA) shipped; §3.4 corrected (no `?client=` projection exists yet). v0.3: roadmap review — O7 and O9 pulled forward, O14 (settings backup) added, clock trust folded into P6, CYD smoke test added to §15 |
 | **Horizons** | **Now** = Oct–Nov 2026 · **Next** = Dec 2026–Feb 2027 · **Later** = Mar 2027 onward |
 | **Related** | `design.md` (design system, governs *what it looks like*), `CLAUDE.md` (mechanics and invariants, governs *how it's built*), `esp32-s3-spec.md` (hardware) |
 | **Precedence** | This file decides *what to do next and why*. When an item is picked up, its design goes into `design.md` first and its mechanics obey `CLAUDE.md`. If this file disagrees with either one, they win and this file gets fixed. |
@@ -122,9 +122,11 @@ waived.
    `/api/usage` contract. New fields are **additive and optional**, so the CYD
    keeps working untouched. ArduinoJson ignores keys it isn't asked for, but it
    still spends heap on them while parsing. So large S3-only blocks (agenda,
-   history) go behind the server's existing `?client=` projection (it already
-   serves a slim `?client=cyd`; S3-only blocks would get a `?client=s3`), and the
-   CYD's payload doesn't grow.
+   history) go behind a `?client=` projection, and the CYD's payload doesn't
+   grow. **That projection doesn't exist yet** (checked 2026-10-14: the server
+   matches the path `/api/usage` exactly, so even a query string 404s); the
+   first large S3-only block adds it. Small blocks like O9's `firmware` go to
+   both boards.
 5. **Hardware.** 480 × 320 RGB565, no alpha, single-point touch, ~30 fps
    composites, 8 MB PSRAM, a 6.25 MB app slot, a 4 MB cat budget, and no light
    sensor (GPIO17/18 are free for an I2C add-on).
@@ -164,7 +166,7 @@ Next until everything it depends on is done.
 | | **UX/UI** | **New features** | **Performance** | **Optimisation** |
 |---|---|---|---|---|
 | **Now** | U1 Truthful sound settings · U2 Strip targets to 40 px · U3 Close the §18.4 board checks · U4 Glance-test protocol · U5 Night Mode context | F5a Pace forecast | P1 Instrument and baseline · P8 Memory budget | O1 Repo hygiene · O2 Docs drift · O3 Port auto-detect · O4 Native unit tests · O7 Parity fixture mode |
-| **Next** | U6 Settings IA · U7 Attention pattern · U8 Theme and contrast audit · U9 Staleness and state coverage · U10 Status page hierarchy test | **F1 Claude needs you** · F2 Next meeting and agenda · F3 Focus timer · F4 Mac-aware sleep · F10 Pages and night window | P2 Static-layer cache · P5 Idle cost · P6 Boot and reconnect · P7 Lean JSON parse ✅ | O5 Tokenizer test corpus · O6 Token pipeline (+ Figma) · O8 CI · O9 OTA updates · O14 Settings backup |
+| **Next** | U6 Settings IA · U7 Attention pattern · U8 Theme and contrast audit · U9 Staleness and state coverage · U10 Status page hierarchy test | **F1 Claude needs you** · F2 Next meeting and agenda · F3 Focus timer · F4 Mac-aware sleep · F10 Pages and night window | P2 Static-layer cache · P5 Idle cost · P6 Boot and reconnect · P7 Lean JSON parse ✅ | O5 Tokenizer test corpus · O6 Token pipeline (+ Figma) · O8 CI ✅ · O9 OTA updates ✅ · O14 Settings backup |
 | **Later** | U11 Optical sizing · U12 Break mode | F4b Presence mode · F5b Usage history · F6 Team signals · F7 Desk sensors · F8 Interactive note checklist · F11 Thai text | P3 60 fps composites · P4 Movie ≥ 15 fps | O10 Code split · O11 Media partition · O12 Toolchain review · O13 Crash telemetry |
 
 **The single most valuable item is F1 (Claude needs you).** It answers glance
@@ -716,7 +718,7 @@ and after in §11.
 - **Done when.** Changing one value in `tokens.json` and running the generator
   updates the firmware, the sim and Figma, with no hand edits.
 
-#### O8 · CI — M · M · Tools
+#### ✅ O8 · CI — M · M · Tools
 - **What.** GitHub Actions on every push:
   - `pio run`, failing on unplanned growth or past **75% of the slot**. It's
     45% today, and the embedded cats are most of the growth.
@@ -726,8 +728,21 @@ and after in §11.
     against golden PNGs
 
   The board-vs-sim compare stays local, because it needs the board.
+- **Shipped (2026-10-14).** `.github/workflows/ci.yml`, on every push and PR:
+  - **firmware:** `pio run` with `config.example.h`, then `tools/size_check.py`.
+    It fails past 75% of the slot, or more than 32 KB over
+    `tools/size_baseline.json`; planned growth moves the baseline in the same
+    commit.
+  - **simulator:** `tools/sim_check.mjs` (Playwright 1.63.0, pinned). It
+    renders all 7 pages and the Weather, Device and Settings sheets in both
+    themes from `tests/fixtures/default.json`, and compares 20 goldens pixel
+    for pixel. This added the sim half of O7: `?fixture=<name>` freezes the
+    clock and data. The board half (a serial fixture command) and
+    `tools/parity.py` are still O7.
+  - **Waiting on their items:** `pio test -e native` (O4) and the O5 corpus
+    get steps when they exist.
 
-#### O9 · OTA updates — H · M · FW Srv Tools
+#### ✅ O9 · OTA updates — H · M · FW Srv Tools
 - **What.**
   - Pull firmware over HTTP from the Mac server (`/firmware.bin`, LAN only).
   - Trigger from a Settings row, or when the server announces a newer build.
@@ -738,6 +753,21 @@ and after in §11.
   no BOOT/RST dance.
 - **Note.** Independent of O8 (CI). Pull it to the front of M2: every M2
   feature is slower to iterate on over a USB cable.
+- **Shipped (2026-10-14).**
+  - **Publish:** `pio run -t publish` copies the build to
+    `~/.cyd_firmware/s3.bin`. A plain `pio run` never reaches the board.
+  - **Server:** announces `firmware.s3.{sha256,size}` and serves
+    `/firmware/s3.bin` to this Mac and to boards that poll it.
+  - **Identity:** the sha256 is esptool's appended image digest, compared with
+    the running partition's, so no version numbers.
+  - **Board:** Settings > Firmware (state, **Auto update** on by default,
+    **Update now**). Auto installs only a build it hasn't acted on, so a USB
+    dev build isn't replaced by an older publish.
+  - **Probation:** a new build stays `PENDING_VERIFY` until its first good
+    poll. A crash first, or 10 min without one, rolls back, and a rolled-back
+    build isn't auto-installed again.
+  - **Verified on the board:** install over WiFi (~20 s for 2.9 MB), confirm,
+    and the bootloader rollback of a build that crashes before its first poll.
 
 #### O14 · Settings backup and restore — M · S · FW Srv
 - **Why.** The settings blob lives in NVS, and F10 adds page toggles plus an

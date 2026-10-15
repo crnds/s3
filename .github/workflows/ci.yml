@@ -1,0 +1,69 @@
+# CI (roadmap O8). Two jobs on every push and pull request:
+#   firmware   pio run + the size gate (tools/size_check.py: <= 75% of the app
+#              slot, no growth past the committed baseline unless it moved too)
+#   simulator  every page and sheet, both themes, from tests/fixtures/ against
+#              tests/golden/ (tools/sim_check.mjs)
+# The board-vs-sim compare stays local: it needs the board. When native unit
+# tests (O4) and the tokenizer corpus (O5) land, they get steps here.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      update_goldens:
+        description: Regenerate tests/golden on the runner and upload them as an artifact
+        type: boolean
+        default: false
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Config (src/config.h is gitignored)
+        run: cp src/config.example.h src/config.h
+      - name: Build
+        run: pio run
+      - name: Size gate
+        run: python3 tools/size_check.py
+
+  simulator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Playwright (pinned; no package.json in this repo)
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Simulator goldens
+        if: ${{ !inputs.update_goldens }}
+        run: node tools/sim_check.mjs
+      - name: Regenerate goldens
+        if: ${{ inputs.update_goldens }}
+        run: node tools/sim_check.mjs --update
+      - name: Upload regenerated goldens
+        if: ${{ inputs.update_goldens }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-goldens
+          path: tests/golden/
+      - name: Upload failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-diff
+          path: tests/out/

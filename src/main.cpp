@@ -201,6 +201,7 @@ void networkTask(void* param) {
   uint32_t lastUsagePollMs = 0;
   uint32_t lastHeapLogMs = 0;
   bool lowHeapLogged = false;
+  otaBoot();  // hashes the running image (~0.1s): before the first poll, off core 1
   for (;;) {
     uint32_t now = millis();
 
@@ -266,6 +267,7 @@ void networkTask(void* param) {
         STATE.haveData = loadCachedUsage();
       }
       pollAlerts(connected, hadData && !STATE.haveData);
+      otaAfterPoll(connected);  // may install a new build and restart
     }
 
     if (pendingConfigSave) {
@@ -278,6 +280,8 @@ void networkTask(void* param) {
       forgetWifiFromFlash();
       ESP.restart();  // only after the erase above has actually landed in flash
     }
+
+    if (pendingOtaInstall) otaInstall();  // Settings > Firmware > Update now
 
     if (pendingRestart) {
       pendingRestart = false;
@@ -580,6 +584,15 @@ void loop() {
     }
     if (settingsScreen != SET_OFF && toastText[0] && (int32_t)(now - toastUntilMs) >= 0) {
       toastText[0] = 0;
+      renderSettings();
+    }
+    // Settings > Firmware's "Updating 42%" while a download runs on core 0.
+    static uint32_t lastOtaRenderMs = 0;
+    static int lastOtaProgress = -1;
+    if (settingsScreen != SET_OFF && otaState == OTA_INSTALLING && !navTransitionActive() &&
+        otaProgress != lastOtaProgress && now - lastOtaRenderMs >= 500) {
+      lastOtaRenderMs = now;
+      lastOtaProgress = otaProgress;
       renderSettings();
     }
   } else if (catMode && navPageTransitionActive()) {

@@ -448,6 +448,7 @@ const CLAUDE_DING_KEY = 's3dashboard_v1_claudeding';
 const SOUND_ALERTS_KEY = 's3dashboard_v1_soundalerts';
 const MUTE_SLEEP_KEY = 's3dashboard_v1_mutesleep';
 const MUTE_NIGHT_KEY = 's3dashboard_v1_mutenight';
+const OTA_AUTO_KEY = 's3dashboard_v1_otaauto';
 const SOUND_VOL_MAX = 7;
 const REDUCE_MOTION_KEY = 's3dashboard_v1_reducemotion';
 const HIGH_CONTRAST_KEY = 's3dashboard_v1_highcontrast';
@@ -501,6 +502,7 @@ const STATE = {
   // Speaker (firmware-only: the sim keeps the settings and stays silent).
   cfgTapVol: 2, cfgAlertVol: 4, cfgHourlyChime: true, cfgClaudeDing: true, cfgSoundAlerts: true,
   cfgMuteSleep: true, cfgMuteNight: true,
+  cfgOtaAuto: true, firmwareOffer: null,  // Settings > Firmware (ota.cpp); offer = /api/usage firmware.s3
   settingsSection: -1,  // -1 = main list, else the SETTINGS row whose children the list shows
   cfgScreenRotation: 1,
   pollOkSeq: 0,
@@ -904,6 +906,20 @@ const SOUND_ROWS = [
   { label: 'Mute when asleep', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgMuteSleep', MUTE_SLEEP_KEY) },
   { label: 'Mute at night', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgMuteNight', MUTE_NIGHT_KEY) },
 ];
+// Settings > Firmware (settings.cpp twin). The browser can't install a build:
+// it reads as a board already running whatever the server offers -- a
+// deliberate non-twin of the install, like the speaker.
+function firmwareSummary() { return STATE.firmwareOffer ? 'Up to date' : 'None published'; }
+function applyUpdateNow() {
+  toastText = STATE.firmwareOffer ? 'Already up to date' : 'No build published';
+  renderSettings();
+}
+const FIRMWARE_ROWS = [
+  { label: 'Auto update', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF, ...boolSetting('cfgOtaAuto', OTA_AUTO_KEY) },
+  { label: 'Update now', subtitle: 'Install the build the Mac offers', hint: 'Tap twice to update and restart',
+    kind: ROW_ACTION, cols: 1, count: 1, values: [0], valueLabels: ['Update'],
+    getCurrent: getCurrentNone, apply: applyUpdateNow, doneToast: 'Updating...' },
+];
 const SETTINGS = [
   { label: 'Brightness', subtitle: 'Backlight brightness', hint: '', kind: ROW_NAV, cols: 5, count: 5,
     values: BRIGHTNESS_VALUES, valueLabels: ['0%', '25%', '50%', '75%', '100%'],
@@ -941,6 +957,8 @@ const SETTINGS = [
   { label: 'Pixel shift', subtitle: 'Anti-retention orbit interval', hint: '', kind: ROW_NAV, cols: 4, count: 4,
     values: [0, 1, 3, 10], valueLabels: ['Off', '1m', '3m', '10m'],
     getCurrent: getCurrentPixelShift, apply: applyPixelShift },
+  { label: 'Firmware', subtitle: '', hint: '', kind: ROW_SECTION, cols: 0, count: 0,
+    children: FIRMWARE_ROWS, summary: firmwareSummary },
   { label: 'Reduce motion', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
     getCurrent: getCurrentReduceMotion, apply: applyReduceMotion },
   { label: 'Increase contrast', subtitle: '', hint: '', kind: ROW_TOGGLE, ...ONOFF,
@@ -3091,7 +3109,7 @@ const MOCK = {
 // the daily one tomorrow.
 function mockDoc() {
   const doc = structuredClone(MOCK);
-  const bkkNow = Date.now() + 7 * 3600 * 1000;  // a Date's UTC fields = Bangkok wall time
+  const bkkNow = simNowMs() + 7 * 3600 * 1000;  // a Date's UTC fields = Bangkok wall time
   const at = (sec) => new Date(bkkNow + sec * 1000);
   const hm = (d) => String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
   const fmtReset = (d) => `${MON_ABBR_LIST[d.getUTCMonth()]} ${d.getUTCDate()}, ${hm(d)}`;
@@ -3103,6 +3121,43 @@ function mockDoc() {
   doc.weather.hourly.forEach((h, i) => { h.h = (now.getUTCHours() + i) % 24; });
   doc.weather.daily.forEach((d, i) => { d.wd = (now.getUTCDay() + 1 + i) % 7; });
   return doc;
+}
+
+// ── FIXTURE MODE (?fixture=<name>, roadmap O7/O8) ─────────────
+// tests/fixtures/<name>.json = {clock, settings, usage}: the wall clock and
+// performance.now() freeze, the usage doc is applied once, nothing polls or
+// ticks, and window.simFixture.show(screen, theme) draws any page or sheet
+// straight to the canvas -- so tools/sim_check.mjs gets the same pixels on
+// every run and compares them with tests/golden/. Needs http(s), not file://.
+const FIXTURE_NAME = new URLSearchParams(location.search).get('fixture');
+let simClockMs = null;  // a fixture's frozen wall clock (epoch ms), else live
+function simNowMs() { return simClockMs ?? Date.now(); }
+const FIXTURE_SCREENS = ['page0', 'page1', 'page2', 'page3', 'page4', 'page5', 'page6', 'weather', 'device', 'settings'];
+async function startFixture(name) {
+  const res = await fetch('tests/fixtures/' + encodeURIComponent(name) + '.json');
+  if (!res.ok) throw new Error('fixture ' + name + ': HTTP ' + res.status);
+  const fx = await res.json();
+  simClockMs = Date.parse(fx.clock);
+  const frozen = Math.max(1, performance.now());
+  Object.defineProperty(performance, 'now', { value: () => frozen });
+  Object.assign(STATE, fx.settings || {});
+  applyData(fx.usage);
+  Object.assign(STATE, { haveData: true, wifiOk: true, connected: true, lastFetchSuccessMs: frozen, lastPollMs: frozen });
+  setConn(true, 'fixture ' + name);
+  window.simFixture = {
+    screens: FIXTURE_SCREENS,
+    show(screen, theme) {
+      STATE.cfgLightMode = theme === 'light';
+      applyThemeTokens();
+      STATE.weatherPageOpen = screen === 'weather';
+      STATE.devicePageOpen = screen === 'device';
+      STATE.settingsScreen = screen === 'settings' ? 'list' : 'off';
+      if (screen.startsWith('page')) STATE.currentPage = parseInt(screen.slice(4), 10);
+      if (screen === 'settings') renderSettings();
+      else render();
+    },
+  };
+  window.simFixtureReady = true;
 }
 
 // Where polls get their data (the Connection card's Data menu): 'auto' tries
@@ -3131,6 +3186,7 @@ function loadCachedUsage() {
 // Mirrors net.cpp's applyUsageJson: keep last-known limits/btc/weather/aqi on
 // an absent field; the note always overwrites (it is server-local state).
 function applyData(doc, fromNetwork = true) {
+  if (fromNetwork) STATE.firmwareOffer = doc.firmware?.s3 ?? null;  // ota.cpp: live polls only
   STATE.projects = (doc.projects || []).slice(0, 5);
   STATE.trend = Array.from({ length: 7 }, (_, i) => doc.trend?.[i] ?? 0);
   if (doc.limits) {
@@ -3201,7 +3257,7 @@ function loadWeatherCache() {
 // Weekday name (Intl 'short', matches WDAY_ABBR) at now + offsetSec, in
 // Bangkok time -- used to relabel the week-reset date with a weekday name.
 function bangkokWeekdayAt(offsetSec) {
-  const d = new Date(Date.now() + offsetSec * 1000);
+  const d = new Date(simNowMs() + offsetSec * 1000);
   return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Bangkok', weekday: 'short' }).format(d);
 }
 
@@ -3212,7 +3268,7 @@ function bangkokParts() {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
   const parts = {};
-  for (const p of fmt.formatToParts(new Date())) parts[p.type] = p.value;
+  for (const p of fmt.formatToParts(new Date(simNowMs()))) parts[p.type] = p.value;
   const out = {
     weekday: parts.weekday, month: parts.month, day: parts.day, year: parts.year,
     hour: parts.hour === '24' ? '00' : parts.hour, minute: parts.minute, second: parts.second,
@@ -3354,6 +3410,7 @@ function loadSettings() {
   loadInt(SOUND_ALERTS_KEY, v => { STATE.cfgSoundAlerts = v !== 0; });
   loadInt(MUTE_SLEEP_KEY, v => { STATE.cfgMuteSleep = v !== 0; });
   loadInt(MUTE_NIGHT_KEY, v => { STATE.cfgMuteNight = v !== 0; });
+  loadInt(OTA_AUTO_KEY, v => { STATE.cfgOtaAuto = v !== 0; });
   loadInt(BATTERY_SAVE_KEY, v => { STATE.cfgBatterySaveMode = Math.max(0, Math.min(2, v)); });
   loadInt(REDUCE_MOTION_KEY, v => { STATE.cfgReduceMotion = v !== 0; });
   loadInt(HIGH_CONTRAST_KEY, v => { STATE.cfgHighContrast = v !== 0; });
@@ -3531,14 +3588,19 @@ if (!window.S3_FONTS) {
 } else {
   const slow = parseFloat(new URLSearchParams(location.search).get('slowmo'));
   if (slow > 1) motionTimeScale = slow;
-  initDataSource();
-  loadWeatherCache();
-  loadSettings();
-  applyEffectiveBrightness(0);
-  render();
-  fetchUsage();
-  restartPollTimer();
-  setInterval(tick, 33);
+  if (FIXTURE_NAME) {
+    applyEffectiveBrightness(0);
+    startFixture(FIXTURE_NAME).catch(err => { window.simFixtureError = String(err); log(String(err), 'err'); });
+  } else {
+    initDataSource();
+    loadWeatherCache();
+    loadSettings();
+    applyEffectiveBrightness(0);
+    render();
+    fetchUsage();
+    restartPollTimer();
+    setInterval(tick, 33);
+  }
 }
 </script>
 </body>
