@@ -1659,8 +1659,7 @@ const NOTE_TEXT_W = NOTE_W - 2 * TOK_SPACE_CARD_PAD;
 const NOTE_FONTS = [TOK_TYPE_MONO_S, TOK_TYPE_MONO_M, TOK_TYPE_MONO_L];
 
 // ── Syntax highlighting ───────────────────────────────────────────────────
-// Same rule set as src/pages.cpp (and ~/cyd's pages.cpp, simulator.html,
-// note.html, note.py). Precedence, first match wins:
+// Same rule set as src/pages.cpp, note.html and tools/note.py. Precedence, first match wins:
 //   1. inside a `backtick span`      -> note.code (delimiters included)
 //   2. word is TODO/FIXME/BUG        -> note.keyword.bad
 //      word is DONE/OK               -> note.keyword.good
@@ -3079,7 +3078,7 @@ const MOCK = {
   context: { tokens: 80000, percent: 40 },
   btc: { price: 109432, changePct: 2.31 },
   aqi: { aqi: 81 },
-  // Exercises every tokenizer rule at once (same sample as ~/cyd's simulator).
+  // Exercises every tokenizer rule at once (same sample the CYD simulator used).
   note: {
     text: '# SPRINT 6\n> shipped 2026-08-26\n\n- TODO wire the note pane\n' +
           '* DONE server /api/note\n+ OK boot page picker\n\n' +

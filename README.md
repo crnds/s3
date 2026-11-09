@@ -1,7 +1,8 @@
 # S3 Dashboard
 
 Claude Code token-usage dashboard for the **JC3248W535EN** (Guition 3.5″
-ESP32-S3, 480×320 touch) — the big-screen sibling of [`~/cyd`](../cyd).
+ESP32-S3, 480×320 touch), plus the Mac server it polls (`server/`).
+It started as a port of the 320×240 CYD dashboard; that board is retired.
 
 Seven pages in a carousel:
 
@@ -28,8 +29,16 @@ offline. Each has a switch in Settings > Sound.
 
 ## Setup
 
-1. Run the Mac server from `~/cyd` (`/usr/bin/python3 server/usage_server.py`,
-   or its launchd job). Nothing else changes on the Mac.
+1. Install the Mac server's launch agents (usage server on :8787, control
+   panel on :8788):
+   ```
+   cp server/com.corner.s3*.plist ~/Library/LaunchAgents/
+   launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.corner.s3usage.plist
+   launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.corner.s3control.plist
+   ```
+   Optional tokens go in `secrets.local.json` (gitignored): `AQICN_TOKEN`
+   for station AQI (Open-Meteo is used without it), `GIPHY_API_KEY` for the
+   cat tools.
 2. `cp src/config.example.h src/config.h` and fill in WiFi + the Mac's
    `.local` name (or leave `WIFI_SSID` empty to use the `S3-Setup-XXXX`
    setup hotspot on first boot).
@@ -63,13 +72,14 @@ The board writes its caches, `/archive.csv` and `/diag_log.csv` there too.
 ## Server control panel
 
 `server.html` is the Mac server's control panel (status, enable/disable,
-battery save, logs). `~/cyd`'s `control_server.py` serves it at
+battery save, logs). `server/control_server.py` serves it at
 <http://127.0.0.1:8788/>; opening the file directly also works.
 
 ## Note editor
 
-`note.html` edits the Note page text. `~/cyd`'s `usage_server.py` serves it at
-<http://127.0.0.1:8787/> (localhost only); both boards show the same note.
+`note.html` edits the Note page text. `server/usage_server.py` serves it at
+<http://127.0.0.1:8787/> (localhost only). From a terminal:
+`tools/note.py "buy milk"`.
 
 ## Simulator
 

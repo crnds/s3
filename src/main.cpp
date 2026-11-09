@@ -139,7 +139,7 @@ static inline uint32_t offlineAfterMs() {
 //    is minutes of data), a limit reaching 100%, and the board going offline.
 //    Usage % only falls at a reset, so a fall re-arms that window's alerts.
 //  - Claude ding (SND_DONE): the server's active_now going true -> false --
-//    Claude Code has written nothing for 180 s (~/cyd's ACTIVE_WINDOW_SEC), so
+//    Claude Code has written nothing for 180 s (server/usage_server.py's ACTIVE_WINDOW_SEC), so
 //    it finished or is waiting on you.
 // The first live poll after boot or an outage only primes the state, so a
 // condition that was already true makes no sound.

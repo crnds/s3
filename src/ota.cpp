@@ -1,5 +1,5 @@
 // OTA updates over the LAN (roadmap O9). `pio run -t publish` copies a build to
-// the Mac (~/.cyd_firmware/s3.bin); ~/cyd's usage_server announces it in every
+// the Mac (~/.s3_firmware/s3.bin); server/usage_server.py announces it in every
 // /api/usage as firmware.s3.{sha256,size} and serves it at /firmware/s3.bin.
 //
 // The sha256 is the image digest esptool appends to every build -- the same

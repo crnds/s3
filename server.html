@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CYD Usage Server — Control Panel</title>
+<title>S3 Usage Server — Control Panel</title>
 <style>
 :root {
   --bg: #08090d;
@@ -287,7 +287,7 @@ footer {
 <body>
 
 <header>
-  <h1>CYD Usage Server <span>· control panel</span></h1>
+  <h1>S3 Usage Server <span>· control panel</span></h1>
   <div class="status-pill unknown" id="status-pill">
     <span class="dot"></span><span id="status-label">…</span>
   </div>
@@ -297,7 +297,7 @@ footer {
 <main>
   <div class="banner" id="control-banner">
     Can't reach the control server. Start it with
-    <code>/usr/bin/python3 ~/cyd/server/control_server.py</code>
+    <code>launchctl kickstart -k gui/$UID/com.corner.s3control</code>
     then reload this page.
   </div>
 
@@ -391,11 +391,11 @@ footer {
     <h2>Logs</h2>
     <div class="log-grid">
       <div>
-        <h2 style="font-size:0.75rem;color:var(--muted)">/tmp/cydusage.log</h2>
+        <h2 style="font-size:0.75rem;color:var(--muted)">/tmp/s3usage.log</h2>
         <div class="log-box" id="log-out">…</div>
       </div>
       <div>
-        <h2 style="font-size:0.75rem;color:var(--muted)">/tmp/cydusage.err</h2>
+        <h2 style="font-size:0.75rem;color:var(--muted)">/tmp/s3usage.err</h2>
         <div class="log-box" id="log-err">…</div>
       </div>
     </div>
@@ -754,7 +754,7 @@ function render() {
     bsVal.textContent = ep.up ? 'unknown' : '—';
     bsVal.className = 'value dim';
     bsSub.textContent = ep.up
-      ? 'usage server has no power field yet — restart com.corner.cydusage'
+      ? 'usage server has no power field yet — restart com.corner.s3usage'
       : 'server not responding';
     document.getElementById('v-power-source').textContent = '—';
     document.getElementById('v-power-pct').textContent = '—';

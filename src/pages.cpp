@@ -1099,8 +1099,8 @@ static const int NOTE_TEXT_W = NOTE_W - 2 * TOK_SPACE_CARD_PAD;
 static const FontId NOTE_FONTS[3] = {TOK_TYPE_MONO_S, TOK_TYPE_MONO_M, TOK_TYPE_MONO_L};
 
 // ── Syntax highlighting ───────────────────────────────────────────────────
-// This rule set is duplicated in simulator-s3.html, and in ~/cyd's pages.cpp,
-// simulator.html, note.html and note.py; all must agree or the board and the
+// This rule set is duplicated in simulator-s3.html, note.html and
+// tools/note.py; all must agree or the board and the
 // editor disagree about what the text looks like. Tokenizing happens at two
 // levels -- source line, then word -- plus a one-character backtick toggle.
 // There is deliberately no per-character classification. The colours are

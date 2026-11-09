@@ -10,7 +10,7 @@
 #define WIFI_SSID     "your-wifi-name"
 #define WIFI_PASSWORD "your-wifi-password"
 
-// Where to find the Mac running ~/cyd/server/usage_server.py (shared with the CYD).
+// Where to find the Mac running server/usage_server.py.
 //
 // RECOMMENDED: use your Mac's ".local" name (Bonjour/mDNS). The board will
 // then find the Mac by name even after its IP address changes (which happens

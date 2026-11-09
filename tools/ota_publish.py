@@ -2,8 +2,8 @@
 #
 #   pio run -t publish
 #
-# which builds, then copies firmware.bin to ~/.cyd_firmware/s3.bin. ~/cyd's
-# usage_server offers that file to the board (roadmap O9, src/ota.cpp): with
+# which builds, then copies firmware.bin to ~/.s3_firmware/s3.bin. server/usage_server.py
+# offers that file to the board (roadmap O9, src/ota.cpp): with
 # Settings > Firmware > Auto update on, the board installs it within one poll.
 # A plain `pio run` never reaches the board -- only what is published here.
 #
@@ -15,7 +15,7 @@ import shutil
 
 Import("env")  # noqa: F821 -- provided by PlatformIO's SCons
 
-PUBLISH_DIR = os.path.expanduser("~/.cyd_firmware")
+PUBLISH_DIR = os.path.expanduser("~/.s3_firmware")
 PUBLISH_PATH = os.path.join(PUBLISH_DIR, "s3.bin")
 
 

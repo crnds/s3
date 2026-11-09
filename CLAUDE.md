@@ -6,32 +6,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A PlatformIO firmware for the **JC3248W535EN** (Guition 3.5″, ESP32-S3 N16R8,
 480×320 IPS, AXS15231B QSPI panel + capacitive touch) that runs the Claude Code
-token-usage dashboard. It is a **port of `~/cyd`** (the 320×240 CYD version):
-same Mac server, same `/api/usage` JSON contract, same pages/settings/offline
-behaviour, re-laid out for the bigger panel with anti-aliased fonts, a
-TE-synced full-frame present, native-rate cat GIFs and page slides.
+token-usage dashboard, **plus the Mac server it polls** (`server/`). It began
+as a port of the 320×240 "Cheap Yellow Display" (CYD) dashboard; that board is
+retired and its repo (`~/cyd`, history at github.com/crnds/cyd) was folded in
+here on 2026-11-09. "The CYD" in comments below means that lineage.
 
 ```
 Mac laptop                                   S3 board (on WiFi)
-~/cyd/server/usage_server.py ──/api/usage──▶ src/*.cpp (polls every 20s, 7 pages)
-(unchanged; the S3 is just a second client)   simulator-s3.html = browser twin
+server/usage_server.py  ──/api/usage──▶      src/*.cpp (polls every 20s, 7 pages)
+  :8787, launchd com.corner.s3usage           simulator-s3.html = browser twin
+server/control_server.py (:8788, localhost; com.corner.s3control)
+  ▲ POST /api/note (localhost): note.html (served by :8787), tools/note.py (CLI)
 ```
 
 `esp32-s3-spec.md` is the board reference (pins, connectors, frame-rate
 math). `design.md` is the design system for the dashboard UI (tokens,
 components, touch, motion, migration plan) — follow it for any UI change.
 `docs/` (seller package, factory backup) is local-only, gitignored.
-The Mac side lives in `~/cyd` and is **not** duplicated here — for server,
-`note.py` and control-panel internals read `~/cyd/CLAUDE.md`. The two
-exceptions are the browser pages, which live here while their servers stay
-in `~/cyd` and serve them by absolute path:
+Mac-side internals are in **"Mac server"** below. The browser pages:
 
 - **`server.html`** — control panel (status, on/off, battery save, firmware
   OTA: build & publish, install on board, each board's build; logs),
-  served by `~/cyd/server/control_server.py` at `http://127.0.0.1:8788/`
-  (`HTML_PATH`).
+  served by `server/control_server.py` at `http://127.0.0.1:8788/`
+  (`HTML_PATH`, repo-relative).
 - **`note.html`** — Note page editor, served by
-  `~/cyd/server/usage_server.py` at `http://127.0.0.1:8787/` (`NOTE_HTML_PATH`).
+  `server/usage_server.py` at `http://127.0.0.1:8787/` (`NOTE_HTML_PATH`).
 
 Both follow the `~/CLAUDE.md` static-web conventions and are **not** bound
 by the parity rule (except `note.html`'s tokenizer, below). Both are read
@@ -65,10 +64,10 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   through RGB565 too).
 - After any UI change: screenshot the sim headless **and** the board
   (`tools/grab_screen.py`) and compare (see Commands).
-- **Note tokenizer is a six-copy parity surface**: `src/pages.cpp`,
-  `simulator-s3.html`, `note.html`, and `~/cyd`'s `pages.cpp`, `simulator.html`,
-  `note.py`. `grep -rn noteWordColor ~/s3/src ~/s3/simulator-s3.html ~/s3/note.html ~/cyd`
-  finds them. The S3 pane uses a monospace font so the wrap walk stays a
+- **Note tokenizer is a four-copy parity surface**: `src/pages.cpp`,
+  `simulator-s3.html`, `note.html` and `tools/note.py`.
+  `grep -rln noteWordColor src simulator-s3.html note.html` finds the first
+  three; `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
   cols×rows grid; every size holds at least the CYD pane's columns, so the
   CYD-geometry fit check in `note.html`/`note.py` stays a safe bound.
 
@@ -235,14 +234,14 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   and anti-aliased text (~1ms per string); the status page is ~54ms at 1Hz.
   Smooth shapes use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp:
   LovyanGFX's algorithm blended straight into the buffer).
-- **Two cores, two locks — unchanged from the CYD** (read `~/cyd/CLAUDE.md`):
+- **Two cores, two locks — unchanged from the CYD:**
   all blocking I/O on `networkTask` (core 0); `loop()` on core 1 only touches
   and renders; `stateMutex` held by `render()` while drawing; `sdMutex` →
   `stateMutex` is the only allowed nesting; the GIF player uses
   `tryLockSD(20)` and drops a frame rather than stall a recovery poll.
 - **No TLS on the board** — BTC/weather/AQI still arrive inside `/api/usage`.
-  With 8MB PSRAM the old heap reason is gone, but the contract (and the Mac's
-  battery-aware fetch cadence) is shared with the CYD, so it stays.
+  With 8MB PSRAM the old (CYD) heap reason is gone, but the Mac's
+  battery-aware fetch cadence lives server-side, so it stays.
 - **Touch (`touch_axs.cpp`):** I2C 0x3B, 11-byte read command, 8-byte report,
   single point; 2 fingers = no touch (seller driver behaviour). Capacitive —
   **no calibration keys** exist (the CYD's `touch_*` NVS keys were dropped).
@@ -275,7 +274,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   (design.md 7.5) is a 3x3 grid of the cards in miniature; its weather cell
   opens the Weather sheet. Offline both show the full-screen cat.
 - **OTA (`ota.cpp`, roadmap O9).** `pio run -t publish` (`tools/ota_publish.py`)
-  copies the build to `~/.cyd_firmware/s3.bin`; `~/cyd`'s usage server announces
+  copies the build to `~/.s3_firmware/s3.bin`; `server/usage_server.py` announces
   it in `/api/usage` as `firmware.s3.{sha256,size}` and serves it at
   `/firmware/s3.bin` (to this Mac and to boards that poll it). The sha256 is the
   image digest esptool appends -- what `esp_partition_get_sha256()` returns for
@@ -308,8 +307,9 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 - **NVS namespace `s3cfg`** (separate board, separate settings). Same keys as
   the CYD minus touch calibration; no `/config.json` migration.
 - **Offline threshold / WiFi self-reboot are wall-clock** (max(3 min, 3 poll
-  intervals) — `offlineAfterMs()` / 15 min), never poll-cycle counts — see
-  `~/cyd/CLAUDE.md` for the flap this fixed. The simulator's
+  intervals) — `offlineAfterMs()` / 15 min), never poll-cycle counts: the
+  CYD's old `OFFLINE_AFTER_CYCLES = 3` became a 15-second hair trigger at the
+  5s poll setting and made the board flap OFFLINE on ordinary packet loss. The simulator's
   `offlineAfterMs()` mirrors it.
 - **Stale data (`dataStale()`, pages.cpp; design.md 13.4):** before offline,
   once the last good *live* poll (`lastFetchSuccessMs`, 0 = none since boot,
@@ -343,6 +343,93 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   pools) instead of the CYD's single DRAM constant; CPU% is the render
   loop's duty cycle with TE-wait time subtracted.
 
+## Mac server (`server/`)
+
+Two launchd jobs, plists in `server/`, installed copies in
+`~/Library/LaunchAgents/` (editing the repo copy does nothing until it is
+re-copied and `launchctl kickstart -k gui/$UID/<label>`):
+
+| Label | Process | Port | Logs |
+|---|---|---|---|
+| `com.corner.s3usage` | `server/usage_server.py` | `*:8787` (LAN: the board polls it) | `/tmp/s3usage.{log,err}` |
+| `com.corner.s3control` | `server/control_server.py` | `127.0.0.1:8788` only | `/tmp/s3control.{log,err}` |
+
+```sh
+/usr/bin/python3 server/usage_server.py          # run by hand (stop the agent first)
+curl -s localhost:8787/api/usage | python3 -m json.tool
+launchctl kickstart -k gui/$UID/com.corner.s3usage   # restart after editing
+tail -f /tmp/s3usage.log                          # one line per board poll = heartbeat
+tools/note.py "buy milk"                          # set the Note page from a terminal
+```
+
+Local state outside the repo: `~/.s3_note.json` (the note), `~/.s3_firmware/`
+(published OTA builds; outside the repo because an image carries the WiFi
+credentials). Optional tokens in `secrets.local.json` at the repo root
+(gitignored): `AQICN_TOKEN`, `GIPHY_API_KEY`; env vars of the same name win.
+
+- **Stdlib only**, run by launchd's **`/usr/bin/python3` (3.9.6)** — keep it
+  3.9-compatible (e.g. `datetime.fromisoformat` can't parse a trailing `Z`,
+  hence `.replace("Z","+00:00")`). Test with `/usr/bin/python3`.
+- **Background loops** (each parks after ~180s with no client polls via
+  `activity_gated_loop`; first iteration always runs):
+  1. `scan_loop` (~15s AC / ~30s battery) — tails `~/.claude/projects/*/*.jsonl`
+     by byte offset into 5-min buckets (8-day retention). Streamed assistant
+     messages repeat with identical usage, so events are **deduped on
+     `(message.id, requestId)`, keep-first** — otherwise totals ~double.
+  2. `limits_loop` (~120s AC / ~300s battery) — OAuth
+     `api.anthropic.com/api/oauth/usage` session/week percents + resets. Token
+     read via `/usr/bin/security` (Keychain); never written to disk or
+     returned. Last-good kept on failure; 429 backoff clamped 10–30 min.
+  3. `market_loop` — BTC (Binance, ~60s AC / ~180s battery), Bangkok weather
+     (Open-Meteo, 10 / 30 min), Bangkok AQI (15 / 30 min): aqicn.org station
+     data when `AQICN_TOKEN` is set, else Open-Meteo's keyless CAMS `us_aqi`
+     (same EPA 0–500 scale; logged once). Last-good kept on failure. All TLS
+     stays on the Mac — the firmware has no `WiFiClientSecure`.
+- **`battery_guard_loop` owns the HTTP socket.** The 20s poll cadence never
+  leaves macOS an idle gap long enough to sleep (a night on battery once
+  drained 100%→1%). On battery below `BATTERY_LOW_PCT` (50%) it closes the
+  listening socket so the Mac can sleep (the board goes OFFLINE → cats), and
+  rebinds on AC or recovery.
+- **Battery save** (socket still up, Mac unplugged, or forced): background
+  intervals stretch as above; `power.battery_save` true. Override with
+  `POST /api/battery-save` `{"enabled": true|false|null}` (`null` = auto),
+  localhost, no `Origin`. The board's Settings > Battery Save AUTO follows it
+  from live polls only.
+- **`GET /api/usage` is the contract** with `src/net.cpp` and the simulator —
+  renaming a field means editing all three. Keys: `today`/`week`
+  `{tokens,cost}`, `active_now`, `projects[{name,tokens}]`, `trend[7]`,
+  `limits{session,week,week_model,credits}` (null until the keychain read
+  works; `resets_in_sec` computed per request), `context{tokens,percent}`,
+  `btc{price,changePct}`, `weather{...,hourly[],daily[]}`, `aqi{aqi}` (each
+  null until its first fetch — clients keep last-known when absent),
+  `note{text,size}` (**always an object**: clearing it must clear the board),
+  `power{...}`, `clients[]`, `firmware{s3:{sha256,size,published,install?}}`,
+  `generated_at`, `epoch`. New fields are additive and optional.
+- **Note routes, localhost-only** (`_is_local()`, LAN gets 403): `GET /`,
+  `/note`, `/note.html` serve `note.html` fresh per request; `GET|POST
+  /api/note` (`{"text", "size": 1-3}` → `sanitize_note()` → atomic write to
+  `~/.s3_note.json`). POST `Origin` is checked against `NOTE_ALLOWED_ORIGINS`
+  (note.html sends one; `note.py`/curl send none). `sanitize_note()` folds
+  CRLF→LF, tab→space, non-printable-ASCII → `?`, caps at 480 chars. The board
+  reads the note over the LAN inside `/api/usage`.
+- **OTA**: see Firmware internals › OTA. Server side: `firmware_offer()` reads
+  `~/.s3_firmware/s3.bin`; `GET /firmware/s3.bin` only to this Mac and IPs
+  that have polled; the board reports `X-S3-Firmware` / `X-S3-OTA` per poll
+  (`note_board_firmware`); localhost `GET /api/firmware` and `POST
+  /api/firmware/install` back the control panel (an install request rides in
+  the offer for ≤15 min).
+- **CORS is an exact allowlist, never `*`**: `Origin: null` (file://) on all
+  routes; loopback origins on any port (`USAGE_CORS_ORIGIN_RE`, e.g. the sim
+  under `python3 -m http.server 8765`) on `GET /api/usage` only.
+- **Control server** is a separate process so the panel stays up while the
+  usage server is disabled: `GET /api/status`, `POST /api/enable|disable`
+  (launchctl bootstrap/bootout of `com.corner.s3usage`), `POST
+  /api/battery-save` (proxy), `POST /api/firmware/publish` (`pio run -t
+  publish` in this repo, one at a time, 15-min cap, last 200 lines kept; pio
+  found on PATH or `PIO_CANDIDATES`), `POST /api/firmware/install` (proxy).
+  **Localhost-bound on purpose** — it can run launchctl.
+- Dollar costs are estimates from a hardcoded per-model price table.
+
 ## Layout grid and tokens
 
 `design.md` section 7 is the source of truth: 8px margins and gutters, content
@@ -363,11 +450,11 @@ block and are copied at the top of `simulator-s3.html`.
 Cats live in `~/s3/cats/*.gif` (tracked) and are **embedded in the firmware** at
 build time -- add or remove a GIF, then `pio run -t upload`. Flash is 16MB with a
 6.25MB app slot (~1.6MB is code+fonts), so `embed_cats.py` fails the build past
-4MB of GIFs; that is why the CYD's full 120-cat library (~83MB after fitting) does
+4MB of GIFs; that is why a full 120-cat library (~83MB after fitting) does
 not go in -- pick a subset.
 
 ```sh
-cp ~/cyd/cats/cat_NNN.gif ~/s3/cats/           # pick cats from the CYD's library
+cp cats_raw/cat_NNN.gif cats/                  # pick from a tools/prepare_cat_gifs.py library
 python3 tools/fit_cats.py                      # enlarge sources smaller than 480x320
 python3 tools/embed_cats.py                    # (optional) preview what gets embedded
 ```

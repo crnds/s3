@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CYD Note</title>
+<title>S3 Note</title>
 <style>
 :root {
   --bg: #08090d;
@@ -220,7 +220,7 @@ main {
 <body>
 
 <header>
-  <h1>CYD Note</h1>
+  <h1>S3 Note</h1>
   <p>Page 6 on the board &mdash; plain monospace text, synced on the next poll.</p>
 </header>
 
@@ -283,7 +283,8 @@ const STATE = {
 
 // ── NOTE TOKENIZER + WRAP (page 6, NOTE_PAGE) ─────────────────────────────
 // Pane geometry, needed here only to answer "will this fit on the board?".
-// Must match firmware/cyd_dashboard/pages.cpp and simulator.html.
+// The retired CYD pane's geometry (also tools/note.py's). The S3 pane holds at
+// least these columns at every size, so this stays a safe fit bound.
 const NOTE_TY = 18;       // first glyph row
 const NOTE_TY_MAX = 212;  // exclusive bottom limit: a row is drawn while y + 8*size <= this
 //
@@ -293,7 +294,7 @@ const NOTE_TY_MAX = 212;  // exclusive bottom limit: a row is drawn while y + 8*
 //     3  |   8  |   7  |   56   |  26
 //
 // ── Syntax highlighting ───────────────────────────────────────────────────
-// Duplicated in firmware/cyd_dashboard/pages.cpp and simulator.html; all three
+// Duplicated in src/pages.cpp, simulator-s3.html and tools/note.py; all four
 // must agree or the board and this editor disagree about what the text looks
 // like. Tokenizing happens at two levels — source line, then word — plus a
 // one-character backtick toggle. There is deliberately no per-character

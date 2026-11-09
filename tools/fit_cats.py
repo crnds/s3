@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Enlarge small cat GIFs so they fill the S3's 480x320 screen.
 
-The S3 plays the CYD's own library (~/cyd/cats, 120 cats built by
-~/cyd/prepare_cat_gifs.py to fit 320x240, many smaller still: 240x240,
+The S3 plays the old CYD board's library (cats_raw/ or any folder built by
+tools/prepare_cat_gifs.py to fit 320x240, many smaller still: 240x240,
 320x180...). Copied as-is they would play as a small island in a black frame
 on the 480x320 panel. This pass scales every GIF that fits inside 480x320 up until it
 touches the box (aspect ratio kept), with gifsicle's Catmull-Rom filter, and
 re-applies the same palette/lossy settings. Files already touching the box
 are left alone, so it is safe to re-run after adding more cats.
 
-    cp ~/cyd/cats/cat_NNN.gif cats/            # pick a subset: all 120 won't fit in 16MB flash
+    cp <library>/cat_NNN.gif cats/            # pick a subset: all 120 won't fit in 16MB flash
     python3 tools/fit_cats.py                  # upscale in place (./cats)
     pio run -t upload                          # cats/ is embedded in the firmware
 

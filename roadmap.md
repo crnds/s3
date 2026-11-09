@@ -118,7 +118,7 @@ waived.
    307,200-byte frame (~16 ms). So **each feature declares its present budget**:
    how many presents per second it adds at rest, and during its motion.
 4. **No TLS on the board.** Every new data source (calendar, Claude hooks, team
-   tools) is a **Mac server change in `~/cyd`** plus a change to the shared
+   tools) is a **Mac server change in `server/`** plus a change to the shared
    `/api/usage` contract. New fields are **additive and optional**, so the CYD
    keeps working untouched. ArduinoJson ignores keys it isn't asked for, but it
    still spends heap on them while parsing. So large S3-only blocks (agenda,
@@ -150,8 +150,8 @@ Each item gets three ratings:
 - **Surfaces** (what changes):
   - `FW`: firmware
   - `Sim`: the simulator twin
-  - `Srv`: the Mac server in `~/cyd`
-  - `CYD`: the sibling board
+  - `Srv`: the Mac server in `server/` (moved in from `~/cyd`, 2026-11-09)
+  - `CYD`: the sibling board (retired 2026-11-09)
   - `Docs`
   - `Tools`
 
@@ -375,7 +375,7 @@ backlight breath it needs are already built and just waiting for a trigger.
 - **Why.** This is glance question 3. With several Claude Code sessions running
   while you're in a crit, the board should tell you which one is waiting on you.
 - **What.**
-  1. **Mac side (`~/cyd`).**
+  1. **Mac side (`server/`).**
      - A Claude Code hook script runs on `Notification` (needs input or
        permission) and on `Stop` (finished).
      - It POSTs `{kind, project, session}` to `usage_server` on localhost.
@@ -702,7 +702,7 @@ and after in §11.
   - Run it against:
     - the C++ copy (native env)
     - `simulator-s3.html` and `note.html` (Node)
-    - the `~/cyd` copies
+    - `tools/note.py`
 - **Why.** A parity rule enforced by memory becomes a failing test.
 
 #### O6 · Token pipeline, with a Figma bridge — H · M · Tools Docs
@@ -755,7 +755,7 @@ and after in §11.
   feature is slower to iterate on over a USB cable.
 - **Shipped (2026-10-14).**
   - **Publish:** `pio run -t publish` copies the build to
-    `~/.cyd_firmware/s3.bin`. A plain `pio run` never reaches the board.
+    `~/.s3_firmware/s3.bin`. A plain `pio run` never reaches the board.
   - **Server:** announces `firmware.s3.{sha256,size}` and serves
     `/firmware/s3.bin` to this Mac and to boards that poll it.
   - **Identity:** the sha256 is esptool's appended image digest, compared with
@@ -866,7 +866,7 @@ Measured on the board unless noted. "Today" values marked † come from
 | **Contract drift with the CYD**, or a bigger payload exhausting its heap | Medium | Fields are additive and optional. Large S3-only blocks go behind a `?client=s3` projection, beside the existing `?client=cyd` (§3.4). Run one CYD smoke test per contract change |
 | **Present budget creep** (each animated feature adds full-frame presents) | Medium | Each item declares its presents per second. P5's target is a hard ceiling, checked in CI against `[timing]` |
 | **Memory pressure** from agenda, history and Thai fonts | Medium | P8's budget table is the gate; price each feature before building it |
-| **Calendar access** on the Mac (TCC permission prompts, the Python helper) | Medium | A Swift helper with its own Calendar permission; `icalBuddy` as the fallback. Decided in `~/cyd` |
+| **Calendar access** on the Mac (TCC permission prompts, the Python helper) | Medium | A Swift helper with its own Calendar permission; `icalBuddy` as the fallback. Decided in `server/` |
 | **Sound in an office** annoys neighbours | Medium | Defaults: alerts on, chime off. "Mute at night" and "Mute when asleep" already exist; F3 adds "Mute in focus" |
 | **OTA bricking** | Low | Rollback via `esp_ota_mark_app_valid` after the first good poll; USB flashing always remains |
 
