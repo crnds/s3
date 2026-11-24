@@ -1,8 +1,10 @@
-# CI (roadmap O8). Two jobs on every push and pull request:
+# CI (roadmap O8). Three jobs on every push and pull request:
 #   firmware   pio run + the size gate (tools/size_check.py: <= 75% of the app
 #              slot, no growth past the committed baseline unless it moved too)
 #   simulator  every page and sheet, both themes, from tests/fixtures/ against
 #              tests/golden/ (tools/sim_check.mjs)
+#   server     the Mac server's unit tests + contract snapshot, on the Python
+#              launchd runs it with (/usr/bin/python3, 3.9.x)
 # The board-vs-sim compare stays local: it needs the board. When native unit
 # tests (O4) and the tokenizer corpus (O5) land, they get steps here.
 name: CI
@@ -67,3 +69,36 @@ jobs:
         with:
           name: sim-diff
           path: tests/out/
+
+  server:
+    # launchd runs the Mac server with /usr/bin/python3 (3.9.6), so test on a
+    # macOS runner with that interpreter: a 3.10+ construct then fails here
+    # instead of on the Mac. If the image's system Python ever stops being 3.9,
+    # fall back to setup-python 3.9 (same language level, different build).
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate Python 3.9
+        id: sys
+        run: |
+          if /usr/bin/python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 9) else 1)'; then
+            echo "PY=/usr/bin/python3" >> "$GITHUB_ENV"
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.sys.outputs.ok != 'true'
+        with:
+          python-version: "3.9"
+      - name: Use setup-python's interpreter
+        if: steps.sys.outputs.ok != 'true'
+        run: echo "PY=python3" >> "$GITHUB_ENV"
+      - name: Python version
+        run: $PY --version
+      - name: Syntax (3.9)
+        run: $PY -m py_compile server/*.py tools/note.py
+      - name: Note wrap selftest
+        run: $PY tools/note.py --selftest
+      - name: Server unit tests
+        run: $PY -m unittest discover -s tests/server -v

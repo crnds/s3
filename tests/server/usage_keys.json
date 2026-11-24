@@ -1,0 +1,104 @@
+{
+ "active_now": "value",
+ "aqi": {
+  "aqi": "value",
+  "source": "value"
+ },
+ "btc": {
+  "changePct": "value",
+  "price": "value"
+ },
+ "clients": [
+  {
+   "ip": "value",
+   "last_seen_sec": "value"
+  }
+ ],
+ "context": {
+  "percent": "value",
+  "tokens": "value"
+ },
+ "epoch": "value",
+ "firmware": {
+  "s3": {
+   "install": "value",
+   "published": "value",
+   "sha256": "value",
+   "size": "value"
+  }
+ },
+ "generated_at": "value",
+ "limits": {
+  "credits": {
+   "limit": "value",
+   "percent": "value",
+   "used": "value"
+  },
+  "session": {
+   "percent": "value",
+   "resets": "value",
+   "resets_in_sec": "value"
+  },
+  "week": {
+   "percent": "value",
+   "resets": "value",
+   "resets_in_sec": "value"
+  },
+  "week_model": {
+   "name": "value",
+   "percent": "value",
+   "resets": "value"
+  }
+ },
+ "note": {
+  "size": "value",
+  "text": "value"
+ },
+ "power": {
+  "battery_save": "value",
+  "battery_save_manual": "null",
+  "on_ac": "value",
+  "paused": "value",
+  "percent": "null",
+  "source": "value"
+ },
+ "projects": [
+  {
+   "name": "value",
+   "tokens": "value"
+  }
+ ],
+ "today": {
+  "cost": "value",
+  "tokens": "value"
+ },
+ "trend": [
+  "value"
+ ],
+ "weather": {
+  "code": "value",
+  "condition": "value",
+  "daily": [
+   {
+    "code": "value",
+    "high": "value",
+    "low": "value",
+    "wd": "value"
+   }
+  ],
+  "high": "value",
+  "hourly": [
+   {
+    "code": "value",
+    "h": "value",
+    "tempC": "value"
+   }
+  ],
+  "low": "value",
+  "tempC": "value"
+ },
+ "week": {
+  "cost": "value",
+  "tokens": "value"
+ }
+}
