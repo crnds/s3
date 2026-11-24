@@ -1,12 +1,13 @@
 # CI (roadmap O8). Three jobs on every push and pull request:
 #   firmware   pio run + the size gate (tools/size_check.py: <= 75% of the app
 #              slot, no growth past the committed baseline unless it moved too)
+#              + `pio test -e native` (host-side unit tests, tests/native/)
 #   simulator  every page and sheet, both themes, from tests/fixtures/ against
 #              tests/golden/ (tools/sim_check.mjs)
 #   server     the Mac server's unit tests + contract snapshot, on the Python
 #              launchd runs it with (/usr/bin/python3, 3.9.x)
-# The board-vs-sim compare stays local: it needs the board. When native unit
-# tests (O4) and the tokenizer corpus (O5) land, they get steps here.
+# The board-vs-sim compare stays local: it needs the board. The tokenizer
+# corpus (O5) gets a step here when it lands.
 name: CI
 
 on:
@@ -39,6 +40,8 @@ jobs:
         run: pio run
       - name: Size gate
         run: python3 tools/size_check.py
+      - name: Native unit tests (O4)
+        run: pio test -e native
 
   simulator:
     runs-on: ubuntu-24.04

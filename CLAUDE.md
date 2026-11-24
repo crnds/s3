@@ -79,6 +79,7 @@ $PIO run                                 # build (first run downloads pioarduino
 $PIO run -t upload                       # flash over native USB (port auto-detected)
 $PIO run -t publish                      # build and offer it to the board over WiFi (OTA, below)
 $PIO device monitor                      # serial log (baud is irrelevant on native USB)
+$PIO test -e native                      # host-side unit tests (tests/native/): format, pace, motion math, timing
 python3 tools/size_check.py              # CI's size gate on the last build (--update after planned growth)
 node tools/sim_check.mjs                 # CI's sim goldens (--update after a deliberate UI change)
 python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
@@ -245,6 +246,17 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 - **Touch (`touch_axs.cpp`):** I2C 0x3B, 11-byte read command, 8-byte report,
   single point; 2 fingers = no touch (seller driver behaviour). Capacitive —
   **no calibration keys** exist (the CYD's `touch_*` NVS keys were dropped).
+- **Pure logic is separate from hardware (native tests).** `format_pure.cpp`
+  (number/time text), `pace.cpp` (pace %, run-out projection, flag deadband,
+  alert crossing), `motion_math.cpp` (springs, release velocity, rubber band)
+  and `timing.cpp` (stale/offline thresholds, live countdown) include no
+  Arduino or LovyanGFX header, so `pio test -e native` runs them in seconds
+  (`[env:native]`, `tests/native/test_*/`). `format.cpp`, `pages.cpp`,
+  `main.cpp` and `motion.cpp` call them through thin wrappers. Add a file to
+  `build_src_filter` in `[env:native]` only if its headers stay clear of
+  `state.h`. `fmtTokensBuf` copies the ESP32 core's `dtostrf` rather than
+  using `snprintf`: the two round near-ties differently, and the board's digits
+  must not change.
 - **Cats (`gif_player.cpp`):** the GIFs are **linked into the firmware**, not read
   from the SD card: `tools/embed_cats.py` (a `pre:` extra script) `.incbin`s
   `cats/*.gif` into `src/cats_embed.gen.cpp` (gitignored) and AnimatedGIF decodes

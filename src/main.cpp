@@ -120,16 +120,8 @@ const uint32_t RESTART_AFTER_WIFI_DOWN_MS = 900000UL;
 // switching the display to the cat/offline screen. Left at 0 on purpose: a
 // board that never reaches the Mac goes offline OFFLINE_AFTER_MS after boot.
 volatile uint32_t lastFetchSuccessMs = 0;
-// Floor for the offline grace. A congested WLAN drops the board's TCP connects
-// in bursts (measured on the office network: gaps of 66-268s between good
-// polls), and Battery Save stretches the poll to 120s, so the old fixed 60s
-// flipped to the cat screen between perfectly healthy polls. The effective
-// grace is max(this, 3 poll intervals): see offlineAfterMs().
-const uint32_t OFFLINE_AFTER_MS = 180000UL;  // ~3 min without a successful poll
-static inline uint32_t offlineAfterMs() {
-  uint32_t byPoll = POLL_INTERVAL_MS * 3;
-  return byPoll > OFFLINE_AFTER_MS ? byPoll : OFFLINE_AFTER_MS;
-}
+// The offline grace is max(OFFLINE_AFTER_MS, 3 poll intervals): timing.h.
+static inline uint32_t offlineAfterMs() { return offlineAfterMsFor(POLL_INTERVAL_MS); }
 
 // ── SOUND ALERTS (Settings > Sound, design.md 12.10) ───────
 // Events read off the poll, each played once per crossing; audioPlay() applies
@@ -143,30 +135,10 @@ static inline uint32_t offlineAfterMs() {
 //    it finished or is waiting on you.
 // The first live poll after boot or an outage only primes the state, so a
 // condition that was already true makes no sound.
-static const int ALERT_MIN_ELAPSED_PCT = 10;
-struct LimitAlert {
-  int lastPct = -1;
-  bool runOut = false;  // already alerted "runs out before the reset" this window
-  bool full = false;    // already alerted "reached 100%" this window
-};
+// LimitAlert, ALERT_MIN_ELAPSED_PCT and limitAlertCrossed() live in pace.h.
 static LimitAlert sessionAlert, weekAlert;
 static bool alertsPrimed = false;
 static bool claudeWasActive = false;
-
-// True when this poll newly crosses one of the limit's alert conditions.
-static bool limitAlertCrossed(LimitAlert& a, int pct, long remSec, long windowSec, bool prime) {
-  if (pct < 0 || remSec < 0) return false;  // limit unavailable: keep the last state
-  if (a.lastPct >= 0 && pct < a.lastPct) a.runOut = a.full = false;  // the window reset
-  a.lastPct = pct;
-  long elapsed = windowSec - remSec;
-  bool runOut = elapsed * 100 >= windowSec * ALERT_MIN_ELAPSED_PCT &&
-                paceSecondsToLimit(pct, elapsed, remSec) >= 0;
-  bool full = pct >= 100;
-  bool crossed = (runOut && !a.runOut) || (full && !a.full);
-  a.runOut = a.runOut || runOut;
-  a.full = a.full || full;
-  return crossed && !prime;
-}
 
 static void pollAlerts(bool liveOk, bool wentOffline) {
   if (wentOffline) {

@@ -5,6 +5,10 @@
 // change costs no frames). simulator-s3.html mirrors each function.
 #include <stdint.h>
 
+// Debug time scale (serial 'm', simulator ?slowmo=10): multiplies every
+// motion token's time (design.md 17). 1.0 normally.
+extern float motionTimeScale;
+
 // A critically-damped-or-softer spring, stepped once per loop() pass.
 // x = presentation offset (px), v = px/s. Retargeting changes only `target`,
 // so position and velocity carry on -- interruptible by construction.

@@ -1,12 +1,11 @@
-// Formatting helpers + live resource-percent readers. Split out of
-// main.cpp (see state.h for the shared declarations these need).
+// Formatting helpers + live resource-percent readers. The pure number/time
+// formatting lives in format_pure.cpp (native-tested); these wrap it in String.
 #include "state.h"
 
 String fmtTokens(int64_t t) {
-  if (t >= 1000000000) return String((double)t / 1000000000.0, 2) + "B";
-  if (t >= 1000000) return String((double)t / 1000000.0, 1) + "M";
-  if (t >= 1000) return String((double)t / 1000.0, 1) + "K";
-  return String((long)t);
+  char b[FMT_BUF_MIN];
+  fmtTokensBuf(b, sizeof(b), t);
+  return String(b);
 }
 
 String fmtCost(float c) {
@@ -14,21 +13,15 @@ String fmtCost(float c) {
 }
 
 String fmtBtc(double p) {
-  if (p < 0) return "--";
-  String s = String((long)(p + 0.5));
-  String out;
-  int len = s.length();
-  for (int i = 0; i < len; i++) {
-    out += s[i];
-    int rem = len - 1 - i;
-    if (rem > 0 && rem % 3 == 0) out += ',';
-  }
-  return out;
+  char b[FMT_BUF_MIN];
+  fmtBtcBuf(b, sizeof(b), p);
+  return String(b);
 }
 
 String fmtChangePct(double pct) {
-  long whole = (long)(fabs(pct) + 0.5);
-  return String(pct < 0 ? "-" : "+") + String(whole) + "%";
+  char b[FMT_BUF_MIN];
+  fmtChangePctBuf(b, sizeof(b), pct);
+  return String(b);
 }
 
 bool haveLocalTime(struct tm* ti) {
@@ -38,34 +31,17 @@ bool haveLocalTime(struct tm* ti) {
 }
 
 String fmtCountdown(long sec) {
-  if (sec < 0) return "";
-  long m = (sec + 30) / 60;  // round to nearest minute
-  long h = m / 60;
-  m %= 60;
-  char buf[16];
-  if (h > 0) snprintf(buf, sizeof(buf), "%ldh %02ldm", h, m);
-  else snprintf(buf, sizeof(buf), "%ldm", m);
-  return String(buf);
+  char b[FMT_BUF_MIN];
+  fmtCountdownBuf(b, sizeof(b), sec);
+  return String(b);
 }
 
 // Day-aware countdown for windows that can span multiple days (the weekly
-// reset). >=1 day: "1d 12h" (days + hours only). <1 day: "23h 59m", same
-// shape as fmtCountdown. No colon: it would read as a clock time (design.md
-// 5.3 rule 9). Twin of simulator-s3.html's fmtCountdownDHM.
+// reset): "6d 16h" / "4h 03m". Twin of simulator-s3.html's fmtCountdownDHM.
 String fmtCountdownDHM(long sec) {
-  if (sec < 0) return "";
-  long totalMin = (sec + 30) / 60;  // round to nearest minute
-  long days = totalMin / 1440;
-  char buf[16];
-  if (days > 0) {
-    long hours = (totalMin % 1440) / 60;
-    snprintf(buf, sizeof(buf), "%ldd %ldh", days, hours);
-  } else {
-    long hours = totalMin / 60;
-    long mins = totalMin % 60;
-    snprintf(buf, sizeof(buf), "%ldh %02ldm", hours, mins);
-  }
-  return String(buf);
+  char b[FMT_BUF_MIN];
+  fmtCountdownDHMBuf(b, sizeof(b), sec);
+  return String(b);
 }
 
 String fmtKB(uint32_t bytes) {
