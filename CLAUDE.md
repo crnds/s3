@@ -382,8 +382,11 @@ credentials). Optional tokens in `secrets.local.json` at the repo root
      returned. Last-good kept on failure; 429 backoff clamped 10–30 min.
   3. `market_loop` — BTC (Binance, ~60s AC / ~180s battery), Bangkok weather
      (Open-Meteo, 10 / 30 min), Bangkok AQI (15 / 30 min): aqicn.org station
-     data when `AQICN_TOKEN` is set, else Open-Meteo's keyless CAMS `us_aqi`
-     (same EPA 0–500 scale; logged once). Last-good kept on failure. All TLS
+     data when `AQICN_TOKEN` is set, else keyless Air4Thai (Thai PCD
+     stations: per-station US AQI from PM2.5/PM10/O3, median within 15 km),
+     else Open-Meteo's CAMS `us_aqi_pm2_5` -- never its combined `us_aqi`,
+     whose modelled afternoon ozone read 165 against the stations' ~86.
+     `aqi.source` says which one answered. Last-good kept on failure. All TLS
      stays on the Mac — the firmware has no `WiFiClientSecure`.
 - **`battery_guard_loop` owns the HTTP socket.** The 20s poll cadence never
   leaves macOS an idle gap long enough to sleep (a night on battery once

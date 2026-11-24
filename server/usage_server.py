@@ -3,8 +3,10 @@
 
 import glob
 import json
+import math
 import os
 import re
+import statistics
 import subprocess
 import sys
 import threading
@@ -112,7 +114,7 @@ STATE = {
     # Bangkok weather for the status card + Weather page: current + next-6h
     # hourly + next-5d daily, fetched here so the board needs no TLS.
     "weather": None,
-    "aqi": None,        # {aqi} Bangkok AQI from aqicn.org — fetched here so the board needs no TLS
+    "aqi": None,        # {aqi, source} Bangkok US AQI (fetch_aqi) — fetched here so the board needs no TLS
     # Power / battery-save. battery_guard_loop writes on_ac/percent/paused;
     # battery_save_manual is set by POST /api/battery-save (control panel):
     #   None  → auto (follow AC: unplugged = save on)
@@ -267,11 +269,34 @@ WEATHER_URL = (
 # aqicn.org (World Air Quality Index project) — same Bangkok coords as the
 # weather fetch above, geo-based so it's not tied to one named station.
 AQICN_URL = "https://api.waqi.info/feed/geo:13.7563;100.5018/?token={token}"
-# Keyless fallback when no AQICN_TOKEN is configured: Open-Meteo's CAMS-model
-# US AQI (same 0-500 EPA scale aqicn reports), so the tile works out of the box.
+# Keyless source when no AQICN_TOKEN is configured: Air4Thai, the Thai Pollution
+# Control Department's station network (~80 stations in Bangkok, hourly).
+# fetch_aqi_air4thai() converts each station's readings to US AQI and takes the
+# median of the stations within AIR4THAI_RADIUS_KM of the weather coords.
+AIR4THAI_URL = "https://air4thai.pcd.go.th/services/getNewAQI_JSON.php"
+AQI_LAT, AQI_LON = 13.7563, 100.5018
+AIR4THAI_RADIUS_KM = 15
+AIR4THAI_MIN_STATIONS = 3
+AIR4THAI_MAX_AGE_SEC = 3 * 3600
+BANGKOK_TZ = timezone(timedelta(hours=7))
+# US EPA AQI breakpoints (C_lo, C_hi, I_lo, I_hi), PM2.5 per the 2024 revision.
+# Air4Thai units: PM2.5/PM10 ug/m3, O3 ppb. Concentrations are truncated to the
+# table's precision first (EPA rule), which closes the gaps between rows.
+US_AQI_BREAKPOINTS = {
+    "PM25": ((0.0, 9.0, 0, 50), (9.1, 35.4, 51, 100), (35.5, 55.4, 101, 150),
+             (55.5, 125.4, 151, 200), (125.5, 225.4, 201, 300), (225.5, 325.4, 301, 500)),
+    "PM10": ((0, 54, 0, 50), (55, 154, 51, 100), (155, 254, 101, 150),
+             (255, 354, 151, 200), (355, 424, 201, 300), (425, 604, 301, 500)),
+    "O3": ((0, 54, 0, 50), (55, 70, 51, 100), (71, 85, 101, 150),
+           (86, 105, 151, 200), (106, 200, 201, 300)),
+}
+# Last resort if Air4Thai is down: Open-Meteo's CAMS model, PM2.5 sub-index
+# only. Its combined us_aqi is ruled by modelled afternoon ozone that runs far
+# high over Bangkok (165 at 17:00 on 2026-11-24, when the stations' readings
+# gave ~86), and that was the number the board showed.
 OPENMETEO_AQI_URL = (
     "https://air-quality-api.open-meteo.com/v1/air-quality"
-    "?latitude=13.7563&longitude=100.5018&current=us_aqi&timezone=Asia%2FBangkok"
+    "?latitude=13.7563&longitude=100.5018&current=us_aqi_pm2_5&timezone=Asia%2FBangkok"
 )
 AQI_INTERVAL_SEC = 900
 AQI_INTERVAL_BATTERY_SEC = 1800
@@ -528,23 +553,84 @@ def aqicn_token():
     if not token and not _aqicn_token_warned:
         _aqicn_token_warned = True
         log_err("aqi: no AQICN_TOKEN in env or secrets.local.json -- "
-                "using Open-Meteo US AQI instead (free aqicn token: https://aqicn.org/data-platform/token/)")
+                "using Air4Thai stations instead (free aqicn token: https://aqicn.org/data-platform/token/)")
     return token
+
+
+def us_aqi(pollutant, conc):
+    # One pollutant's US AQI sub-index, or None for a missing (<0) reading.
+    if conc is None or conc < 0:
+        return None
+    table = US_AQI_BREAKPOINTS[pollutant]
+    conc = math.floor(conc * 10) / 10 if pollutant == "PM25" else math.floor(conc)
+    conc = min(conc, table[-1][1])
+    for c_lo, c_hi, i_lo, i_hi in table:
+        if conc <= c_hi:
+            return round((i_hi - i_lo) / (c_hi - c_lo) * (conc - c_lo) + i_lo)
+    return None
+
+
+def _km(lat1, lon1, lat2, lon2):
+    p = math.pi / 180
+    a = (math.sin((lat2 - lat1) * p / 2) ** 2
+         + math.cos(lat1 * p) * math.cos(lat2 * p) * math.sin((lon2 - lon1) * p / 2) ** 2)
+    return 12742 * math.asin(math.sqrt(a))
+
+
+def _float_or_none(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_aqi_air4thai():
+    req = urllib.request.Request(AIR4THAI_URL, headers={"User-Agent": "s3usage"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        doc = json.loads(resp.read())
+    now = datetime.now(BANGKOK_TZ)
+    station_aqis = []
+    for st in doc.get("stations") or []:
+        lat, lon = _float_or_none(st.get("lat")), _float_or_none(st.get("long"))
+        if lat is None or lon is None or _km(AQI_LAT, AQI_LON, lat, lon) > AIR4THAI_RADIUS_KM:
+            continue
+        last = st.get("AQILast") or {}
+        try:
+            stamp = datetime.strptime(f"{last.get('date')} {last.get('time')}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+        if (now - stamp.replace(tzinfo=BANGKOK_TZ)).total_seconds() > AIR4THAI_MAX_AGE_SEC:
+            continue
+        subs = [us_aqi(p, _float_or_none((last.get(p) or {}).get("value"))) for p in US_AQI_BREAKPOINTS]
+        subs = [s for s in subs if s is not None]
+        if subs:
+            station_aqis.append(max(subs))
+    if len(station_aqis) < AIR4THAI_MIN_STATIONS:
+        log_err(f"aqi: Air4Thai has {len(station_aqis)} fresh stations within {AIR4THAI_RADIUS_KM} km")
+        return None
+    return {"aqi": round(statistics.median(station_aqis)), "source": "air4thai"}
 
 
 def fetch_aqi_openmeteo():
     req = urllib.request.Request(OPENMETEO_AQI_URL, headers={"User-Agent": "s3usage"})
     with urllib.request.urlopen(req, timeout=8) as resp:
         doc = json.loads(resp.read())
-    aqi = (doc.get("current") or {}).get("us_aqi")
+    aqi = (doc.get("current") or {}).get("us_aqi_pm2_5")
     if not isinstance(aqi, (int, float)) or aqi < 0:
         return None
-    return {"aqi": round(aqi)}
+    return {"aqi": round(aqi), "source": "open-meteo"}
 
 
 def fetch_aqi():
+    # aqicn with a token; else Air4Thai stations; else Open-Meteo's model.
     token = aqicn_token()
     if not token:
+        try:
+            aqi = fetch_aqi_air4thai()
+            if aqi:
+                return aqi
+        except Exception as e:
+            log_err(f"aqi: Air4Thai failed: {type(e).__name__}: {e}")
         return fetch_aqi_openmeteo()
     req = urllib.request.Request(AQICN_URL.format(token=token), headers={"User-Agent": "s3usage"})
     with urllib.request.urlopen(req, timeout=8) as resp:
@@ -554,7 +640,7 @@ def fetch_aqi():
     aqi = (doc.get("data") or {}).get("aqi")
     if not isinstance(aqi, (int, float)) or aqi < 0:
         return None
-    return {"aqi": round(aqi)}
+    return {"aqi": round(aqi), "source": "aqicn"}
 
 
 def fetch_btc():

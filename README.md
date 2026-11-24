@@ -37,7 +37,7 @@ offline. Each has a switch in Settings > Sound.
    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.corner.s3control.plist
    ```
    Optional tokens go in `secrets.local.json` (gitignored): `AQICN_TOKEN`
-   for station AQI (Open-Meteo is used without it), `GIPHY_API_KEY` for the
+   for aqicn station AQI (Thai PCD's Air4Thai stations are used without it), `GIPHY_API_KEY` for the
    cat tools.
 2. `cp src/config.example.h src/config.h` and fill in WiFi + the Mac's
    `.local` name (or leave `WIFI_SSID` empty to use the `S3-Setup-XXXX`
