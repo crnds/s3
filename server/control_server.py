@@ -359,7 +359,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._send_json({"ok": False, "detail": "invalid JSON"}, status=400)
                 return
-            if "enabled" not in doc or (
+            # json.loads also accepts 5, [], "x", null: only an object has "enabled".
+            if not isinstance(doc, dict) or "enabled" not in doc or (
                 doc.get("enabled") is not None and not isinstance(doc.get("enabled"), bool)
             ):
                 self._send_json(
