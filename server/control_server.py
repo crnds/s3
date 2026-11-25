@@ -16,28 +16,27 @@ import subprocess
 import threading
 import time
 import urllib.error
-import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from s3srv.common import (CONTROL_PORT as PORT, REPO_DIR as S3_REPO, USAGE_LOCAL_URL,
+                          JsonHandler, Server, fetch_json)
 
 # The only two contexts server.html legitimately runs in: served by this
 # process itself (same-origin, no CORS needed at all), or opened directly via
 # file:// for local dev (Origin: null). Anything else hitting the destructive
 # POST endpoints below is cross-site and must be rejected outright.
-ALLOWED_ORIGIN = "http://127.0.0.1:8788"
+ALLOWED_ORIGIN = "http://127.0.0.1:%d" % PORT
 
-PORT = 8788
 JOB_LABEL = "com.corner.s3usage"
 PLIST_PATH = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % JOB_LABEL)
-# Repo root (this file is server/control_server.py); the panel page is
-# server.html there, and "Build & publish" runs pio in it.
-S3_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The panel page is server.html at the repo root, and "Build & publish" runs
+# pio there.
 HTML_PATH = os.path.join(S3_REPO, "server.html")
-USAGE_URL = "http://127.0.0.1:8787/api/usage"
-BATTERY_SAVE_URL = "http://127.0.0.1:8787/api/battery-save"
+USAGE_URL = USAGE_LOCAL_URL + "/api/usage"
+BATTERY_SAVE_URL = USAGE_LOCAL_URL + "/api/battery-save"
 # Firmware (OTA) for the S3 board: status and "Install on board" are the usage
 # server's (localhost-only there); "Build & publish" runs here.
-FIRMWARE_URL = "http://127.0.0.1:8787/api/firmware"
-FIRMWARE_INSTALL_URL = "http://127.0.0.1:8787/api/firmware/install"
+FIRMWARE_URL = USAGE_LOCAL_URL + "/api/firmware"
+FIRMWARE_INSTALL_URL = USAGE_LOCAL_URL + "/api/firmware/install"
 # launchd's PATH has no PlatformIO; these are where it lives on this Mac.
 PIO_CANDIDATES = [
     os.path.expanduser("~/.pio-venv/bin/pio"),
@@ -50,7 +49,7 @@ BUILD_LOG_LINES = 200
 LOG_OUT = "/tmp/s3usage.log"
 LOG_ERR = "/tmp/s3usage.err"
 LOG_TAIL_LINES = 40
-MAX_BODY_BYTES = 4096  # POST bodies here are tiny JSON; anything bigger is bogus/abusive
+JSON_HEADERS = {"Content-Type": "application/json"}
 
 
 def run(cmd):
@@ -87,8 +86,7 @@ def launchd_status():
 def probe_endpoint():
     t0 = time.time()
     try:
-        with urllib.request.urlopen(USAGE_URL, timeout=3) as resp:
-            doc = json.loads(resp.read())
+        doc = fetch_json(USAGE_URL, 3)
         return {
             "up": True,
             "latency_ms": int((time.time() - t0) * 1000),
@@ -107,15 +105,8 @@ def set_battery_save(enabled):
     # too). enabled: True/False forces the mode, None clears the override
     # back to auto — pass through as-is so None serializes to JSON null.
     body = json.dumps({"enabled": enabled}).encode("utf-8")
-    req = urllib.request.Request(
-        BATTERY_SAVE_URL,
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
     try:
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            doc = json.loads(resp.read())
+        doc = fetch_json(BATTERY_SAVE_URL, 3, headers=JSON_HEADERS, data=body)
         if doc.get("ok"):
             if enabled is True:
                 state = "on"
@@ -131,8 +122,7 @@ def set_battery_save(enabled):
 
 def probe_firmware():
     try:
-        with urllib.request.urlopen(FIRMWARE_URL, timeout=3) as resp:
-            return json.loads(resp.read())
+        return fetch_json(FIRMWARE_URL, 3)
     except urllib.error.HTTPError as exc:
         return {"error": "usage server answered %d (restart it for /api/firmware)" % exc.code}
     except Exception as exc:
@@ -140,11 +130,8 @@ def probe_firmware():
 
 
 def request_install():
-    req = urllib.request.Request(FIRMWARE_INSTALL_URL, data=b"{}", method="POST",
-                                 headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            doc = json.loads(resp.read())
+        doc = fetch_json(FIRMWARE_INSTALL_URL, 3, headers=JSON_HEADERS, data=b"{}")
     except urllib.error.HTTPError as exc:
         try:
             doc = json.loads(exc.read())
@@ -265,10 +252,7 @@ def do_disable():
     return False, (err or out or "launchctl bootout failed").strip()
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        pass
-
+class Handler(JsonHandler):
     def _origin_allowed(self):
         # No Origin header at all = not a browser cross-origin request (curl,
         # the board, etc.) — allow. Otherwise it must be this server's own
@@ -278,20 +262,11 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return origin is None or origin == ALLOWED_ORIGIN or origin == "null"
 
-    def _send(self, status, body, content_type):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+    def _cors_origin(self):
         # ACAO only for the file:// dev case (Origin: null) — same-origin
         # fetches from server.html-as-served-here need no CORS header at all,
         # and a blanket "*" would let any web page read this API cross-origin.
-        if self.headers.get("Origin") == "null":
-            self.send_header("Access-Control-Allow-Origin", "null")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_json(self, doc, status=200):
-        self._send(status, json.dumps(doc).encode("utf-8"), "application/json")
+        return "null" if self.headers.get("Origin") == "null" else None
 
     def do_OPTIONS(self):
         # CORS preflight — the battery-save POST sends a JSON Content-Type
@@ -308,9 +283,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/", "/index.html", "/server.html"):
             try:
                 with open(HTML_PATH, "rb") as f:
-                    self._send(200, f.read(), "text/html; charset=utf-8")
+                    self._send(f.read(), "text/html; charset=utf-8")
             except OSError:
-                self._send(404, b"server.html not found", "text/plain")
+                self._send(b"server.html not found", "text/plain", status=404)
             return
         if self.path == "/api/status":
             self._send_json({
@@ -322,11 +297,11 @@ class Handler(BaseHTTPRequestHandler):
                 "build": build_status(),
             })
             return
-        self._send(404, b"not found", "text/plain")
+        self._send(b"not found", "text/plain", status=404)
 
     def do_POST(self):
         if not self._origin_allowed():
-            self._send(403, b"forbidden origin", "text/plain")
+            self._send(b"forbidden origin", "text/plain", status=403)
             return
         if self.path == "/api/enable":
             ok, detail = do_enable()
@@ -346,18 +321,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/battery-save":
             # Body: {"enabled": true|false}. Proxied to the usage server.
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                length = 0
-            if length > MAX_BODY_BYTES:
-                self._send_json({"ok": False, "detail": "body too large"}, status=413)
-                return
-            raw = self.rfile.read(length) if length > 0 else b"{}"
-            try:
-                doc = json.loads(raw.decode("utf-8") or "{}")
-            except ValueError:
-                self._send_json({"ok": False, "detail": "invalid JSON"}, status=400)
+            doc, err = self._read_json_body()
+            if err:
                 return
             # json.loads also accepts 5, [], "x", null: only an object has "enabled".
             if not isinstance(doc, dict) or "enabled" not in doc or (
@@ -371,12 +336,7 @@ class Handler(BaseHTTPRequestHandler):
             ok, detail, power = set_battery_save(doc["enabled"])
             self._send_json({"ok": ok, "detail": detail, "power": power})
             return
-        self._send(404, b"not found", "text/plain")
-
-
-class Server(ThreadingHTTPServer):
-    allow_reuse_address = True
-    daemon_threads = True
+        self._send(b"not found", "text/plain", status=404)
 
 
 def main():

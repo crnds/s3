@@ -8,17 +8,15 @@ import os
 import re
 import statistics
 import subprocess
-import sys
 import threading
 import time
 import urllib.error
-import urllib.request
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from s3srv.common import (USAGE_PORT as PORT, REPO_DIR, USER_AGENT, JsonHandler, Server,
+                          fetch_json, load_secret, log_err)
 
 LOG_GLOB = os.path.expanduser("~/.claude/projects/*/*.jsonl")
-PORT = 8787
-MAX_BODY_BYTES = 4096  # POST bodies here are tiny JSON; anything bigger is bogus/abusive
 
 # ── Note page (board page 6) ──────────────────────────────────────────────
 # Free text authored in note.html and rendered in the right-hand pane of the
@@ -33,7 +31,6 @@ NOTE_PATH = os.path.expanduser("~/.s3_note.json")
 NOTE_MAX_CHARS = 480
 # The editor page sits at the repo root (note.html), next to the control
 # panel's server.html.
-REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTE_HTML_PATH = os.path.join(REPO_DIR, "note.html")
 # note.html is served from this same origin, so its POST carries an Origin
 # header — the blanket "reject any Origin" rule /api/battery-save uses (see
@@ -373,14 +370,6 @@ def fmt_reset_time(iso_ts, with_date):
     return f"{dt.strftime('%b')} {dt.day}, {t}" if with_date else t
 
 
-def log_err(msg):
-    # stderr goes to /tmp/s3usage.err via launchd; without timestamps the
-    # log can't answer "when did this loop last run", which is the first
-    # question when the displayed percent goes stale.
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}",
-          file=sys.stderr, flush=True)
-
-
 def oauth_token():
     # Read the Claude Code OAuth token from the macOS Keychain at request
     # time; it is never written to disk or included in responses.
@@ -403,12 +392,10 @@ def fetch_limits():
     token = oauth_token()
     if not token:
         return None
-    req = urllib.request.Request(OAUTH_USAGE_URL, headers={
+    doc = fetch_json(OAUTH_USAGE_URL, 10, headers={
         "Authorization": f"Bearer {token}",
         "anthropic-beta": "oauth-2025-04-20",
     })
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        doc = json.loads(resp.read())
     if "five_hour" not in doc and "seven_day" not in doc:
         return None
     session = doc.get("five_hour") or {}
@@ -533,7 +520,6 @@ def limits_loop():
     activity_gated_loop(body)
 
 
-_SECRETS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "secrets.local.json")
 _aqicn_token_warned = False
 
 
@@ -542,14 +528,7 @@ def aqicn_token():
     # same lookup order pull_giphy_cats.py uses for its GIPHY_API_KEY, so a
     # missing token here is either unset (never fetched) or added there.
     global _aqicn_token_warned
-    env_token = os.environ.get("AQICN_TOKEN")
-    if env_token:
-        return env_token
-    try:
-        with open(_SECRETS_PATH) as f:
-            token = (json.load(f) or {}).get("AQICN_TOKEN")
-    except (OSError, ValueError):
-        token = None
+    token = load_secret("AQICN_TOKEN")
     if not token and not _aqicn_token_warned:
         _aqicn_token_warned = True
         log_err("aqi: no AQICN_TOKEN in env or secrets.local.json -- "
@@ -585,9 +564,7 @@ def _float_or_none(v):
 
 
 def fetch_aqi_air4thai():
-    req = urllib.request.Request(AIR4THAI_URL, headers={"User-Agent": "s3usage"})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        doc = json.loads(resp.read())
+    doc = fetch_json(AIR4THAI_URL, 8, headers=USER_AGENT)
     now = datetime.now(BANGKOK_TZ)
     station_aqis = []
     for st in doc.get("stations") or []:
@@ -612,9 +589,7 @@ def fetch_aqi_air4thai():
 
 
 def fetch_aqi_openmeteo():
-    req = urllib.request.Request(OPENMETEO_AQI_URL, headers={"User-Agent": "s3usage"})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        doc = json.loads(resp.read())
+    doc = fetch_json(OPENMETEO_AQI_URL, 8, headers=USER_AGENT)
     aqi = (doc.get("current") or {}).get("us_aqi_pm2_5")
     if not isinstance(aqi, (int, float)) or aqi < 0:
         return None
@@ -632,9 +607,7 @@ def fetch_aqi():
         except Exception as e:
             log_err(f"aqi: Air4Thai failed: {type(e).__name__}: {e}")
         return fetch_aqi_openmeteo()
-    req = urllib.request.Request(AQICN_URL.format(token=token), headers={"User-Agent": "s3usage"})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        doc = json.loads(resp.read())
+    doc = fetch_json(AQICN_URL.format(token=token), 8, headers=USER_AGENT)
     if doc.get("status") != "ok":
         return None
     aqi = (doc.get("data") or {}).get("aqi")
@@ -644,9 +617,7 @@ def fetch_aqi():
 
 
 def fetch_btc():
-    req = urllib.request.Request(BTC_URL, headers={"User-Agent": "s3usage"})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        doc = json.loads(resp.read())
+    doc = fetch_json(BTC_URL, 8, headers=USER_AGENT)
     price = float(doc.get("lastPrice") or 0)
     if price <= 0:
         return None
@@ -725,8 +696,7 @@ def weather_payload(temp_c, code, high=None, low=None, hourly=None, daily=None):
 
 
 def fetch_weather_openmeteo():
-    with urllib.request.urlopen(WEATHER_URL, timeout=10) as resp:
-        doc = json.loads(resp.read())
+    doc = fetch_json(WEATHER_URL, 10)
     cur = doc.get("current") or {}
     if cur.get("temperature_2m") is None:
         return None
@@ -1397,14 +1367,8 @@ _last_seen_mono = {}  # ip -> monotonic time of that client's previous request
 _min_gap_seen = {}    # ip -> smallest inter-request gap, i.e. inferred poll interval
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        pass
-
-    def _send(self, body, content_type, status=200):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+class Handler(JsonHandler):
+    def _cors_origin(self):
         # ACAO only for the dev pages: the file:// case (Origin: null) --
         # simulator-s3.html fetches this endpoint directly from disk -- and, for
         # /api/usage only, a page served from this Mac's loopback
@@ -1414,33 +1378,8 @@ class Handler(BaseHTTPRequestHandler):
         # through control_server's proxy instead).
         origin = self.headers.get("Origin")
         if origin == "null" or (self.path == "/api/usage" and origin and USAGE_CORS_ORIGIN_RE.fullmatch(origin)):
-            self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_json(self, doc, status=200):
-        self._send(json.dumps(doc).encode("utf-8"), "application/json", status)
-
-    def _is_local(self):
-        return self.client_address[0] in ("127.0.0.1", "::1")
-
-    def _read_json_body(self):
-        """Shared POST body reader. Returns (doc, None) or (None, True) after
-        having already sent the error response."""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = 0
-        if length > MAX_BODY_BYTES:
-            self._send_json({"ok": False, "detail": "body too large"}, status=413)
-            return None, True
-        raw = self.rfile.read(length) if length > 0 else b"{}"
-        try:
-            return json.loads(raw.decode("utf-8") or "{}"), None
-        except (ValueError, UnicodeDecodeError):
-            self._send_json({"ok": False, "detail": "invalid JSON"}, status=400)
-            return None, True
+            return origin
+        return None
 
     def do_OPTIONS(self):
         # Only the file:// (Origin: null) case ever preflights: note.html is
@@ -1650,11 +1589,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         set_battery_save_manual(doc["enabled"])
         self._send_json({"ok": True, "power": power_snapshot()})
-
-
-class Server(ThreadingHTTPServer):
-    allow_reuse_address = True  # rebind immediately if launchd restarts us
-    daemon_threads = True
 
 
 def start_http_server():

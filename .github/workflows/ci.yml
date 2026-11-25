@@ -92,7 +92,7 @@ jobs:
       - name: Python version
         run: python3 --version
       - name: Syntax (3.9)
-        run: python3 -m py_compile server/*.py tools/note.py
+        run: python3 -m py_compile server/*.py server/s3srv/*.py tools/note.py
       - name: Note wrap selftest
         run: python3 tools/note.py --selftest
       - name: Server unit tests
