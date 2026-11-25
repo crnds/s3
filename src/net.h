@@ -17,6 +17,8 @@ void loadWeatherCache();
 // fromNetwork=true only for a live /api/usage fetch — applies power.battery_save
 // into serverBatterySave. SD cache loads pass false so a stale Mac power flag
 // can't floor the poll across an overnight offline boot.
+// POSIX TZ from GMT_OFFSET_SEC (whole hours); called at the start of connectWifi().
+void applyTimezone();
 bool applyUsageJson(const String& payload, bool fromNetwork = false);
 // Set false by networkTask() (main.cpp) on WiFi loss, so ensureMdns()
 // re-initializes once WiFi returns.
