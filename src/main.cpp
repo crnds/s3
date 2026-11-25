@@ -59,6 +59,10 @@ float cpuPercentAvg = 0;
 bool touchWasDown = false;
 bool wifiOk = false;
 volatile bool connected = false;  // did the most recent fetch reach the server?
+volatile bool fixtureMode = false;  // serial 'F' loaded canned data: polling is frozen until 'f'
+static volatile long fixtureEpoch = 0;  // the wall clock fixtureMode holds still
+static long realEpochAtFixture = 0;     // the true time when the first 'F' arrived, to put back on 'f'
+static uint32_t realMsAtFixture = 0;
 
 // Guards every read/write of the shared UsageState between the render loop
 // (core 1) and the network task (core 0). See state.h for the locking contract.
@@ -190,7 +194,19 @@ void networkTask(void* param) {
       logDiag((String("low_heap free=") + freeInternal).c_str());
     }
 
-    if (now - lastUsagePollMs >= POLL_INTERVAL_MS) {
+    if (fixtureMode) {
+      // Canned data (serial 'F'): never poll, keep the data "just fetched" so
+      // countdowns hold still and nothing goes stale or offline, and hold the
+      // clock at the fixture's instant.
+      connected = true;
+      STATE.haveData = true;
+      lastFetchSuccessMs = now;
+      struct timeval frozen = { (time_t)fixtureEpoch, 0 };  // the simulator's clock is frozen too
+      settimeofday(&frozen, nullptr);
+      lockState();
+      STATE.lastFetchOkMs = now;
+      unlockState();
+    } else if (now - lastUsagePollMs >= POLL_INTERVAL_MS) {
       lastUsagePollMs = now;
       lastPollMs = now;  // drives the footer progress line on the render side
       // FAT bookkeeping for Device Stats, paced by wall time, not poll rate.
@@ -330,8 +346,74 @@ static void closeSheetNow() {
 
 static uint32_t hourlyTestStartMs = 0;  // serial 'h': play the hourly signal now
 
+// One line from the serial port (CR/LF stripped), or what arrived before the
+// timeout. Debug-only and blocking: used by the 'F' fixture command.
+static String serialReadLine(uint32_t timeoutMs) {
+  String s;
+  uint32_t t0 = millis();
+  while (millis() - t0 < timeoutMs) {
+    while (Serial.available()) {
+      char c = (char)Serial.read();
+      if (c == '\n') return s;
+      if (c != '\r') s += c;
+      t0 = millis();  // the sender is still talking
+    }
+    delay(1);
+  }
+  return s;
+}
+
 static void serialCommand(char c) {
   switch (c) {
+    case 'F': {
+      // "F<epoch> <light 0|1>\n", wait for "[fixture] send", then "<usage json on
+      // one line>\n": the canned data and
+      // frozen clock for tools/parity.py (roadmap O7). Applies the document as a
+      // cache load would, sets the wall clock, the theme (RAM only, never saved)
+      // and page 0, then freezes polling until 'f'. Same inputs as the
+      // simulator's ?fixture=<name>.
+      String head = serialReadLine(1000);
+      long epoch = head.toInt();
+      int sp = head.indexOf(' ');
+      bool light = sp >= 0 && head.substring(sp + 1).toInt() != 0;
+      // loop() can be mid-render (~100 ms) when 'F' arrives, and the USB receive
+      // buffer holds only 256 bytes: the sender waits for this before the JSON.
+      if (epoch > 0) Serial.println("[fixture] send");
+      String json = epoch > 0 ? serialReadLine(4000) : String();
+      if (epoch <= 0 || !applyUsageJson(json, false)) {
+        Serial.println("[fixture] FAILED");
+        break;
+      }
+      struct tm clockCheck;
+      if (!fixtureMode && haveLocalTime(&clockCheck)) {  // remember the true time (first load only)
+        realEpochAtFixture = (long)time(nullptr);
+        realMsAtFixture = millis();
+      }
+      struct timeval tv = { (time_t)epoch, 0 };
+      settimeofday(&tv, nullptr);
+      fixtureEpoch = epoch;
+      fixtureMode = true;
+      if (cfgLightMode != light) {
+        cfgLightMode = light;
+        applyThemeTokens();
+        navInvalidatePosters();
+      }
+      closeSheetNow();
+      navGoToPage(0, true);
+      Serial.println("[fixture] on");
+      break;
+    }
+    case 'f':
+      fixtureMode = false;
+      if (realEpochAtFixture > 0) {  // the true time, advanced by what passed meanwhile
+        struct timeval back = { (time_t)(realEpochAtFixture + (millis() - realMsAtFixture) / 1000), 0 };
+        settimeofday(&back, nullptr);
+        realEpochAtFixture = 0;
+      }
+      loadThemeEarly();  // the fixture's theme was RAM-only: back to the saved one
+      navInvalidatePosters();
+      Serial.println("[fixture] off (polling resumes, saved theme and true clock restored)");
+      break;
     case 'h':
       hourlyTestStartMs = millis() | 1;  // never 0, which means "not running"
       audioPlay(SND_HOURLY);

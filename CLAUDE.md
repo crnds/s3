@@ -81,6 +81,7 @@ $PIO run -t publish                      # build and offer it to the board over 
 $PIO device monitor                      # serial log (baud is irrelevant on native USB)
 $PIO test -e native                      # host-side unit tests (tests/native/): format, pace, motion math, timing
 python3 tools/size_check.py              # CI's size gate on the last build (--update after planned growth)
+~/.pio-venv/bin/python tools/parity.py   # board vs simulator goldens, both themes (needs the board on USB + pyserial)
 node tools/sim_check.mjs                 # CI's sim goldens (--update after a deliberate UI change)
 python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
                                          # drive the board over serial, save shots/*.ppm
@@ -107,7 +108,11 @@ Serial debug keys (main.cpp `serialCommand`): `n`/`p` next/prev page,
 `w`/`d`/`s` Weather/Device/Settings, `x` close sheets, `h` play the hourly
 signal now, `z` toggle screen
 sleep, `m` slow motion (every motion token x10, design.md 17), `g` dump the frame
-(`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`). The simulator
+(`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`), `F` load a fixture
+(`F<epoch> <light 0|1>\n`, wait for `[fixture] send`, then the usage JSON on one
+line: canned data, wall clock held still, theme in RAM only, page 0, polling
+off -- `tools/parity.py` drives it) and `f` leave it (polling, saved theme and
+true clock back). The simulator
 canvas takes the same keys (plus arrows/Esc) when focused, and
 `?slowmo=10` starts it in slow motion. A grab is the `frame` buffer, not the
 composite on the panel, so grab after transitions settle.
