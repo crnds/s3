@@ -82,7 +82,7 @@ COL_ACCENT = 209  # 0xFB08 rgb(255,97,66)
 COL_GOOD = 77     # 0x2668 rgb(33,206,66)
 COL_WARN = 196    # 0xF8C6 rgb(255,24,49)
 COL_BLUE = 69     # 0x3C1E rgb(58,130,247)
-COL_YELLOW = 226  # 0xFFE0 rgb(255,255,0)
+COL_YELLOW = 220  # 0xFE60 rgb(255,206,0), design.md note.number; nearest 256-colour is (255,215,0)
 
 # Rows the pane fits per size, and the column count. 24 divides evenly by all
 # three sizes, which is why the board's usable width is 24 glyphs at size 1.

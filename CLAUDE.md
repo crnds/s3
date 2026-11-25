@@ -74,8 +74,9 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
   (CI `simulator` job) and against `tools/note.py` by
   `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
-  `noteWordColor` returns a role instead of a colour. It checks logic, not
-  colours: `note.py`'s palette still has the old CYD yellow.
+  `noteWordColor` returns a role instead of a colour. It checks logic; a
+  test in `test_note_tokens.py` also pins `note.py`'s yellow to the nearest
+  256-colour match of the firmware's `note.number` colour.
 
 ## Commands
 

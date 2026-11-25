@@ -42,5 +42,25 @@ class NoteTokens(unittest.TestCase):
             self.assertTrue(c is None or c in WORD_ROLES, case["w"])
 
 
+def nearest_256(rgb):
+    """The xterm-256 index nearest to an RGB triple (colour cube + grays)."""
+    levels = (0, 95, 135, 175, 215, 255)
+    palette = {16 + 36 * r + 6 * g + b: (levels[r], levels[g], levels[b])
+               for r in range(6) for g in range(6) for b in range(6)}
+    palette.update({232 + i: (8 + 10 * i,) * 3 for i in range(24)})
+    return min(palette, key=lambda k: sum((a - b) ** 2 for a, b in zip(palette[k], rgb)))
+
+
+class NotePalette(unittest.TestCase):
+    def test_yellow_is_the_firmware_note_number_colour(self):
+        # tokens.h: TOK_COLOR_CONTENT_SUN, 0xFE60 = rgb(255,206,0). note.py once
+        # still had the CYD's 0xFFE0 pure yellow (226).
+        self.assertEqual(note.COL_YELLOW, nearest_256((255, 206, 0)))
+
+    def test_palette_is_distinct(self):
+        cols = [note.COL_TEXT2, note.COL_ACCENT, note.COL_GOOD, note.COL_WARN, note.COL_BLUE, note.COL_YELLOW]
+        self.assertEqual(len(set(cols)), len(cols))
+
+
 if __name__ == "__main__":
     unittest.main()
