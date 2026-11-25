@@ -6,7 +6,7 @@
 // code is a defect (design.md section 16).
 #pragma once
 #include <stdint.h>
-#include "fonts.h"
+#include "fonts/fonts_data.h"  // FontId only: keeps this header free of Arduino.h (native tests)
 
 // ── COLOUR: PRIMITIVES (design.md 4.1) ─────────────────────
 // Exact RGB565 grays (R = B, G = 2R) plus the hue set. Screens never use

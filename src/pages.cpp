@@ -471,22 +471,14 @@ bool pulseTick(uint32_t nowMs) {
 // Stale data (state.h). One missed poll is not news, so the bar is two
 // intervals, floored at a minute; offline mode (main.cpp's offlineAfterMs)
 // takes over at 3 min / 3 polls.
-static const uint32_t STALE_AFTER_MIN_MS = 60000;
 bool dataStale() {
-  if (!STATE.haveData) return false;
-  uint32_t okMs = lastFetchSuccessMs;
-  if (okMs == 0) return true;
-  uint32_t after = POLL_INTERVAL_MS * 2;
-  if (after < STALE_AFTER_MIN_MS) after = STALE_AFTER_MIN_MS;
-  return millis() - okMs > after;
+  return dataStaleAt(STATE.haveData, lastFetchSuccessMs, POLL_INTERVAL_MS, millis());
 }
 
 // Live countdown: tick the last server-provided remaining-seconds down by
 // wall time since lastFetchOkMs.
 static long liveResetsInSec(long baseSec) {
-  if (baseSec < 0) return -1;
-  long rem = baseSec - (long)((millis() - STATE.lastFetchOkMs) / 1000);
-  return rem < 0 ? 0 : rem;
+  return liveResetsFrom(baseSec, millis(), STATE.lastFetchOkMs);
 }
 
 // ── DATA ROWS (Usage page limits column, Device page) ─────
@@ -877,38 +869,13 @@ bool shineTick(uint32_t nowMs) {
 // ── SHARED LEFT COLUMN (status / mixed / note pages) ───────
 // SESSION_WINDOW_SEC / WEEK_WINDOW_SEC live in state.h (the sound alerts use them).
 
-// Pace = % of the window elapsed: 0% right after a reset, 100% right before
-// the next.
-static int elapsedPercentOfWindow(long remainingSec, long windowSec) {
-  if (remainingSec < 0) return -1;
-  long elapsed = windowSec - remainingSec;
-  if (elapsed < 0) elapsed = 0;
-  int pct = (int)(elapsed * 100 / windowSec);
-  return constrain(pct, 0, 100);
-}
+// Pace maths (elapsedPercentOfWindow, paceSecondsToLimit) lives in pace.cpp.
 
-// Projected time until 100% "if this pace continues" -- the average rate
-// since the window's own start (currentPct / elapsedSec). -1 when unknown or
-// the reset would land first ("the reset wins, say nothing").
-long paceSecondsToLimit(int currentPct, long elapsedSec, long remainingSec) {
-  if (currentPct <= 0 || elapsedSec <= 0 || remainingSec < 0) return -1;
-  float remainingPct = 100 - currentPct;
-  if (remainingPct <= 0) return -1;
-  float ratePerSec = (float)currentPct / (float)elapsedSec;
-  float secToExhaust = remainingPct / ratePerSec;
-  if (secToExhaust >= remainingSec) return -1;  // reset wins, say nothing
-  return (long)secToExhaust;
-}
-
-// The pace flag's projection text: "45m" / "3h", or "" (see above).
+// The pace flag's projection text: "45m" / "3h", or "" (see pace.h).
 static String formatPaceDur(int currentPct, long elapsedSec, long remainingSec) {
-  long secToExhaust = paceSecondsToLimit(currentPct, elapsedSec, remainingSec);
-  if (secToExhaust < 0) return "";
-  if (secToExhaust < 3600) {
-    int m = (int)(secToExhaust / 60.0f + 0.5f);
-    return String(m < 1 ? 1 : m) + "m";
-  }
-  return String((int)(secToExhaust / 3600.0f + 0.5f)) + "h";
+  char b[16];
+  formatPaceDurBuf(b, sizeof(b), currentPct, elapsedSec, remainingSec);
+  return String(b);
 }
 
 // Metric flag (design.md 11.3): "!" (headline, status.error) + the projection
@@ -1011,10 +978,8 @@ static void drawLimitsColumn(bool overview = false) {
   // usage -- a flag is earned only by running ahead of pace.
   int sessionPace = elapsedPercentOfWindow(sessionRem, SESSION_WINDOW_SEC);
   int weekPace = elapsedPercentOfWindow(weekRem, WEEK_WINDOW_SEC);
-  bool sessionAhead = STATE.sessionPercent >= 0 && sessionPace >= 0 &&
-                       STATE.sessionPercent > sessionPace + 2;  // 2pt deadband stops boundary flicker
-  bool weekAhead = STATE.weekPercent >= 0 && weekPace >= 0 &&
-                    STATE.weekPercent > weekPace + 2;
+  bool sessionAhead = paceAhead(STATE.sessionPercent, sessionPace);  // deadband stops boundary flicker
+  bool weekAhead = paceAhead(STATE.weekPercent, weekPace);
   long sessionElapsed = sessionRem >= 0 ? SESSION_WINDOW_SEC - sessionRem : -1;
   long weekElapsed = weekRem >= 0 ? WEEK_WINDOW_SEC - weekRem : -1;
 

@@ -692,6 +692,15 @@ and after in §11.
     pixel, and writes a diff PNG and a report.
 - **Why.** Every change gets checked the way `CLAUDE.md` requires, in one
   command instead of by hand. P2 needs it to prove the cache is pixel-identical.
+- **Shipped (board half, 2026-11-25).** Serial `F`/`f` (main.cpp) and
+  `tools/parity.py`. It loads `tests/fixtures/<name>.json` on the board, grabs
+  every page and sheet in both themes, and diffs each against the CI goldens
+  (which the sim already matches) with a 565-aware tolerance. Pages with live
+  cats/movies and the Device sheet (live hardware numbers) are report-only; the
+  status strip's live group is masked. `tests/parity_baseline.json` records the
+  residual (anti-aliased edges, the pace sweep): 0.01-0.5% of pixels per twin
+  screen. Run `~/.pio-venv/bin/python tools/parity.py`; light-mode and sim-only
+  differences show up there, not in CI.
 
 ### Next
 

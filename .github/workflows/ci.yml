@@ -1,10 +1,14 @@
-# CI (roadmap O8). Two jobs on every push and pull request:
+# CI (roadmap O8). Three jobs on every push and pull request:
 #   firmware   pio run + the size gate (tools/size_check.py: <= 75% of the app
 #              slot, no growth past the committed baseline unless it moved too)
+#              + `pio test -e native` (host-side unit tests, tests/native/)
 #   simulator  every page and sheet, both themes, from tests/fixtures/ against
-#              tests/golden/ (tools/sim_check.mjs)
-# The board-vs-sim compare stays local: it needs the board. When native unit
-# tests (O4) and the tokenizer corpus (O5) land, they get steps here.
+#              tests/golden/ (tools/sim_check.mjs), and the note tokenizer
+#              corpus (tools/note_corpus.mjs; note.py's half is in `server`)
+#   server     the Mac server's unit tests + contract snapshot, on Python 3.9
+#              (the language level launchd's /usr/bin/python3 runs it with)
+# The board-vs-sim compare (tools/parity.py) stays local: it needs the board.
+# The C++ tokenizer joins the corpus when it returns roles (refactor Phase 4c).
 name: CI
 
 on:
@@ -37,6 +41,8 @@ jobs:
         run: pio run
       - name: Size gate
         run: python3 tools/size_check.py
+      - name: Native unit tests (O4)
+        run: pio test -e native
 
   simulator:
     runs-on: ubuntu-24.04
@@ -52,6 +58,9 @@ jobs:
       - name: Simulator goldens
         if: ${{ !inputs.update_goldens }}
         run: node tools/sim_check.mjs
+      - name: Note tokenizer corpus (simulator, note.html)
+        if: ${{ !inputs.update_goldens }}
+        run: node tools/note_corpus.mjs
       - name: Regenerate goldens
         if: ${{ inputs.update_goldens }}
         run: node tools/sim_check.mjs --update
@@ -67,3 +76,24 @@ jobs:
         with:
           name: sim-diff
           path: tests/out/
+
+  server:
+    # launchd runs the Mac server with /usr/bin/python3 (3.9.6). A macOS runner
+    # is not available to this account (macos-14 is "not supported"), so test on
+    # Python 3.9 itself: a 3.10+ construct then fails here instead of on the Mac.
+    # The interpreter build differs (OpenSSL vs the system LibreSSL); the language
+    # level, which is what breaks, is the same.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Python version
+        run: python3 --version
+      - name: Syntax (3.9)
+        run: python3 -m py_compile server/*.py tools/note.py
+      - name: Note wrap selftest
+        run: python3 tools/note.py --selftest
+      - name: Server unit tests
+        run: python3 -m unittest discover -s tests/server -v

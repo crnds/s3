@@ -36,6 +36,9 @@
 #include "fonts.h"
 #include "tokens.h"
 #include "motion.h"
+#include "format_pure.h"
+#include "pace.h"
+#include "timing.h"
 
 // ── DISPLAY ────────────────────────────────────────────────
 // Every page draws into `frame`, a 480x320 16bpp LGFX_Sprite in PSRAM (via
@@ -308,6 +311,7 @@ extern bool touchWasDown;
 // 0), read by drawFooter()/loop()'s progress line (core 1) with no lock --
 // volatile for the same cross-core-visibility reason as STATE.haveData.
 extern bool wifiOk;
+extern volatile bool fixtureMode;  // serial 'F': canned data, polling frozen (tools/parity.py)
 extern volatile bool connected;
 
 // Guards every read/write of the shared UsageState between the render loop
@@ -579,9 +583,7 @@ void shuffleCentre(bool offline, int& cx, int& cy);
 // The two usage windows, and the pace projection: seconds until the limit at
 // the window's average rate so far, or -1 when unknown or the reset lands
 // first. Shared by the pace flag and networkTask's sound alerts.
-const long SESSION_WINDOW_SEC = 5L * 3600;       // 5h
-const long WEEK_WINDOW_SEC = 7L * 24 * 3600;     // 168h
-long paceSecondsToLimit(int currentPct, long elapsedSec, long remainingSec);
+// SESSION_WINDOW_SEC, WEEK_WINDOW_SEC and paceSecondsToLimit() live in pace.h.
 // Stale data (design.md 13.4): the dashboard is up, but the last good poll is
 // older than max(2 poll intervals, 1 min), or there has been none since boot
 // (the SD cache). The strip says how old; the limit numerals go secondary.
@@ -699,9 +701,6 @@ void navResetGesture();           // drop any gesture in progress (screen sleep)
 // 80MHz, WiFi modem sleep; the next press anywhere wakes (and is swallowed).
 void enterScreenSleep();
 void exitScreenSleep();
-// Debug time scale (serial 'm', simulator ?slowmo=10): multiplies every
-// motion token's time (design.md 17).
-extern float motionTimeScale;
 
 // ── AP SETUP (ap_setup.cpp) ────────────────────────────────
 void runApSetup();  // blocks until configured, then ESP.restart()s — never returns

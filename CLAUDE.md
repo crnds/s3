@@ -70,6 +70,12 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   three; `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
   cols×rows grid; every size holds at least the CYD pane's columns, so the
   CYD-geometry fit check in `note.html`/`note.py` stays a safe bound.
+- **Tokenizer corpus (`tests/note_tokens.json`).** Word and line cases, run
+  against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
+  (CI `simulator` job) and against `tools/note.py` by
+  `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
+  `noteWordColor` returns a role instead of a colour. It checks logic, not
+  colours: `note.py`'s palette still has the old CYD yellow.
 
 ## Commands
 
@@ -79,7 +85,9 @@ $PIO run                                 # build (first run downloads pioarduino
 $PIO run -t upload                       # flash over native USB (port auto-detected)
 $PIO run -t publish                      # build and offer it to the board over WiFi (OTA, below)
 $PIO device monitor                      # serial log (baud is irrelevant on native USB)
+$PIO test -e native                      # host-side unit tests (tests/native/): format, pace, motion math, timing
 python3 tools/size_check.py              # CI's size gate on the last build (--update after planned growth)
+~/.pio-venv/bin/python tools/parity.py   # board vs simulator goldens, both themes (needs the board on USB + pyserial)
 node tools/sim_check.mjs                 # CI's sim goldens (--update after a deliberate UI change)
 python3 tools/grab_screen.py "x 1 g:status n 1 g:usage w 1 g:weather x"
                                          # drive the board over serial, save shots/*.ppm
@@ -106,7 +114,11 @@ Serial debug keys (main.cpp `serialCommand`): `n`/`p` next/prev page,
 `w`/`d`/`s` Weather/Device/Settings, `x` close sheets, `h` play the hourly
 signal now, `z` toggle screen
 sleep, `m` slow motion (every motion token x10, design.md 17), `g` dump the frame
-(`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`). The simulator
+(`S3SHOT 480 320\n` + raw big-endian RGB565 + `\nS3END\n`), `F` load a fixture
+(`F<epoch> <light 0|1>\n`, wait for `[fixture] send`, then the usage JSON on one
+line: canned data, wall clock held still, theme in RAM only, page 0, polling
+off -- `tools/parity.py` drives it) and `f` leave it (polling, saved theme and
+true clock back). The simulator
 canvas takes the same keys (plus arrows/Esc) when focused, and
 `?slowmo=10` starts it in slow motion. A grab is the `frame` buffer, not the
 composite on the panel, so grab after transitions settle.
@@ -142,8 +154,9 @@ commit.** Playwright is pinned to 1.63.0 with no package.json: locally
 `npm install --no-save playwright@1.63.0 && npx playwright install chromium`
 (node_modules/ is gitignored), or point `NODE_PATH` at an install. Goldens
 made on the Mac pass on Linux within the tolerance; if they ever drift, run
-the workflow by hand with `update_goldens` and commit its artifact. Native
-tests (O4) and the tokenizer corpus (O5) get CI steps when they exist.
+the workflow by hand with `update_goldens` and commit its artifact. The same
+job runs `node tools/note_corpus.mjs`; the `firmware` job runs
+`pio test -e native`; the `server` job runs the Python tests (Python 3.9).
 
 A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
 Git remote is `origin` (github.com/crnds/s3). `docs/`, `shots/` and `config.h`
@@ -245,6 +258,17 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 - **Touch (`touch_axs.cpp`):** I2C 0x3B, 11-byte read command, 8-byte report,
   single point; 2 fingers = no touch (seller driver behaviour). Capacitive —
   **no calibration keys** exist (the CYD's `touch_*` NVS keys were dropped).
+- **Pure logic is separate from hardware (native tests).** `format_pure.cpp`
+  (number/time text), `pace.cpp` (pace %, run-out projection, flag deadband,
+  alert crossing), `motion_math.cpp` (springs, release velocity, rubber band)
+  and `timing.cpp` (stale/offline thresholds, live countdown) include no
+  Arduino or LovyanGFX header, so `pio test -e native` runs them in seconds
+  (`[env:native]`, `tests/native/test_*/`). `format.cpp`, `pages.cpp`,
+  `main.cpp` and `motion.cpp` call them through thin wrappers. Add a file to
+  `build_src_filter` in `[env:native]` only if its headers stay clear of
+  `state.h`. `fmtTokensBuf` copies the ESP32 core's `dtostrf` rather than
+  using `snprintf`: the two round near-ties differently, and the board's digits
+  must not change.
 - **Cats (`gif_player.cpp`):** the GIFs are **linked into the firmware**, not read
   from the SD card: `tools/embed_cats.py` (a `pre:` extra script) `.incbin`s
   `cats/*.gif` into `src/cats_embed.gen.cpp` (gitignored) and AnimatedGIF decodes
