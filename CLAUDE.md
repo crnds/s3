@@ -30,7 +30,7 @@ Mac-side internals are in **"Mac server"** below. The browser pages:
   served by `server/control_server.py` at `http://127.0.0.1:8788/`
   (`HTML_PATH`, repo-relative).
 - **`note.html`** — Note page editor, served by
-  `server/usage_server.py` at `http://127.0.0.1:8787/` (`NOTE_HTML_PATH`).
+  `server/usage_server.py` at `http://127.0.0.1:8787/` (`NOTE_HTML_PATH`, `server/s3srv/notes.py`).
 
 Both follow the `~/CLAUDE.md` static-web conventions and are **not** bound
 by the parity rule (except `note.html`'s tokenizer, below). Both are read
@@ -300,7 +300,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   (design.md 7.5) is a 3x3 grid of the cards in miniature; its weather cell
   opens the Weather sheet. Offline both show the full-screen cat.
 - **OTA (`ota.cpp`, roadmap O9).** `pio run -t publish` (`tools/ota_publish.py`)
-  copies the build to `~/.s3_firmware/s3.bin`; `server/usage_server.py` announces
+  copies the build to `~/.s3_firmware/s3.bin`; the usage server (`s3srv/firmware.py`) announces
   it in `/api/usage` as `firmware.s3.{sha256,size}` and serves it at
   `/firmware/s3.bin` (to this Mac and to boards that poll it). The sha256 is the
   image digest esptool appends -- what `esp_partition_get_sha256()` returns for
@@ -386,7 +386,31 @@ curl -s localhost:8787/api/usage | python3 -m json.tool
 launchctl kickstart -k gui/$UID/com.corner.s3usage   # restart after editing
 tail -f /tmp/s3usage.log                          # one line per board poll = heartbeat
 tools/note.py "buy milk"                          # set the Note page from a terminal
+/usr/bin/python3 -m unittest discover -s tests/server   # server tests (CI `server` job)
 ```
+
+**Code layout.** `usage_server.py` is only the launchd entry point
+(`build_report()` wiring, `main()`); the code is the `server/s3srv/` package
+beside it, which `control_server.py` also imports from. Both files are run
+by absolute path with no WorkingDirectory, so `sys.path[0]` is `server/`:
+import with absolute imports (`from s3srv import state`; a relative import
+breaks in a file run by path) and never name a module after a stdlib one.
+
+| Module | Owns |
+|---|---|
+| `s3srv/common.py` | `log_err`/`log_out`, `REPO_DIR`, the ports and `USAGE_LOCAL_URL`, `fetch_json()`, `load_secret()`, `JsonHandler` (CORS hook, body reader), `Server` |
+| `s3srv/state.py` | `STATE` + lock, `state_set()` (every loop's write), client registry (`note_client()` records and prunes), `activity_gated_loop` |
+| `s3srv/power.py` | `pmset` battery read, battery save, `battery_guard_loop(start_server)` |
+| `s3srv/usage_scan.py` | jsonl tail: `parse_line` → `ingest_lines` (dedupe) → `merge_buckets`/`commit_batch`; `compute_aggregates`, `scan_loop`, prices |
+| `s3srv/limits.py` | Keychain token, `fetch_limits` (HTTP) + `parse_limits` (pure), `limits_loop` |
+| `s3srv/market.py` | BTC, weather (`parse_openmeteo_weather`), AQI chain (`parse_air4thai`), `market_loop` |
+| `s3srv/notes.py` | `sanitize_note`, load/save/`set_note`, `NOTE_HTML_PATH`, `NOTE_ALLOWED_ORIGINS` |
+| `s3srv/firmware.py` | OTA offer, board reports, install requests (its dicts, under its own lock) |
+| `s3srv/report.py` | `build_report(offer)`: the `/api/usage` document, a pure read of `STATE` |
+| `s3srv/routes.py` | `Handler` route tables, poll heartbeat log, `start_http_server(report_fn)` |
+
+Tests (`tests/server/`, stdlib `unittest`) import the modules directly;
+`test_report_contract.py` pins the `/api/usage` key tree to `usage_keys.json`.
 
 Local state outside the repo: `~/.s3_note.json` (the note), `~/.s3_firmware/`
 (published OTA builds; outside the repo because an image carries the WiFi

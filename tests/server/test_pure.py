@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
-import helpers
+import helpers  # noqa: F401  (puts server/ on sys.path)
 from s3srv import power
 from s3srv import market
 from s3srv import notes
