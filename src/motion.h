@@ -43,11 +43,7 @@ float projectDistance(float v);
 float rubberband(float over, float dim);
 
 // ── BACKLIGHT ANIMATOR ───────────────────────────────────────
-// Fades the PWM level toward a target over a motion.backlight.* duration, and
-// can play a breath (dip to 40% and back, three times; currently unused, the
-// hourly signal is the panel inversion). Stepped from
-// loop() every pass, including while nothing else presents.
+// Fades the PWM level toward a target over a motion.backlight.* duration.
+// Stepped from loop() every pass, including while nothing else presents.
 void backlightFadeTo(uint8_t target, uint32_t fadeMs);
-void backlightBreath();
 void backlightTick(uint32_t now);
-uint8_t backlightLevel();

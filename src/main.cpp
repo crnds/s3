@@ -56,7 +56,7 @@ bool shiftDirty = false;
 // is the render loop's duty cycle -- work time per pass vs the pass period,
 // minus time spent idle waiting on the panel's TE edge -- smoothed with an EMA.
 float cpuPercentAvg = 0;
-bool touchWasDown = false;
+static bool touchWasDown = false;
 bool wifiOk = false;
 volatile bool connected = false;  // did the most recent fetch reach the server?
 volatile bool fixtureMode = false;  // serial 'F' loaded canned data: polling is frozen until 'f'
@@ -389,6 +389,13 @@ static void serialCommand(char c) {
         realEpochAtFixture = (long)time(nullptr);
         realMsAtFixture = millis();
       }
+      // The board's own timezone, set here rather than trusted: configTime()
+      // only runs if WiFi came up within 20 s of boot, and without it the fixture's
+      // 17:09 (+07:00) would show as 10:09.
+      char tz[16];
+      snprintf(tz, sizeof(tz), "<%+03ld>%+ld", GMT_OFFSET_SEC / 3600, -GMT_OFFSET_SEC / 3600);
+      setenv("TZ", tz, 1);
+      tzset();
       struct timeval tv = { (time_t)epoch, 0 };
       settimeofday(&tv, nullptr);
       fixtureEpoch = epoch;

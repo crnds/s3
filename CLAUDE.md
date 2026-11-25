@@ -74,8 +74,9 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
   (CI `simulator` job) and against `tools/note.py` by
   `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
-  `noteWordColor` returns a role instead of a colour. It checks logic, not
-  colours: `note.py`'s palette still has the old CYD yellow.
+  `noteWordColor` returns a role instead of a colour. It checks logic; a
+  test in `test_note_tokens.py` also pins `note.py`'s yellow to the nearest
+  256-colour match of the firmware's `note.number` colour.
 
 ## Commands
 
@@ -205,7 +206,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   `displaySetInvert()` writes INVON/INVOFF straight from `loop()` (no present,
   so sheets and static screens flash too) on the even seconds of hh:00:00..05;
   serial `h` plays it now. `motion.cpp`'s backlight animator fades sleep, wake,
-  Night Mode edges and brightness changes (its breath is currently unused).
+  Night Mode edges and brightness changes.
 - **Navigation (`nav.cpp`, twin: the simulator's NAV block).** The touch
   router, gesture recogniser and every transition, stepped once per `loop()`
   pass -- nothing blocks, so a touch during motion is always read. Commit on
@@ -250,8 +251,9 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 - **Two cores, two locks — unchanged from the CYD:**
   all blocking I/O on `networkTask` (core 0); `loop()` on core 1 only touches
   and renders; `stateMutex` held by `render()` while drawing; `sdMutex` →
-  `stateMutex` is the only allowed nesting; the GIF player uses
-  `tryLockSD(20)` and drops a frame rather than stall a recovery poll.
+  `stateMutex` is the only allowed nesting; the movie player uses
+  `tryLockSD(20)` and drops a frame rather than stall a recovery poll (the cats
+  are embedded and need no SD lock).
 - **No TLS on the board** — BTC/weather/AQI still arrive inside `/api/usage`.
   With 8MB PSRAM the old (CYD) heap reason is gone, but the Mac's
   battery-aware fetch cadence lives server-side, so it stays.
@@ -396,15 +398,15 @@ credentials). Optional tokens in `secrets.local.json` at the repo root
   hence `.replace("Z","+00:00")`). Test with `/usr/bin/python3`.
 - **Background loops** (each parks after ~180s with no client polls via
   `activity_gated_loop`; first iteration always runs):
-  1. `scan_loop` (~15s AC / ~30s battery) — tails `~/.claude/projects/*/*.jsonl`
+  1. `scan_loop` (~30s) — tails `~/.claude/projects/*/*.jsonl`
      by byte offset into 5-min buckets (8-day retention). Streamed assistant
      messages repeat with identical usage, so events are **deduped on
      `(message.id, requestId)`, keep-first** — otherwise totals ~double.
-  2. `limits_loop` (~120s AC / ~300s battery) — OAuth
+  2. `limits_loop` (~180s AC / ~300s battery) — OAuth
      `api.anthropic.com/api/oauth/usage` session/week percents + resets. Token
      read via `/usr/bin/security` (Keychain); never written to disk or
      returned. Last-good kept on failure; 429 backoff clamped 10–30 min.
-  3. `market_loop` — BTC (Binance, ~60s AC / ~180s battery), Bangkok weather
+  3. `market_loop` — BTC (Binance, ~120s AC / ~180s battery), Bangkok weather
      (Open-Meteo, 10 / 30 min), Bangkok AQI (15 / 30 min): aqicn.org station
      data when `AQICN_TOKEN` is set, else keyless Air4Thai (Thai PCD
      stations: per-station US AQI from PM2.5/PM10/O3, median within 15 km),

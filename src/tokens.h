@@ -168,8 +168,7 @@ const int TOK_LAYOUT_HALF_SPLIT_X = 240;                             // page-nav
 // System corner (design.md 7.3): glyph boxes + the sleep hit box.
 const int TOK_CORNER_SLOT_A_X = 448, TOK_CORNER_SLOT_B_X = 404, TOK_CORNER_SLOT_Y = 8, TOK_CORNER_SLOT_SIZE = 24;
 const int TOK_CORNER_HIT_X0 = 436, TOK_CORNER_HIT_Y1 = 44;           // sleep: x 436..479, y 0..43
-const int TOK_CORNER_INK_X1 = TOK_CORNER_SLOT_B_X - TOK_SPACE_SM;    // content ink stays left of x 396 ...
-const int TOK_CORNER_INK_Y1 = TOK_CORNER_SLOT_Y + TOK_CORNER_SLOT_SIZE + TOK_SPACE_SM;  // ... while above y 40
+const int TOK_CORNER_INK_X1 = TOK_CORNER_SLOT_B_X - TOK_SPACE_SM;    // content ink stays left of x 396
 // Close slot (top-left of every sheet / modal screen).
 const int TOK_CLOSE_SLOT_X = 8, TOK_CLOSE_SLOT_Y = 8;
 const int TOK_CLOSE_HIT_X1 = 52, TOK_CLOSE_HIT_Y1 = 52;              // x 0..51, y 0..51
@@ -187,7 +186,6 @@ const float TOK_STROKE_GLYPH_R = 1.0f;     // 2px, system glyphs at 16/20px
 const float TOK_STROKE_GLYPH_LG_R = 1.5f;  // 3px, system glyphs at 24px
 
 // ── TOUCH (design.md 9) ────────────────────────────────────
-const int TOK_TOUCH_MIN = 44;
 const int TOK_TOUCH_COMFORTABLE = 56;
 const int TOK_TOUCH_EDGE_MIN = 40;
 const int TOK_TOUCH_SLOP = 10;

@@ -93,7 +93,7 @@ const int PAGE_COUNT = 7;
 const int BOOT_PAGE_AUTO = -1;
 // Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
 // 3 Movies, 4 Status + cats, 5 Note, 6 Overview.
-const int GIF_PAGE = 2;    // 3rd page: random cat GIFs from /cats/ on SD
+const int GIF_PAGE = 2;    // 3rd page: random cat GIFs, embedded in the firmware (cats_embed.h)
 const int MOVIE_PAGE = 3;  // 4th page: random movies from /movies/ on SD (see movie_player.cpp)
 const int MIXED_PAGE = 4;  // 5th page: status + cats split
 // 6th page: the same left column as MIXED_PAGE, but the right half shows the
@@ -126,7 +126,7 @@ const int DST_OFFSET_SEC = 0;
 // same numbers. Colours, type, spacing and component sizes are tokens
 // (tokens.h) -- no COL_* literals any more.
 //   - 8px screen margin and card gutter; content x 8..471, y 8..291
-//   - left column x 8..179 (fixed reservation), right column x 188..471
+//   - left column x 8..135 (fixed 128px), right column x 144..471
 //   - status strip y 300..318, progress hairline y 319
 // Page navigation splits at the screen half, independent of the grid.
 const int SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
@@ -199,7 +199,7 @@ struct WeatherDay {
 // ── STATE ──────────────────────────────────────────────────
 // projectNames/sessionResets/weekResets/weekModelName/weekModelResets are
 // fixed char buffers rather than String: these fields get reassigned every
-// ~20s poll for weeks of uptime on a no-PSRAM board, and repeated String
+// ~20s poll for weeks of uptime on a small internal heap, and repeated String
 // reassignment (realloc when the new value's length differs from the old
 // capacity) is exactly the kind of long-run heap churn that eventually
 // fragments a small heap. Local, short-lived String concatenation elsewhere
@@ -277,7 +277,6 @@ enum SettingsScreen { SET_OFF, SET_LIST, SET_LEAF };
 extern SettingsScreen settingsScreen;
 extern int settingsScrollOffset;  // vertical scroll position (px) of the SET_LIST list (may overshoot while rubber-banding)
 extern int settingsLeafIndex;
-const uint32_t CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
 extern uint32_t confirmArmedMs;
 extern int confirmArmedRow;
 // Written by networkTask() (core 0), read by drawFooter()/loop()'s progress
@@ -295,18 +294,15 @@ extern uint32_t lastTouchMs;
 extern volatile bool screenSleeping;
 
 // ── PIXEL SHIFT (anti image-retention) ─────────────────────
-const int8_t SHIFT_ORBIT[8][2] = {
-  {0, 0}, {1, 0}, {2, 0}, {2, -1}, {2, -2}, {1, -2}, {0, -2}, {0, -1}
-};
+// The orbit itself (SHIFT_ORBIT) is pages.cpp's.
 extern uint32_t cfgShiftStepMs;  // dwell per step; flash "pixel_shift_min", 0 disables
 extern uint8_t shiftIdx;
 extern int shiftX, shiftY;
 extern uint32_t lastShiftMs;
 extern bool shiftDirty;
 
-// CPU load estimate + touch edge tracking.
+// CPU load estimate.
 extern float cpuPercentAvg;
-extern bool touchWasDown;
 // Did the most recent fetch reach the server? Written by networkTask() (core
 // 0), read by drawFooter()/loop()'s progress line (core 1) with no lock --
 // volatile for the same cross-core-visibility reason as STATE.haveData.
@@ -329,12 +325,13 @@ inline void unlockState() { if (stateMutex) xSemaphoreGive(stateMutex); }
 extern SemaphoreHandle_t sdMutex;
 inline void lockSD()   { if (sdMutex) xSemaphoreTake(sdMutex, portMAX_DELAY); }
 inline void unlockSD() { if (sdMutex) xSemaphoreGive(sdMutex); }
-// Bounded variant for the GIF player's per-frame decode, which is the ONLY
-// high-frequency SD consumer (core 1, ~12fps). With an unbounded wait there,
-// going offline actively sabotaged coming back: the cat screen is what plays
-// during an outage, so core 0's recovery path (diag appends, cache reads,
-// capacity refresh) queued behind a continuous stream of frame decodes.
-// A skipped cat frame is invisible; a stalled poll is not. Returns false if
+// Bounded variant for the movie player's per-frame read, which is the ONLY
+// high-frequency SD consumer (core 1, ~10fps; the cat GIFs are embedded in
+// flash and never touch the card). With an unbounded wait there, going
+// offline actively sabotaged coming back: the media pages play during an
+// outage, so core 0's recovery path (diag appends, cache reads, capacity
+// refresh) queued behind a continuous stream of frame reads.
+// A skipped movie frame is invisible; a stalled poll is not. Returns false if
 // the card was busy — callers must NOT unlock in that case.
 inline bool tryLockSD(uint32_t waitMs) {
   if (!sdMutex) return true;
@@ -364,7 +361,6 @@ extern int cfgServerPort;
 extern int cfgBrightness;
 extern bool cfgNightModeOn;
 extern bool nightDimActive;
-const uint8_t NIGHT_MODE_DIM_VALUE = 64;  // ~25%, matches the brightness preset
 // Battery Save: floor usage-poll interval only (no backlight change). User's
 // Poll Interval preference stays stored; applyEffectivePoll() applies the floor.
 // Mode is Settings OFF/ON/AUTO (persisted as flash key "battery_save"):
@@ -474,7 +470,6 @@ extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
 // without ever reading the clock (~0.2% of calls; blanked the clock/calendar cards).
 bool haveLocalTime(struct tm* ti);
 String fmtTokens(int64_t t);
-String fmtCost(float c);
 String fmtBtc(double p);
 String fmtChangePct(double pct);  // "+5%" / "-3%" (whole percent, sign always)
 String fmtCountdown(long sec);     // "4h 03m" / "42m"
@@ -521,7 +516,6 @@ extern bool mdnsStarted;
 void loadRuntimeConfig();
 const char* resetReasonStr();
 void logDiag(const char* event);
-bool drawBmpFromSD(const char* path, int dx, int dy);
 void showBootSplash();
 void saveWifiCredsToFlash(const String& ssid, const String& password);
 void saveIntConfigToFlash(const char* key, int32_t value);
@@ -557,12 +551,11 @@ void drawMediaPageStatic();
 // System corner glyphs, drawn LAST on every screen (design.md 11.21).
 // overMedia puts each occupied slot on a color.plate backing.
 void drawSystemCorner(bool overMedia);
-// Shared icon/component primitives settings.cpp and gif_player.cpp reuse.
+// Shared icon/component primitives (pages.cpp; settings.cpp and gif_player.cpp reuse these).
 void drawCloseGlyph(int cx, int cy, uint16_t c);
 void drawBackGlyph(int cx, int cy, uint16_t c);
 void drawChevron(int cx, int cy, uint16_t c);
 void drawShuffleButton(int cx, int cy, bool pressed);
-void drawIconButtonPressed(int cx, int cy);
 void drawModalHeader(bool back, const char* title, bool pressed);
 void drawCardSurface(int x, int y, int w, int h, uint16_t fill);
 // Anti-aliased fills (design.md 8.1): LovyanGFX's fillSmoothRoundRect /

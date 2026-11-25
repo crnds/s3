@@ -16,7 +16,6 @@ import hashlib
 import json
 import os
 import random
-import re
 import shutil
 import sys
 import tempfile
@@ -31,7 +30,7 @@ GIPHY_MAX_OFFSET = 4999  # GIPHY search caps offset+limit around 5000 results to
 
 def load_giphy_api_key():
     """GIPHY_API_KEY env var, then secrets.local.json (repo root, gitignored,
-    same convention as usage_server.py's WEATHER_API_KEY). No hardcoded
+    same convention as usage_server.py's AQICN_TOKEN). No hardcoded
     fallback -- a key must never be committed to source."""
     env_key = os.environ.get("GIPHY_API_KEY")
     if env_key:
@@ -49,52 +48,14 @@ def load_giphy_api_key():
 
 DEFAULT_API_KEY = load_giphy_api_key()
 
-# Attempt to import resizing helpers from prepare_cat_gifs.py
-try:
-    from prepare_cat_gifs import (
-        pick_resizer,
-        resize_gif,
-        next_index,
-        existing_hashes
-    )
-    HAS_RESIZER = True
-except ImportError:
-    HAS_RESIZER = False
-
-# Fallback implementations in case prepare_cat_gifs.py is moved/missing
-if not HAS_RESIZER:
-    def pick_resizer():
-        if shutil.which("gifsicle"):
-            return "gifsicle", "gifsicle"
-        for im in ("magick", "convert"):
-            if shutil.which(im):
-                return "imagemagick", im
-        return None, None
-
-    def next_index(outdir):
-        hi = 0
-        for name in os.listdir(outdir) if os.path.isdir(outdir) else []:
-            m = re.match(r"cat_(\d+)\.gif$", name)
-            if m:
-                hi = max(hi, int(m.group(1)))
-        return hi + 1
-
-    def existing_hashes(outdir):
-        seen = set()
-        if not os.path.isdir(outdir):
-            return seen
-        for name in os.listdir(outdir):
-            if name.endswith(".gif"):
-                try:
-                    with open(os.path.join(outdir, name), "rb") as f:
-                        seen.add(hashlib.md5(f.read()).hexdigest())
-                except OSError:
-                    pass
-        return seen
-
-    def resize_gif(*args, **kwargs):
-        print("    Warning: Resizing is unavailable. Please check prepare_cat_gifs.py.")
-        return False
+# Resizing helpers live next to this script; running it by path puts tools/ on
+# sys.path, so this import cannot silently degrade.
+from prepare_cat_gifs import (  # noqa: E402
+    pick_resizer,
+    resize_gif,
+    next_index,
+    existing_hashes,
+)
 
 
 def get_existing_raw_gifs(raw_dir):

@@ -75,8 +75,6 @@ USAGE_CORS_ORIGIN_RE = re.compile(r"http://(localhost|127\.0\.0\.1|\[::1\])(:[0-
 # ingest lag is invisible on screen, and this halves the scan wakeups + disk
 # glob/stat over ~200 jsonl files vs. the old 15s — the biggest wakeup source.
 SCAN_INTERVAL_SEC = 30
-# On battery (still serving): slow the jsonl tail further.
-SCAN_INTERVAL_BATTERY_SEC = 30
 RETENTION = timedelta(days=8)
 ACTIVE_WINDOW_SEC = 180
 # Assumed model context size for the "context window" percent — the jsonl
@@ -137,7 +135,7 @@ STATE = {
     # poll (do_GET) and every power-state change, both far more often than
     # each loop's actual fetch cadence, so it must NOT also interrupt a
     # loop's in-flight interval sleep (each body() computes and sleeps its
-    # own sleep_sec — e.g. limits_loop's 120s/300s — via plain time.sleep,
+    # own sleep_sec — e.g. limits_loop's 180s/300s — via plain time.sleep,
     # deliberately not activity_event.wait). Doing so would fire fetches on
     # every poll instead of on-interval, risking 429s on the OAuth endpoint.
     "activity_event": threading.Event(),
@@ -325,16 +323,31 @@ BATTERY_LOW_PCT = 50
 BATTERY_CHECK_INTERVAL_SEC = 120
 
 
+_battery_failure_logged = False
+
+
+def _battery_failed(why):
+    # None from battery_status() reads as "desktop Mac, treat as AC", which
+    # silently disables the low-battery guard. A desktop is normal (no battery
+    # line); pmset itself failing is not, so say so once.
+    global _battery_failure_logged
+    if not _battery_failure_logged:
+        _battery_failure_logged = True
+        log_err(f"battery_status: pmset failed ({why}); treating as AC power, "
+                "so the low-battery guard is off until it works")
+    return None
+
+
 def battery_status():
-    # Returns (percent, on_ac) or None (desktop Macs / parse failure / no
-    # battery report yet). Parsed from `pmset -g batt` text since the stdlib
-    # has no battery API; on_ac comes from the first line, percent from the
-    # "NN%" in the battery detail line below it.
+    # Returns (percent, on_ac) or None (desktop Macs / no battery report yet /
+    # pmset failing, which is logged once). Parsed from `pmset -g batt` text
+    # since the stdlib has no battery API; on_ac comes from the first line,
+    # percent from the "NN%" in the battery detail line below it.
     try:
         out = subprocess.run(["/usr/bin/pmset", "-g", "batt"],
                               capture_output=True, text=True, timeout=5)
         if out.returncode != 0:
-            return None
+            return _battery_failed(f"exit {out.returncode}")
         lines = out.stdout.splitlines()
         on_ac = "AC Power" in (lines[0] if lines else "")
         for line in lines[1:]:
@@ -348,25 +361,13 @@ def battery_status():
                 continue
             return int(line[start:idx]), on_ac
         return None
-    except Exception:
-        return None
-
-
-def local_tz_name():
-    try:
-        link = os.readlink("/etc/localtime")
-        return link.split("zoneinfo/")[-1]
-    except OSError:
-        return ""
-
-
-TZ_NAME = local_tz_name()
+    except Exception as e:
+        return _battery_failed(f"{type(e).__name__}: {e}")
 
 
 def fmt_reset_time(iso_ts, with_date):
     # Time only, no timezone suffix — the CYD screen is 320px wide and the
-    # reset line is rendered at a large, readable size. TZ_NAME is exposed
-    # separately in the JSON for anyone who wants it.
+    # reset line is rendered at a large, readable size.
     dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00")).astimezone()
     t = dt.strftime("%H:%M")
     return f"{dt.strftime('%b')} {dt.day}, {t}" if with_date else t
@@ -469,7 +470,6 @@ def fetch_limits():
                    "percent": round(pct)}
 
     return {
-        "tz": TZ_NAME,
         # Raw epoch of this fetch; the handler turns it into age_sec per
         # request so clients can see when the snapshot has gone stale.
         "fetched_at_epoch": time.time(),
@@ -716,8 +716,8 @@ def weather_payload(temp_c, code, high=None, low=None, hourly=None, daily=None):
         "tempC": temp_c,
         "code": code if code is not None else -1,
         "condition": wmo_condition(code if code is not None else -1),
-        "high": high if high is not None else None,
-        "low": low if low is not None else None,
+        "high": high,
+        "low": low,
         "hourly": hourly or [],
         "daily": daily or [],
     }
@@ -802,7 +802,7 @@ def market_intervals():
 
 
 def market_loop():
-    # BTC ~60s on AC / ~3 min on battery; weather 10 min / 30 min; AQI 15 min /
+    # BTC ~2 min on AC / ~3 min on battery; weather 10 min / 30 min; AQI 15 min /
     # 30 min (an hourly-updating station gains nothing from polling faster).
     # Each keeps its last good value on failure so a transient outage doesn't
     # blank tiles.
@@ -1050,7 +1050,7 @@ def maybe_log_stats():
 def compute_aggregates():
     # Rolls the bucketed state up into everything build_report() needs that
     # doesn't have to be fresh on every single request (today/week totals,
-    # top projects, 7-day trend). Called once per scan cycle (~15s) instead
+    # top projects, 7-day trend). Called once per scan cycle (~30s) instead
     # of once per HTTP request. last5h / models[] were dropped — no board,
     # simulator, or control-panel consumer.
     now = datetime.now(timezone.utc)
@@ -1100,12 +1100,6 @@ def compute_aggregates():
         STATE["aggregates"] = aggregates
 
 
-def scan_interval():
-    # On battery, scan half as often — jsonl tails are cheap, but glob +
-    # recompute every 15s is pure waste when the Mac is trying to idle.
-    return SCAN_INTERVAL_BATTERY_SEC if battery_save_active() else SCAN_INTERVAL_SEC
-
-
 def scan_loop():
     # Recompute the rollup only when scan_once() ingested new data, OR when the
     # local calendar day has rolled over (so today/trend advance at midnight even
@@ -1127,7 +1121,7 @@ def scan_loop():
         except Exception as e:
             # never let a transient error (e.g. during sleep/wake) kill the thread
             log_err(f"scan_loop: {type(e).__name__}: {e}")
-        time.sleep(scan_interval())
+        time.sleep(SCAN_INTERVAL_SEC)
 
     activity_gated_loop(body)
 
@@ -1218,7 +1212,6 @@ def build_report():
     if limits:
         limits = dict(limits)
         limits.pop("fetched_at_epoch", None)
-        limits.pop("tz", None)  # never read by board/sim/control panel
         for key in ("session", "week", "week_model"):
             win = limits.get(key) or {}
             if not isinstance(win, dict):
@@ -1413,7 +1406,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # ACAO only for the dev pages: the file:// case (Origin: null) --
-        # simulator.html fetches this endpoint directly from disk -- and, for
+        # simulator-s3.html fetches this endpoint directly from disk -- and, for
         # /api/usage only, a page served from this Mac's loopback
         # (USAGE_CORS_ORIGIN_RE). A blanket "*" would let any website's JS read
         # board usage data cross-origin over the LAN/loopback; nothing else

@@ -372,13 +372,12 @@ const TOK_LAYOUT_HALF_SPLIT_X = 240;
 const TOK_CORNER_SLOT_A_X = 448, TOK_CORNER_SLOT_B_X = 404, TOK_CORNER_SLOT_Y = 8, TOK_CORNER_SLOT_SIZE = 24;
 const TOK_CORNER_HIT_X0 = 436, TOK_CORNER_HIT_Y1 = 44;
 const TOK_CORNER_INK_X1 = TOK_CORNER_SLOT_B_X - TOK_SPACE_SM;
-const TOK_CORNER_INK_Y1 = TOK_CORNER_SLOT_Y + TOK_CORNER_SLOT_SIZE + TOK_SPACE_SM;
 const TOK_CLOSE_SLOT_X = 8, TOK_CLOSE_SLOT_Y = 8, TOK_CLOSE_HIT_X1 = 52, TOK_CLOSE_HIT_Y1 = 52;
 const TOK_HEADER_TITLE_X = 60, TOK_HEADER_TITLE_Y = 11;
 const TOK_RADIUS_SM = 4, TOK_RADIUS_MD = 8, TOK_RADIUS_LG = 12;  // lg: media (cat GIF / movie area; firmware-only)
 const TOK_STROKE_GLYPH_R = 1.0;
 
-const TOK_TOUCH_MIN = 44, TOK_TOUCH_COMFORTABLE = 56, TOK_TOUCH_EDGE_MIN = 40;
+const TOK_TOUCH_COMFORTABLE = 56, TOK_TOUCH_EDGE_MIN = 40;
 const TOK_TOUCH_SLOP = 10, TOK_TOUCH_REARM_MS = 120, TOK_TOUCH_ARM_WINDOW_MS = 4000, TOK_TOUCH_WAKE_GUARD_MS = 600;
 const TOK_TOUCH_VELOCITY_WINDOW_MS = 100, TOK_TOUCH_DECEL = 0.995;
 const TOK_TOUCH_FLICK_COMMIT = 150, TOK_TOUCH_FLICK_BOUNCE = 300, TOK_TOUCH_RUBBERBAND = 0.55;
@@ -460,9 +459,11 @@ const BATTERY_SAVE_POLL_SEC = 120;
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* best-effort */ } }
 
-// On-device figures with no browser equivalent: from the board's own boot
-// log (they only change on a reflash).
-const FLASH_USED_BYTES = 1562241, FLASH_TOTAL_BYTES = 8103168;
+// On-device figures with no browser equivalent (they only change on a
+// reflash). Flash mirrors format.cpp's flashPercent(): used = the image
+// (firmware.bin), total = used + getFreeSketchSpace() (the other 0x640000 OTA
+// slot of default_16MB.csv). RAM/PSRAM/SD are from an earlier board boot.
+const FLASH_USED_BYTES = 2981920, FLASH_TOTAL_BYTES = 9535520;
 const RAM_USED_BYTES = 158720, RAM_TOTAL_BYTES = 348330;
 const PSRAM_USED_BYTES = 1301504, PSRAM_TOTAL_BYTES = 8388608;
 const SD_USED_BYTES = 2483027968, SD_TOTAL_BYTES = 7948206080;
@@ -970,7 +971,6 @@ const SETTINGS = [
     kind: ROW_ACTION, cols: 1, count: 1, values: [0], valueLabels: ['Restart'],
     getCurrent: getCurrentNone, apply: applyRestart, doneToast: 'Restarting...' },
 ];
-const SETTINGS_COUNT = SETTINGS.length;
 const CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
 let toastText = '', toastUntilMs = 0;
 
@@ -981,7 +981,6 @@ function fmtTokens(t) {
   if (t >= 1e3) return (t / 1e3).toFixed(1) + 'K';
   return String(t);
 }
-function fmtCost(c) { return '$' + c.toFixed(2); }
 function fmtBtc(p) { return p < 0 ? '--' : Math.round(p).toLocaleString('en-US'); }
 function fmtChangePct(pct) { return (pct < 0 ? '-' : '+') + Math.trunc(Math.abs(pct) + 0.5) + '%'; }
 function fmtCountdown(sec) {
@@ -1223,14 +1222,6 @@ function liveResetsInSec(baseSec) {
 
 // ── DATA ROWS (Usage page limits column, Device page) ────────
 const ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD, ROW_STEP = ROW_H + TOK_SPACE_STACK;
-function drawDataRow(x, r, y, label, detail, percent, meterColor) {
-  drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
-  const pct = percent >= 0 ? percent + '%' : '--';
-  drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
-  const vx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
-  if (detail) drawTextR(TOK_TYPE_BODY, vx, y, detail, TOK_COLOR_TEXT_SECONDARY);
-  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, meterColor);
-}
 // A limits-column row in 112 px: label (body) left, percent (numeral.sm, on the
 // label's baseline) right, meter.md under it. No detail text -- the Status
 // page's 5H / Week cards carry the "Resets ..." lines. numeral.sm, not .md,
@@ -2468,7 +2459,7 @@ function projectDistance(v) { return (v / 1000) * TOK_TOUCH_DECEL / (1 - TOK_TOU
 function rubberband(over, dim) { return over * dim * TOK_TOUCH_RUBBERBAND / (dim + TOK_TOUCH_RUBBERBAND * Math.abs(over)); }
 
 // Backlight animator: the canvas brightness filter stands in for the PWM.
-const BL = { level: 0, from: 0, target: 0, start: 0, dur: 0, breathLeft: 0, breathStart: 0 };
+const BL = { level: 0, from: 0, target: 0, start: 0, dur: 0 };
 let panelInverted = false;  // INVON/INVOFF twin: same filter chain as the backlight
 function blApply() { canvas.style.filter = 'brightness(' + (BL.level / 255 * 100).toFixed(1) + '%)' + (panelInverted ? ' invert(1)' : ''); }
 function displaySetInvert(on) { if (on === panelInverted) return; panelInverted = on; blApply(); }
@@ -2476,7 +2467,6 @@ function backlightFadeTo(target, fadeMs) {
   BL.from = BL.level; BL.target = target; BL.start = performance.now(); BL.dur = fadeMs * motionTimeScale;
   if (BL.dur === 0) { BL.level = target; blApply(); }
 }
-function backlightBreath() { BL.breathLeft = TOK_MOTION_BACKLIGHT_BREATH_COUNT; BL.breathStart = performance.now(); }
 function backlightTick(now) {
   let base = BL.target;
   if (BL.dur > 0) {
@@ -2485,16 +2475,7 @@ function backlightTick(now) {
     else { const t = el / BL.dur; base = BL.from + (BL.target - BL.from) * t * t * (3 - 2 * t); }
   }
   let level = base;
-  if (BL.breathLeft > 0) {
-    const dur = TOK_MOTION_BACKLIGHT_BREATH_MS * motionTimeScale;
-    let el = now - BL.breathStart;
-    if (el >= dur) { BL.breathLeft--; BL.breathStart = now; el = 0; }
-    if (BL.breathLeft > 0) {
-      const dip = 0.5 - 0.5 * Math.cos(2 * Math.PI * el / dur);
-      level = base * (1 - dip * (1 - TOK_MOTION_BACKLIGHT_BREATH_PCT / 100));
-    }
-  }
-  if (BL.dur === 0 && BL.breathLeft === 0) level = BL.target;
+  if (BL.dur === 0) level = BL.target;
   if (Math.abs(level - BL.level) >= 0.5 || level !== BL.level) { BL.level = level; blApply(); }
 }
 

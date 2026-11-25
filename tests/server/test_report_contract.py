@@ -40,7 +40,6 @@ def full_state():
         "context": {"tokens": 50000, "ts": now},
         "last_ts": now,
         "limits": {
-            "tz": "Asia/Bangkok",
             "fetched_at_epoch": time.time(),
             "session": dict(win),
             "week": dict(win),
@@ -83,8 +82,7 @@ class ReportContract(unittest.TestCase):
 
     def test_internal_limit_fields_are_stripped(self):
         limits = u.build_report()["limits"]
-        for k in ("tz", "fetched_at_epoch"):
-            self.assertNotIn(k, limits)
+        self.assertNotIn("fetched_at_epoch", limits)
         self.assertNotIn("resets_at_epoch", limits["session"])
         self.assertIn("resets_in_sec", limits["session"])
         self.assertIn("resets_in_sec", limits["week"])
@@ -98,7 +96,7 @@ class ReportContract(unittest.TestCase):
     def test_state_limits_not_mutated_by_a_report(self):
         u.build_report()
         self.assertIn("resets_at_epoch", u.STATE["limits"]["session"])
-        self.assertIn("tz", u.STATE["limits"])
+        self.assertIn("fetched_at_epoch", u.STATE["limits"])
 
     def test_note_is_always_an_object(self):
         u.STATE["note"] = {"text": "", "size": 1}

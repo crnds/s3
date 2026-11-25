@@ -63,7 +63,7 @@ looks arbitrary, look for its reason here.
 | Memory | 8 MB PSRAM; one full frame is 300 KB | spec | An extra frame buffer (for a slide, a swipe preview, or a sheet) is affordable. The limit is bus time, not RAM. |
 | Flash | 6.25 MB app slot, build ~1.55 MB | `CLAUDE.md` | Flash size isn't a design constraint. The **parity cost** is: every asset exists twice, once in the firmware and once in the simulator. |
 | Panel type | IPS: wide viewing angles, a slightly lifted black, and some image retention | spec | Near-black (gray.0) and true black look the same. Pixel shift (≤2 px orbit, `SHIFT_ORBIT`) needs a margin at every edge. Avoid large, static, saturated blocks. |
-| Backlight | PWM, 0–255; Night Mode dims to 25% (`NIGHT_MODE_DIM_VALUE = 64`) | `state.h:365` | Dimming scales everything, so contrast ratios hold. Absolute luminance falls, though, and low-contrast non-text (tracks, separators) nearly disappears at 25%. So grouping must never depend on a separator alone. |
+| Backlight | PWM, 0–255; Night Mode dims to 25% (`NIGHT_MODE_DIM_VALUE = 64`) | `settings.cpp` | Dimming scales everything, so contrast ratios hold. Absolute luminance falls, though, and low-contrast non-text (tracks, separators) nearly disappears at 25%. So grouping must never depend on a separator alone. |
 | Audio | NS4168 I2S amp and speaker socket | spec | A feedback channel (§12.10), on at a quiet default level; Settings > Sound holds every control (§13.3). |
 
 ---
@@ -528,7 +528,7 @@ Emphasis within a size comes from weight (headline vs body), never from colour.
    | Weekday / month | 3-letter | `Thu`, `Sep` |
    | Date | `Www D Mmm` | `Thu 24 Sep` |
    | Large counts | `fmtTokens` | `1.2M` |
-   | Money | `fmtCost` | `$12.40` |
+   | Money | no screen shows money today; if one does, `$12.40` (two decimals) | `$12.40` |
    | BTC | `fmtBtc` | `84,194` |
    | BTC 24h change | `fmtChangePct` | `+5%` / `-3%` |
    | Temperature | integer + ring glyph (or `C` in caption on compact tiles) | `27` |
@@ -894,7 +894,7 @@ rotate copy on the way to the panel, so a darkened layer applied there costs not
 
 | Token | Value | Physical | Rule |
 |---|---|---|---|
-| `touch.min` | 44 × 44 px | 6.7 mm | Every target's **hit box** is at least this. |
+| `touch.min` | 44 × 44 px | 6.7 mm | Every target's **hit box** is at least this. (A design rule: the layout meets it, and `tokens.h` defines no constant for it.) |
 | `touch.comfortable` | 56 px tall | 8.6 mm | Default height for rows, buttons and option cells. |
 | `touch.edge.min` | 40 px | 6.1 mm | Allowed in the dimension *normal to the physical edge* for edge-anchored targets (the status strip, the corners). The bezel stops the finger, so the touch centroid lands inside the band. |
 | `touch.hit.outset.max` | 8 px | 1.2 mm | A hit box may extend up to 8 px beyond its **component box** into margins and gutters, **never** into another target. A control's component box is its visible shape. An icon button's component box is 44 × 44 centred on the glyph (§11.10), even though only the glyph is drawn. |
@@ -1659,7 +1659,7 @@ brightness jumps are easiest to avoid.
 | `motion.backlight.wake` | DISPON, then 200 ms up to the target | Waking. The frame is still intact, so the screen is effectively there at once, and the fade starts on the touch itself. |
 | `motion.backlight.night` | 2 s | Night Mode starting and ending (today these are instant cuts) |
 | `motion.backlight.adjust` | 150 ms | Picking a new brightness, so you see the change you chose |
-| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Currently unused; the hourly signal is the panel inversion (§12.7) |
+| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Not implemented: the animator was removed as unused; its tokens (`TOK_MOTION_BACKLIGHT_BREATH_*`) are kept (the hourly signal is the panel inversion, §12.7). Reintroduce from git history if the F1 attention pattern wants it |
 
 **Sound** (NS4168 amp, `src/audio.cpp`) follows Apple's three rules:
 - **Causality:** sound only for meaningful events. A *committed* tap (touch-up on a target, never the
