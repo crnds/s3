@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""Download and resize cat GIFs into a board-friendly library for the CYD.
+"""Download and fit cat GIFs into a library for the S3's 480x320 screen.
 
-Fetches random cat GIFs from Cataas (cataas.com, no API key), resizes/optimizes
-each to fit the 320x240 CYD screen, and writes them to an output folder you copy
-to the SD card as /cats/. Page 6 of the firmware plays them at random, endlessly.
+Fetches random cat GIFs from Cataas (cataas.com, no API key), fits each inside
+480x320 (aspect kept, never upscaled), thins and optimizes it, and writes it to
+an output folder. Pick a subset into cats/: they are embedded in the firmware
+(tools/embed_cats.py), and a whole library won't fit in flash.
 
 Prefers `gifsicle` (best GIF optimizer); falls back to ImageMagick (`magick`/
-`convert`) if gifsicle isn't installed. For smoothest playback on the ESP32:
+`convert`) if gifsicle isn't installed:
     brew install gifsicle
 
 Standalone, re-runnable (continues the cat_NNN numbering so you can grow the
 library over several runs):
-    python3 prepare_cat_gifs.py                 # 40 cats into ./cats
-    python3 prepare_cat_gifs.py --count 100     # a bigger library
-    python3 prepare_cat_gifs.py --colors 128    # smaller/lighter for the board
+    python3 tools/prepare_cat_gifs.py --outdir cats_raw              # 40 cats
+    python3 tools/prepare_cat_gifs.py --outdir cats_raw --count 100  # a bigger library
+    python3 tools/prepare_cat_gifs.py --width 320 --height 240       # the retired CYD's size
 
-Then: COPYFILE_DISABLE=1 cp -r cats /Volumes/<SD>/cats
+Then: cp cats_raw/cat_NNN.gif cats/ && python3 tools/fit_cats.py
+(fit_cats only upscales GIFs smaller than the screen, e.g. an older CYD library.)
 """
 
 import argparse
 import hashlib
-import http.client
 import os
 import re
 import shutil
@@ -28,15 +29,14 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
+
+import common
 
 CATAAS_GIF_URL = "https://cataas.com/cat/gif"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) prepare_cat_gifs/1.0"
-GIF_MAGIC = (b"GIF87a", b"GIF89a")
 
-# Warn above this per-file size: big GIFs strain the ESP32's LZW buffers and SD
-# read cadence, and make page 6 stutter. Not fatal — just flagged.
+# Warn above this per-file size: big GIFs cost flash (the embedded library is
+# capped at 4MB) and decode time. Not fatal -- just flagged.
 BIG_FILE_WARN = 600 * 1024
 
 
@@ -98,9 +98,7 @@ def resize_gif(resizer, binary, src, dst, w, h, colors, max_frames, lossy):
             cmd = [binary, "--unoptimize", src]
             if idx and len(idx) < n:
                 cmd += [f"#{i}" for i in idx]
-            cmd += ["--resize-fit", f"{w}x{h}", "--colors", str(colors)]
-            if lossy:
-                cmd += [f"--lossy={lossy}"]
+            cmd += ["--resize-fit", f"{w}x{h}"] + common.gifsicle_quality_args(colors, lossy)
             cmd += ["-O3", "-o", dst]
             subprocess.run(cmd, check=True, capture_output=True, timeout=180)
         else:
@@ -133,20 +131,7 @@ def resize_gif(resizer, binary, src, dst, w, h, colors, max_frames, lossy):
 # ── DOWNLOAD ───────────────────────────────────────────────
 def download_gif(timeout=20):
     """Fetch one random cat GIF. Returns bytes, or None on failure / non-GIF."""
-    req = urllib.request.Request(CATAAS_GIF_URL, headers={"User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-    except (urllib.error.URLError, TimeoutError, OSError, http.client.IncompleteRead) as e:
-        # IncompleteRead isn't an OSError/URLError subclass, so a truncated
-        # response (connection dropped mid-body) would otherwise crash the
-        # whole batch instead of just skipping this one download.
-        print(f"    download failed: {e}")
-        return None
-    if not data.startswith(GIF_MAGIC):
-        print("    skipped: response was not a GIF")
-        return None
-    return data
+    return common.download_gif(CATAAS_GIF_URL, timeout=timeout, user_agent=UA)
 
 
 def next_index(outdir):
@@ -174,16 +159,19 @@ def existing_hashes(outdir):
 
 # ── MAIN ───────────────────────────────────────────────────
 def main():
-    ap = argparse.ArgumentParser(description="Download + resize cat GIFs for the CYD.")
+    ap = argparse.ArgumentParser(description="Download + fit cat GIFs for the S3 (480x320).")
     ap.add_argument("--count", type=int, default=40, help="how many new GIFs to add (default 40)")
     ap.add_argument("--outdir", default="cats", help="output folder (default ./cats)")
-    ap.add_argument("--width", type=int, default=320, help="max width (default 320)")
-    ap.add_argument("--height", type=int, default=240, help="max height (default 240)")
-    ap.add_argument("--colors", type=int, default=128, help="palette size, 2-256 (default 128)")
-    ap.add_argument("--max-frames", type=int, default=40,
-                    help="thin GIFs to at most this many frames (default 40)")
-    ap.add_argument("--lossy", type=int, default=80,
-                    help="gifsicle lossy level, higher=smaller; 0 off (default 80)")
+    ap.add_argument("--width", type=int, default=common.BOX_W,
+                    help="max width (default %d)" % common.BOX_W)
+    ap.add_argument("--height", type=int, default=common.BOX_H,
+                    help="max height (default %d)" % common.BOX_H)
+    ap.add_argument("--colors", type=int, default=common.GIF_COLORS,
+                    help="palette size, 2-256 (default %d)" % common.GIF_COLORS)
+    ap.add_argument("--max-frames", type=int, default=common.GIF_MAX_FRAMES,
+                    help="thin GIFs to at most this many frames (default %d)" % common.GIF_MAX_FRAMES)
+    ap.add_argument("--lossy", type=int, default=common.GIF_LOSSY,
+                    help="gifsicle lossy level, higher=smaller; 0 off (default %d)" % common.GIF_LOSSY)
     ap.add_argument("--max-attempts", type=int, default=0,
                     help="cap total download attempts (default: count*4)")
     args = ap.parse_args()
@@ -247,8 +235,7 @@ def main():
     if added < args.count:
         print(f"(wanted {args.count}; stopped after {attempts} attempts — "
               "cataas may be rate-limiting. Re-run to add more.)")
-    print(f"Copy to the SD card:  COPYFILE_DISABLE=1 cp -r {args.outdir} /Volumes/<SD>/cats")
-    print("  (COPYFILE_DISABLE=1 stops macOS from writing '._*.gif' AppleDouble junk")
+    print(f"Pick a subset into cats/ (embedded in the firmware):  cp {args.outdir}/cat_NNN.gif cats/")
 
 
 if __name__ == "__main__":
