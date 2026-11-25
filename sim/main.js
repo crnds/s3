@@ -26,12 +26,7 @@ function tick() {
   const start = performance.now(), now = start;
   backlightTick(now);
   if (!STATE.screenSleeping) {
-    if (SHIFT_STEP_MS > 0 && now - STATE.lastShiftMs >= SHIFT_STEP_MS) {
-      STATE.lastShiftMs = now;
-      STATE.shiftIdx = (STATE.shiftIdx + 1) % 8;
-      [STATE.shiftX, STATE.shiftY] = SHIFT_ORBIT[STATE.shiftIdx];
-      STATE.shiftDirty = true;
-    }
+    pixelShiftTick(now);
     if (now - lastNightCheckMs >= 1000) {
       lastNightCheckMs = now;
       const bkk = bangkokParts();

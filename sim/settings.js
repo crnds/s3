@@ -2,7 +2,7 @@
 
 // ── SETTINGS TABLE (mirrors settings.cpp's SETTINGS[]) ────────
 // Night mode: fixed 23:00-07:00, dims to 25%. The backlight is the canvas
-// brightness filter (see BACKLIGHT below).
+// brightness filter (the backlight animator in sim/motion.js).
 function applyEffectiveBrightness(fadeMs = 0) {
   if (STATE.screenSleeping) { backlightFadeTo(0, 0); return; }
   backlightFadeTo(STATE.nightDimActive ? NIGHT_MODE_DIM_VALUE : STATE.cfgBrightness, fadeMs);
@@ -13,7 +13,10 @@ function batterySaveActive() {
   if (STATE.cfgBatterySaveMode === BATTERY_SAVE_AUTO) return !!STATE.serverBatterySave;
   return false;
 }
-function effectivePollMs() {
+// settings.cpp's applyEffectivePoll(): the Poll interval preference with the
+// Battery Save / screen-sleep floor. The firmware stores it in
+// POLL_INTERVAL_MS; the sim returns it to each caller instead.
+function applyEffectivePoll() {
   let sec = Number(document.getElementById('poll-interval').value) / 1000;
   if (!Number.isFinite(sec) || sec <= 0) sec = POLL_DEFAULT_MS / 1000;
   if ((batterySaveActive() || STATE.screenSleeping) && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;

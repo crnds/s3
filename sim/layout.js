@@ -1,9 +1,9 @@
 // sim/layout.js -- screen constants and shared boxes (src/state.h CONSTANTS + LAYOUT).
 
 // ── CONSTANTS (mirroring src/state.h / tokens.h / main.cpp) ──
-// PARITY: every number in this file that places pixels is a copy of the
-// firmware's. Change the firmware, change it here (CLAUDE.md). Design values
-// are design.md's tokens -- the TOKENS block mirrors src/tokens.h line for line.
+// PARITY: every number in sim/*.js that places pixels is a copy of the
+// firmware's. Change the firmware, change it here too (CLAUDE.md). Design values
+// are design.md's tokens -- sim/tokens.js mirrors src/tokens.h line for line.
 const SCREEN_W = 480, SCREEN_H = 320;
 const POLL_DEFAULT_MS = 20000;
 const PAGE_COUNT = 7;

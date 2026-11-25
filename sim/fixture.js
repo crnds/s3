@@ -23,7 +23,7 @@ async function startFixture(name) {
   const frozen = FIXTURE_PERF_MS;
   Object.defineProperty(performance, 'now', { value: () => frozen });
   Object.assign(STATE, fx.settings || {});
-  applyData(fx.usage);
+  applyUsageDoc(fx.usage);
   Object.assign(STATE, { haveData: true, wifiOk: true, connected: true, lastFetchSuccessMs: frozen, lastPollMs: frozen });
   setConn(true, 'fixture ' + name);
   window.simFixture = {

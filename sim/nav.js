@@ -33,13 +33,13 @@ function sheetScrimLevel(vis) {
 function presentComposite() {
   const off = Math.round(NAV.spring.x);
   switch (NAV.tKind) {
-    case 'page': presentSlide(prevFrame, frameCanvas, off, NAV.tForward, NAV.tPinStrip ? TOK_LAYOUT_STRIP_Y0 : SCREEN_H); break;
-    case 'push': presentSlide(prevFrame, frameCanvas, off, NAV.tForward); break;
+    case 'page': displayPresentSlide(prevFrame, frameCanvas, off, NAV.tForward, NAV.tPinStrip ? TOK_LAYOUT_STRIP_Y0 : SCREEN_H); break;
+    case 'push': displayPresentSlide(prevFrame, frameCanvas, off, NAV.tForward); break;
     case 'sheet':
-      if (!NAV.sheetClosing) presentSheet(behindFrame, frameCanvas, off, sheetScrimLevel(off));
-      else presentSheet(frameCanvas, prevFrame, off, sheetScrimLevel(off));
+      if (!NAV.sheetClosing) displayPresentSheet(behindFrame, frameCanvas, off, sheetScrimLevel(off));
+      else displayPresentSheet(frameCanvas, prevFrame, off, sheetScrimLevel(off));
       break;
-    case 'fade': presentFade(NAV.fadeFrom, frameCanvas, NAV.fadeStep); break;
+    case 'fade': displayPresentFade(NAV.fadeFrom, frameCanvas, NAV.fadeStep); break;
     default: return;
   }
   STATE.shiftDirty = false;

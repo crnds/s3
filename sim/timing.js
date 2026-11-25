@@ -6,7 +6,7 @@ const STALE_AFTER_MIN_MS = 60000;
 function dataStale() {
   if (!STATE.haveData) return false;
   if (STATE.lastFetchSuccessMs === 0) return true;
-  return performance.now() - STATE.lastFetchSuccessMs > Math.max(effectivePollMs() * 2, STALE_AFTER_MIN_MS);
+  return performance.now() - STATE.lastFetchSuccessMs > Math.max(applyEffectivePoll() * 2, STALE_AFTER_MIN_MS);
 }
 
 function liveResetsInSec(baseSec) {
@@ -40,4 +40,4 @@ function bangkokParts() {
 
 // Offline after max(OFFLINE_AFTER_MS, 3 polls) of wall time without a
 // successful poll -- main.cpp's offlineAfterMs(), not a cycle count.
-function offlineAfterMs() { return Math.max(OFFLINE_AFTER_MS, effectivePollMs() * 3); }
+function offlineAfterMs() { return Math.max(OFFLINE_AFTER_MS, applyEffectivePoll() * 3); }

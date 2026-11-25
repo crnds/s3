@@ -39,14 +39,14 @@ function drawWifiGlyph() {
   }
 }
 function progressLineW() {
-  const pollMs = effectivePollMs();
+  const pollMs = applyEffectivePoll();
   const elapsed = Math.min(performance.now() - STATE.lastPollMs, pollMs);
   return Math.floor(elapsed / pollMs * SCREEN_W);
 }
 // How long one physical pixel of fill takes to appear, floored at
 // TOK_MOTION_AMBIENT_TICK_MS (pages.cpp twin).
 function progressStepMs() {
-  const px = Math.floor(effectivePollMs() / SCREEN_W);
+  const px = Math.floor(applyEffectivePoll() / SCREEN_W);
   return Math.max(px, TOK_MOTION_AMBIENT_TICK_MS);
 }
 let progressDrawnW = 0, progressLastMs = 0;

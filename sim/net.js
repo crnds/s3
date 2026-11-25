@@ -6,14 +6,14 @@ function loadCachedUsage() {
   try {
     const raw = lsGet(LAST_USAGE_KEY);
     if (!raw) return false;
-    applyData(JSON.parse(raw), false);
+    applyUsageDoc(JSON.parse(raw), false);
     return true;
   } catch { return false; }
 }
 
 // Mirrors net.cpp's applyUsageJson: keep last-known limits/btc/weather/aqi on
 // an absent field; the note always overwrites (it is server-local state).
-function applyData(doc, fromNetwork = true) {
+function applyUsageDoc(doc, fromNetwork = true) {
   if (fromNetwork) STATE.firmwareOffer = doc.firmware?.s3 ?? null;  // ota.cpp: live polls only
   STATE.projects = (doc.projects || []).slice(0, 5);
   STATE.trend = Array.from({ length: 7 }, (_, i) => doc.trend?.[i] ?? 0);
@@ -37,7 +37,7 @@ function applyData(doc, fromNetwork = true) {
     STATE.btcPrice = doc.btc.price;
     if (typeof doc.btc.changePct === 'number') STATE.btcChangePct = doc.btc.changePct;
   }
-  if (doc.weather) applyWeatherData(doc.weather);
+  if (doc.weather) applyWeatherDoc(doc.weather);
   if (doc.aqi && doc.aqi.aqi >= 0) STATE.aqi = doc.aqi.aqi;
   if (doc.note) {
     STATE.note = doc.note.text || '';
@@ -55,7 +55,7 @@ function applyData(doc, fromNetwork = true) {
   document.getElementById('raw-json').textContent = JSON.stringify(doc, null, 2);
 }
 
-function applyWeatherData(w) {
+function applyWeatherDoc(w) {
   if (!w) return;
   if (w.tempC != null) STATE.weatherTempC = w.tempC;
   if (w.code != null) STATE.weatherCode = w.code;
@@ -77,7 +77,7 @@ function applyWeatherData(w) {
 function loadWeatherCache() {
   try {
     const raw = lsGet(LAST_WEATHER_KEY);
-    if (raw) applyWeatherData(JSON.parse(raw));
+    if (raw) applyWeatherDoc(JSON.parse(raw));
   } catch { /* ignore corrupt cache */ }
 }
 
@@ -106,7 +106,7 @@ async function fetchUsage() {
   // Mock data stands in for the server; it is never written to the
   // last-usage cache, which (like the board's SD copy) holds real polls only.
   const useMock = (reason) => {
-    applyData(mockDoc());
+    applyUsageDoc(mockDoc());
     ok(reason);
     if (reason !== lastMockReason) log('using mock data: ' + reason, 'ok');
     lastMockReason = reason;
@@ -129,7 +129,7 @@ async function fetchUsage() {
       const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const doc = await res.json();
-      applyData(doc);
+      applyUsageDoc(doc);
       saveLastUsageCache(doc);
       lastMockReason = '';
       ok('ok, ' + new Date().toLocaleTimeString());
@@ -154,5 +154,5 @@ async function fetchUsage() {
 
 function restartPollTimer() {
   clearInterval(STATE.pollTimer);
-  STATE.pollTimer = setInterval(fetchUsage, effectivePollMs());
+  STATE.pollTimer = setInterval(fetchUsage, applyEffectivePoll());
 }
