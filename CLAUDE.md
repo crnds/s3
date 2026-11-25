@@ -157,7 +157,9 @@ commit.** Playwright is pinned to 1.63.0 with no package.json: locally
 made on the Mac pass on Linux within the tolerance; if they ever drift, run
 the workflow by hand with `update_goldens` and commit its artifact. The same
 job runs `node tools/note_corpus.mjs`; the `firmware` job runs
-`pio test -e native`; the `server` job runs the Python tests (Python 3.9).
+`pio test -e native`; the `server` job runs the Python tests (Python 3.9):
+`tests/server/` and `tests/tools/` (`common.py`, `pull_giphy_cats.py`'s
+filter/fetch/write, offline), after compiling `server/*.py` and `tools/*.py`.
 
 A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
 Git remote is `origin` (github.com/crnds/s3). `docs/`, `shots/` and `config.h`
@@ -391,7 +393,8 @@ tools/note.py "buy milk"                          # set the Note page from a ter
 Local state outside the repo: `~/.s3_note.json` (the note), `~/.s3_firmware/`
 (published OTA builds; outside the repo because an image carries the WiFi
 credentials). Optional tokens in `secrets.local.json` at the repo root
-(gitignored): `AQICN_TOKEN`, `GIPHY_API_KEY`; env vars of the same name win.
+(gitignored): `AQICN_TOKEN`, `GIPHY_API_KEY`; env vars of the same name win
+(tools read them with `tools/common.py`'s `load_secret`).
 
 - **Stdlib only**, run by launchd's **`/usr/bin/python3` (3.9.6)** — keep it
   3.9-compatible (e.g. `datetime.fromisoformat` can't parse a trailing `Z`,
@@ -483,10 +486,20 @@ build time -- add or remove a GIF, then `pio run -t upload`. Flash is 16MB with 
 not go in -- pick a subset.
 
 ```sh
-cp cats_raw/cat_NNN.gif cats/                  # pick from a tools/prepare_cat_gifs.py library
-python3 tools/fit_cats.py                      # enlarge sources smaller than 480x320
+python3 tools/prepare_cat_gifs.py --outdir cats_raw   # Cataas library, fitted to 480x320
+python3 tools/pull_giphy_cats.py --skip-resize        # or a raw GIPHY library (needs GIPHY_API_KEY)
+cp cats_raw/cat_NNN.gif cats/                  # pick a subset
+python3 tools/fit_cats.py                      # enlarge already-prepared sources smaller than 480x320
 python3 tools/embed_cats.py                    # (optional) preview what gets embedded
 ```
-`fit_cats.py` enlarges each until it touches 480x320 (Catmull-Rom, same
-palette/lossy settings; needs `gifsicle`). Hidden files (macOS `._*.gif`) are
-skipped.
+`prepare_cat_gifs.py` (and `pull_giphy_cats.py`'s resize step, which reuses
+it) fits new GIFs inside 480x320, thins them to 40 frames and optimizes with
+`gifsicle` (ImageMagick fallback). `fit_cats.py` is for sources that are
+already prepared but small (an old 320x240 CYD library): it enlarges each
+until it touches 480x320 (Catmull-Rom; needs `gifsicle` and Pillow).
+`pull_cute_cats.py` builds contact sheets of GIPHY candidates to pick from by
+eye. The box size, GIF magic, download, secret lookup and the shared
+palette/lossy settings (128 colours, lossy 80) live in `tools/common.py`;
+tools import it as plain `import common` (run by path, `tools/` is
+`sys.path[0]`), so no tool may take a stdlib module's name. `fit_cats.py`
+skips hidden files (macOS `._*.gif`).
