@@ -79,8 +79,15 @@ let TOK_CARD_OUTLINE = false;
 const TOK_COLOR_CARD_OUTLINE = TOK_GRAY_4;
 const TOK_NOTE_CODE = TOK_COLOR_STATUS_INFO;
 const TOK_NOTE_KEYWORD_BAD = TOK_COLOR_STATUS_ERROR;
-// note.keyword.good / note.number / note.text are runtime roles: the firmware aliases them
-// (tokens.h macros); here the three draw sites read the semantic token directly.
+// The rest are runtime roles, #define aliases in tokens.h. A getter on the
+// global object is the macro's twin: it reads the theme token at draw time.
+const tokAlias = (name, get) => Object.defineProperty(globalThis, name, { get });
+tokAlias('TOK_NOTE_KEYWORD_GOOD', () => TOK_COLOR_STATUS_SUCCESS);
+tokAlias('TOK_NOTE_NUMBER', () => TOK_COLOR_CONTENT_SUN);
+tokAlias('TOK_NOTE_HEADING', () => TOK_COLOR_ACCENT);
+tokAlias('TOK_NOTE_MARKER', () => TOK_COLOR_ACCENT);
+tokAlias('TOK_NOTE_TEXT', () => TOK_COLOR_TEXT_PRIMARY);
+// note.quote is text.secondary, a runtime token -- use TOK_COLOR_TEXT_SECONDARY.
 
 const TOK_TYPE_DISPLAY = 'XL', TOK_TYPE_TITLE = 'LG', TOK_TYPE_HEADLINE = 'MDB', TOK_TYPE_BODY = 'MD';
 const TOK_TYPE_LABEL = 'SMB', TOK_TYPE_CAPTION = 'SM';

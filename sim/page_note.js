@@ -36,13 +36,13 @@ function noteWordColor(s, a, b) {
   if (b === a) return null;
   const w = s.slice(a, b);
   if (w === 'TODO' || w === 'FIXME' || w === 'BUG') return TOK_NOTE_KEYWORD_BAD;
-  if (w === 'DONE' || w === 'OK') return TOK_COLOR_STATUS_SUCCESS;  // note.keyword.good
+  if (w === 'DONE' || w === 'OK') return TOK_NOTE_KEYWORD_GOOD;
   let hasDigit = false;
   for (let i = a; i < b; i++) {
     if (!noteIsNumChar(s[i])) return null;
     if (noteIsDigit(s[i])) hasDigit = true;
   }
-  return hasDigit ? TOK_COLOR_CONTENT_SUN : null  /* note.number */;
+  return hasDigit ? TOK_NOTE_NUMBER : null;
 }
 
 // Word-wrapped, syntax-coloured STATE.note: glyph columns from tx, rows from
@@ -62,7 +62,7 @@ function drawNoteText(tx, ty, widthPx, tyMax, font) {
     while (p < lineEnd && s[p] === ' ') p++;
     let lineColor = null, markerIdx = -1;
     if (p < lineEnd) {
-      if (s[p] === '#') lineColor = TOK_COLOR_ACCENT;  // note.heading
+      if (s[p] === '#') lineColor = TOK_NOTE_HEADING;
       else if (s[p] === '>') lineColor = TOK_COLOR_TEXT_SECONDARY;  // note.quote
       else if ((s[p] === '-' || s[p] === '*' || s[p] === '+') && (p + 1 === lineEnd || s[p + 1] === ' ')) markerIdx = p;
     }
@@ -91,8 +91,8 @@ function drawNoteText(tx, ty, widthPx, tyMax, font) {
         else if (inCode) c = TOK_NOTE_CODE;
         else if (wordColor) c = wordColor;
         else if (lineColor) c = lineColor;
-        else if (i === markerIdx) c = TOK_COLOR_ACCENT;  // note.marker
-        else c = TOK_COLOR_TEXT_PRIMARY;  // note.text
+        else if (i === markerIdx) c = TOK_NOTE_MARKER;
+        else c = TOK_NOTE_TEXT;
         drawChar(font, tx + col * glyphW, y, s[i], c);
         col++; i++;
       }
