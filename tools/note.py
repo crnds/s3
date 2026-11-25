@@ -32,16 +32,17 @@ import urllib.request
 # ── ENDPOINT ──────────────────────────────────────────────
 # Localhost-only by server policy (writes never come from the LAN). urllib
 # sends no Origin header, which the server's NOTE_ALLOWED_ORIGINS allowlist
-# permits -- that is the curl/CLI path.
-HOST = "127.0.0.1:8787"
-NOTE_URL = "http://%s/api/note" % HOST
+# permits -- that is the curl/CLI path. The one place the address lives: tools
+# don't import server/, so this must follow the usage server's PORT (8787).
+SERVER_URL = "http://127.0.0.1:8787"
+NOTE_URL = SERVER_URL + "/api/note"
 TIMEOUT_SEC = 3
 
 SERVER_DOWN_HELP = (
     "Error: cannot reach the usage server at %s\n"
     "       it may be stopped, or paused on battery (the battery guard closes\n"
     "       the socket below 50%% so macOS can sleep)\n"
-    "       try: launchctl kickstart -k gui/$UID/com.corner.s3usage" % HOST
+    "       try: launchctl kickstart -k gui/$UID/com.corner.s3usage" % SERVER_URL
 )
 
 # ── NOTE TOKENIZER + WRAP ─────────────────────────────────
