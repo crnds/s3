@@ -4,8 +4,8 @@
 #              + `pio test -e native` (host-side unit tests, tests/native/)
 #   simulator  every page and sheet, both themes, from tests/fixtures/ against
 #              tests/golden/ (tools/sim_check.mjs)
-#   server     the Mac server's unit tests + contract snapshot, on the Python
-#              launchd runs it with (/usr/bin/python3, 3.9.x)
+#   server     the Mac server's unit tests + contract snapshot, on Python 3.9
+#              (the language level launchd's /usr/bin/python3 runs it with)
 # The board-vs-sim compare stays local: it needs the board. The tokenizer
 # corpus (O5) gets a step here when it lands.
 name: CI
@@ -74,34 +74,22 @@ jobs:
           path: tests/out/
 
   server:
-    # launchd runs the Mac server with /usr/bin/python3 (3.9.6), so test on a
-    # macOS runner with that interpreter: a 3.10+ construct then fails here
-    # instead of on the Mac. If the image's system Python ever stops being 3.9,
-    # fall back to setup-python 3.9 (same language level, different build).
-    runs-on: macos-14
+    # launchd runs the Mac server with /usr/bin/python3 (3.9.6). A macOS runner
+    # is not available to this account (macos-14 is "not supported"), so test on
+    # Python 3.9 itself: a 3.10+ construct then fails here instead of on the Mac.
+    # The interpreter build differs (OpenSSL vs the system LibreSSL); the language
+    # level, which is what breaks, is the same.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Locate Python 3.9
-        id: sys
-        run: |
-          if /usr/bin/python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 9) else 1)'; then
-            echo "PY=/usr/bin/python3" >> "$GITHUB_ENV"
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/setup-python@v5
-        if: steps.sys.outputs.ok != 'true'
         with:
           python-version: "3.9"
-      - name: Use setup-python's interpreter
-        if: steps.sys.outputs.ok != 'true'
-        run: echo "PY=python3" >> "$GITHUB_ENV"
       - name: Python version
-        run: $PY --version
+        run: python3 --version
       - name: Syntax (3.9)
-        run: $PY -m py_compile server/*.py tools/note.py
+        run: python3 -m py_compile server/*.py tools/note.py
       - name: Note wrap selftest
-        run: $PY tools/note.py --selftest
+        run: python3 tools/note.py --selftest
       - name: Server unit tests
-        run: $PY -m unittest discover -s tests/server -v
+        run: python3 -m unittest discover -s tests/server -v
