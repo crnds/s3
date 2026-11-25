@@ -6,6 +6,7 @@ from unittest import mock
 import helpers
 from helpers import u
 from s3srv import power
+from s3srv import usage_scan as scan
 
 
 class SanitizeNote(unittest.TestCase):
@@ -87,49 +88,49 @@ class Weather(unittest.TestCase):
 
 class Pricing(unittest.TestCase):
     def test_pricing_for_model(self):
-        self.assertIs(u.pricing_for_model("claude-opus-4-8"), u.PRICING["opus"])
-        self.assertIs(u.pricing_for_model("CLAUDE-HAIKU-4-5-20251001"), u.PRICING["haiku"])
-        self.assertIs(u.pricing_for_model("who-knows"), u.DEFAULT_PRICING)
-        self.assertIs(u.pricing_for_model(None), u.DEFAULT_PRICING)
+        self.assertIs(scan.pricing_for_model("claude-opus-4-8"), scan.PRICING["opus"])
+        self.assertIs(scan.pricing_for_model("CLAUDE-HAIKU-4-5-20251001"), scan.PRICING["haiku"])
+        self.assertIs(scan.pricing_for_model("who-knows"), scan.DEFAULT_PRICING)
+        self.assertIs(scan.pricing_for_model(None), scan.DEFAULT_PRICING)
 
     def test_estimate_cost_multipliers(self):
         m = 1_000_000
         sonnet = "claude-sonnet-5-5"
-        self.assertAlmostEqual(u.estimate_cost({"input_tokens": m}, sonnet), 3.0)
-        self.assertAlmostEqual(u.estimate_cost({"output_tokens": m}, sonnet), 15.0)
-        self.assertAlmostEqual(u.estimate_cost({"cache_creation_input_tokens": m}, sonnet), 3.75)
-        self.assertAlmostEqual(u.estimate_cost({"cache_read_input_tokens": m}, sonnet), 0.3)
-        self.assertEqual(u.estimate_cost({}, sonnet), 0)
+        self.assertAlmostEqual(scan.estimate_cost({"input_tokens": m}, sonnet), 3.0)
+        self.assertAlmostEqual(scan.estimate_cost({"output_tokens": m}, sonnet), 15.0)
+        self.assertAlmostEqual(scan.estimate_cost({"cache_creation_input_tokens": m}, sonnet), 3.75)
+        self.assertAlmostEqual(scan.estimate_cost({"cache_read_input_tokens": m}, sonnet), 0.3)
+        self.assertEqual(scan.estimate_cost({}, sonnet), 0)
 
     def test_model_family(self):
-        self.assertEqual(u.model_family("claude-opus-4-8"), "opus")
-        self.assertEqual(u.model_family("claude-haiku-4-5-20251001"), "haiku")
-        self.assertEqual(u.model_family("gpt-x"), "gpt")
-        self.assertEqual(u.model_family(""), "other")
-        self.assertEqual(u.model_family(None), "other")
+        self.assertEqual(scan.model_family("claude-opus-4-8"), "opus")
+        self.assertEqual(scan.model_family("claude-haiku-4-5-20251001"), "haiku")
+        self.assertEqual(scan.model_family("gpt-x"), "gpt")
+        self.assertEqual(scan.model_family(""), "other")
+        self.assertEqual(scan.model_family(None), "other")
 
     def test_total_tokens(self):
         usage = {"input_tokens": 1, "output_tokens": 2,
                  "cache_creation_input_tokens": 3, "cache_read_input_tokens": 4}
-        self.assertEqual(u.total_tokens(usage), 10)
-        self.assertEqual(u.total_tokens({}), 0)
+        self.assertEqual(scan.total_tokens(usage), 10)
+        self.assertEqual(scan.total_tokens({}), 0)
 
 
 class Buckets(unittest.TestCase):
     def test_bucket_epoch_floors_to_five_minutes(self):
         t = datetime(2026, 11, 24, 10, 7, 33, tzinfo=timezone.utc)
-        e = u.bucket_epoch_for(t)
-        self.assertEqual(e % u.BUCKET_SEC, 0)
+        e = scan.bucket_epoch_for(t)
+        self.assertEqual(e % scan.BUCKET_SEC, 0)
         self.assertEqual(datetime.fromtimestamp(e, tz=timezone.utc).minute, 5)
         t2 = datetime(2026, 11, 24, 10, 9, 59, tzinfo=timezone.utc)
-        self.assertEqual(u.bucket_epoch_for(t2), e)
+        self.assertEqual(scan.bucket_epoch_for(t2), e)
 
     def test_project_name(self):
-        self.assertEqual(u.project_name("/Users/x/s3"), "s3")
-        self.assertEqual(u.project_name("/Users/x/s3/"), "s3")
-        self.assertEqual(u.project_name(""), "unknown")
-        self.assertEqual(u.project_name(None), "unknown")
-        self.assertEqual(u.project_name("/"), "/")
+        self.assertEqual(scan.project_name("/Users/x/s3"), "s3")
+        self.assertEqual(scan.project_name("/Users/x/s3/"), "s3")
+        self.assertEqual(scan.project_name(""), "unknown")
+        self.assertEqual(scan.project_name(None), "unknown")
+        self.assertEqual(scan.project_name("/"), "/")
 
 
 class BatteryStatus(unittest.TestCase):
