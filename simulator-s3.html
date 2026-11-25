@@ -459,9 +459,11 @@ const BATTERY_SAVE_POLL_SEC = 120;
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* best-effort */ } }
 
-// On-device figures with no browser equivalent: from the board's own boot
-// log (they only change on a reflash).
-const FLASH_USED_BYTES = 1562241, FLASH_TOTAL_BYTES = 8103168;
+// On-device figures with no browser equivalent (they only change on a
+// reflash). Flash mirrors format.cpp's flashPercent(): used = the image
+// (firmware.bin), total = used + getFreeSketchSpace() (the other 0x640000 OTA
+// slot of default_16MB.csv). RAM/PSRAM/SD are from an earlier board boot.
+const FLASH_USED_BYTES = 2981920, FLASH_TOTAL_BYTES = 9535520;
 const RAM_USED_BYTES = 158720, RAM_TOTAL_BYTES = 348330;
 const PSRAM_USED_BYTES = 1301504, PSRAM_TOTAL_BYTES = 8388608;
 const SD_USED_BYTES = 2483027968, SD_TOTAL_BYTES = 7948206080;
