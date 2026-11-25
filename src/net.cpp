@@ -31,7 +31,31 @@ static void drawWifiSpinner(int frameNum) {
   presentFrame();
 }
 
+// ── TIME ───────────────────────────────────────────────────
+// The timezone is a constant and needs no network, so it is applied at boot
+// whatever WiFi does. It used to ride along with configTime(), which was only
+// called if WiFi came up within connectWifi()'s 20 s: on a slow AP the board
+// then stayed on UTC (a clock 7 h behind, 05:31 at 12:31) until the next reboot,
+// even after the link came up and the server's epoch had set the time.
+static void applyTimezone() {
+  char tz[16];  // POSIX TZ, sign inverted: UTC+7 is "<+07>-7"
+  snprintf(tz, sizeof(tz), "<%+03ld>%+ld", GMT_OFFSET_SEC / 3600, -GMT_OFFSET_SEC / 3600);
+  setenv("TZ", tz, 1);
+  tzset();
+}
+
+// SNTP needs the network, so start it once, the first time WiFi is up -- at
+// boot, or later from fetchUsage() if the AP was slow. (configTime() also
+// re-applies the timezone, to the same value.)
+static bool sntpStarted = false;
+static void ensureSntp() {
+  if (sntpStarted) return;
+  sntpStarted = true;
+  configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
+}
+
 void connectWifi() {
+  applyTimezone();
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);           // steadier link for an always-powered display
   WiFi.setAutoReconnect(true);    // rejoin automatically when the AP returns
@@ -46,7 +70,7 @@ void connectWifi() {
   wifiOk = WiFi.status() == WL_CONNECTED;
   if (wifiOk) {
     ensureMdns();
-    configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
+    ensureSntp();
   }
 }
 
@@ -499,6 +523,7 @@ bool fetchUsage() {
   if (!wifiOk) {
     return false;
   }
+  ensureSntp();  // no-op after the first time; covers a WiFi that came up after connectWifi() gave up
 
   if ((!serverIpValid || serverIpSuspect) && !resolveServer()) {
     return false;  // never resolved at all — Mac likely still asleep

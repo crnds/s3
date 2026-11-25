@@ -337,6 +337,13 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   CYD's old `OFFLINE_AFTER_CYCLES = 3` became a 15-second hair trigger at the
   5s poll setting and made the board flap OFFLINE on ordinary packet loss. The simulator's
   `offlineAfterMs()` mirrors it.
+- **Time (`net.cpp`).** The timezone (`GMT_OFFSET_SEC`, UTC+7, no DST) is applied
+  by `applyTimezone()` at the start of `connectWifi()`, whatever WiFi does. It
+  used to ride along with `configTime()`, which only ran if WiFi came up within 20 s
+  of boot, so on a slow AP the clock stayed on UTC (7 h behind) until a reboot.
+  SNTP starts once, the first time WiFi is up (`ensureSntp()`, called at boot and
+  from `fetchUsage()`). With no SNTP yet, `applyUsageDoc` seeds the clock from the
+  server's `epoch`, and the timezone is already right.
 - **Stale data (`dataStale()`, pages.cpp; design.md 13.4):** before offline,
   once the last good *live* poll (`lastFetchSuccessMs`, 0 = none since boot,
   i.e. the SD cache) is older than max(2 poll intervals, 1 min), the strip's
