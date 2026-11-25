@@ -75,8 +75,6 @@ USAGE_CORS_ORIGIN_RE = re.compile(r"http://(localhost|127\.0\.0\.1|\[::1\])(:[0-
 # ingest lag is invisible on screen, and this halves the scan wakeups + disk
 # glob/stat over ~200 jsonl files vs. the old 15s — the biggest wakeup source.
 SCAN_INTERVAL_SEC = 30
-# On battery (still serving): slow the jsonl tail further.
-SCAN_INTERVAL_BATTERY_SEC = 30
 RETENTION = timedelta(days=8)
 ACTIVE_WINDOW_SEC = 180
 # Assumed model context size for the "context window" percent — the jsonl
@@ -352,21 +350,9 @@ def battery_status():
         return None
 
 
-def local_tz_name():
-    try:
-        link = os.readlink("/etc/localtime")
-        return link.split("zoneinfo/")[-1]
-    except OSError:
-        return ""
-
-
-TZ_NAME = local_tz_name()
-
-
 def fmt_reset_time(iso_ts, with_date):
     # Time only, no timezone suffix — the CYD screen is 320px wide and the
-    # reset line is rendered at a large, readable size. TZ_NAME is exposed
-    # separately in the JSON for anyone who wants it.
+    # reset line is rendered at a large, readable size.
     dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00")).astimezone()
     t = dt.strftime("%H:%M")
     return f"{dt.strftime('%b')} {dt.day}, {t}" if with_date else t
@@ -469,7 +455,6 @@ def fetch_limits():
                    "percent": round(pct)}
 
     return {
-        "tz": TZ_NAME,
         # Raw epoch of this fetch; the handler turns it into age_sec per
         # request so clients can see when the snapshot has gone stale.
         "fetched_at_epoch": time.time(),
@@ -716,8 +701,8 @@ def weather_payload(temp_c, code, high=None, low=None, hourly=None, daily=None):
         "tempC": temp_c,
         "code": code if code is not None else -1,
         "condition": wmo_condition(code if code is not None else -1),
-        "high": high if high is not None else None,
-        "low": low if low is not None else None,
+        "high": high,
+        "low": low,
         "hourly": hourly or [],
         "daily": daily or [],
     }
@@ -1100,12 +1085,6 @@ def compute_aggregates():
         STATE["aggregates"] = aggregates
 
 
-def scan_interval():
-    # On battery, scan half as often — jsonl tails are cheap, but glob +
-    # recompute every 15s is pure waste when the Mac is trying to idle.
-    return SCAN_INTERVAL_BATTERY_SEC if battery_save_active() else SCAN_INTERVAL_SEC
-
-
 def scan_loop():
     # Recompute the rollup only when scan_once() ingested new data, OR when the
     # local calendar day has rolled over (so today/trend advance at midnight even
@@ -1127,7 +1106,7 @@ def scan_loop():
         except Exception as e:
             # never let a transient error (e.g. during sleep/wake) kill the thread
             log_err(f"scan_loop: {type(e).__name__}: {e}")
-        time.sleep(scan_interval())
+        time.sleep(SCAN_INTERVAL_SEC)
 
     activity_gated_loop(body)
 
@@ -1218,7 +1197,6 @@ def build_report():
     if limits:
         limits = dict(limits)
         limits.pop("fetched_at_epoch", None)
-        limits.pop("tz", None)  # never read by board/sim/control panel
         for key in ("session", "week", "week_model"):
             win = limits.get(key) or {}
             if not isinstance(win, dict):
