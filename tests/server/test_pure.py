@@ -5,6 +5,7 @@ from unittest import mock
 
 import helpers
 from helpers import u
+from s3srv import power
 
 
 class SanitizeNote(unittest.TestCase):
@@ -135,16 +136,16 @@ class BatteryStatus(unittest.TestCase):
     """pmset failing used to look exactly like a desktop Mac on AC."""
 
     def setUp(self):
-        u._battery_failure_logged = False
-        self.addCleanup(setattr, u, "_battery_failure_logged", False)
-        p = mock.patch.object(u, "log_err")
+        power._battery_failure_logged = False
+        self.addCleanup(setattr, power, "_battery_failure_logged", False)
+        p = mock.patch.object(power, "log_err")
         self.log = p.start()
         self.addCleanup(p.stop)
 
     def run_pmset(self, stdout="", returncode=0, raises=None):
         done = mock.Mock(stdout=stdout, returncode=returncode)
-        with mock.patch.object(u.subprocess, "run", side_effect=raises, return_value=done):
-            return u.battery_status()
+        with mock.patch.object(power.subprocess, "run", side_effect=raises, return_value=done):
+            return power.battery_status()
 
     def test_battery_on_battery_and_on_ac(self):
         self.assertEqual(self.run_pmset("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t72%; discharging"), (72, False))
@@ -160,6 +161,34 @@ class BatteryStatus(unittest.TestCase):
         self.assertIsNone(self.run_pmset(raises=OSError("no pmset")))
         self.assertEqual(self.log.call_count, 1)
         self.assertIn("pmset failed", self.log.call_args[0][0])
+
+
+class PowerSnapshot(unittest.TestCase):
+    def setUp(self):
+        saved = dict(power.STATE["power"])
+        self.addCleanup(power.STATE.__setitem__, "power", saved)
+
+    def snap(self, on_ac, manual):
+        power.STATE["power"] = {"on_ac": on_ac, "percent": 80, "paused": False,
+                                "battery_save_manual": manual}
+        return power.power_snapshot()
+
+    def test_auto_follows_ac(self):
+        s = self.snap(True, None)
+        self.assertEqual((s["battery_save"], s["source"]), (False, "auto"))
+        self.assertTrue(self.snap(False, None)["battery_save"])
+
+    def test_manual_override_wins(self):
+        s = self.snap(True, True)
+        self.assertEqual((s["battery_save"], s["source"]), (True, "manual"))
+        self.assertFalse(self.snap(False, False)["battery_save"])
+
+    def test_set_power_state_keeps_the_manual_override(self):
+        self.snap(True, True)
+        with mock.patch.object(power, "wake_loops"):
+            power.set_power_state(False, 40, False)
+        self.assertIs(power.STATE["power"]["battery_save_manual"], True)
+        self.assertEqual(power.STATE["power"]["percent"], 40)
 
 
 if __name__ == "__main__":
