@@ -246,7 +246,7 @@ def tail_file(path, n=LOG_TAIL_LINES):
 
 def do_enable():
     if not os.path.exists(PLIST_PATH):
-        return False, "plist not found at %s — see README Part 1" % PLIST_PATH
+        return False, "plist not found at %s -- copy server/com.corner.s3*.plist there (README, step 1)" % PLIST_PATH
     code, out, err = run(["/bin/launchctl", "bootstrap", "gui/%d" % os.getuid(), PLIST_PATH])
     if code == 0:
         return True, "server enabled (launchd job loaded)"

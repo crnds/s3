@@ -93,7 +93,7 @@ const int PAGE_COUNT = 7;
 const int BOOT_PAGE_AUTO = -1;
 // Pages (0-indexed): 0 Status, 1 Usage (limits + projects + trend), 2 Cats,
 // 3 Movies, 4 Status + cats, 5 Note, 6 Overview.
-const int GIF_PAGE = 2;    // 3rd page: random cat GIFs from /cats/ on SD
+const int GIF_PAGE = 2;    // 3rd page: random cat GIFs, embedded in the firmware (cats_embed.h)
 const int MOVIE_PAGE = 3;  // 4th page: random movies from /movies/ on SD (see movie_player.cpp)
 const int MIXED_PAGE = 4;  // 5th page: status + cats split
 // 6th page: the same left column as MIXED_PAGE, but the right half shows the
@@ -126,7 +126,7 @@ const int DST_OFFSET_SEC = 0;
 // same numbers. Colours, type, spacing and component sizes are tokens
 // (tokens.h) -- no COL_* literals any more.
 //   - 8px screen margin and card gutter; content x 8..471, y 8..291
-//   - left column x 8..179 (fixed reservation), right column x 188..471
+//   - left column x 8..135 (fixed 128px), right column x 144..471
 //   - status strip y 300..318, progress hairline y 319
 // Page navigation splits at the screen half, independent of the grid.
 const int SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
@@ -199,7 +199,7 @@ struct WeatherDay {
 // ── STATE ──────────────────────────────────────────────────
 // projectNames/sessionResets/weekResets/weekModelName/weekModelResets are
 // fixed char buffers rather than String: these fields get reassigned every
-// ~20s poll for weeks of uptime on a no-PSRAM board, and repeated String
+// ~20s poll for weeks of uptime on a small internal heap, and repeated String
 // reassignment (realloc when the new value's length differs from the old
 // capacity) is exactly the kind of long-run heap churn that eventually
 // fragments a small heap. Local, short-lived String concatenation elsewhere
@@ -325,12 +325,13 @@ inline void unlockState() { if (stateMutex) xSemaphoreGive(stateMutex); }
 extern SemaphoreHandle_t sdMutex;
 inline void lockSD()   { if (sdMutex) xSemaphoreTake(sdMutex, portMAX_DELAY); }
 inline void unlockSD() { if (sdMutex) xSemaphoreGive(sdMutex); }
-// Bounded variant for the GIF player's per-frame decode, which is the ONLY
-// high-frequency SD consumer (core 1, ~12fps). With an unbounded wait there,
-// going offline actively sabotaged coming back: the cat screen is what plays
-// during an outage, so core 0's recovery path (diag appends, cache reads,
-// capacity refresh) queued behind a continuous stream of frame decodes.
-// A skipped cat frame is invisible; a stalled poll is not. Returns false if
+// Bounded variant for the movie player's per-frame read, which is the ONLY
+// high-frequency SD consumer (core 1, ~10fps; the cat GIFs are embedded in
+// flash and never touch the card). With an unbounded wait there, going
+// offline actively sabotaged coming back: the media pages play during an
+// outage, so core 0's recovery path (diag appends, cache reads, capacity
+// refresh) queued behind a continuous stream of frame reads.
+// A skipped movie frame is invisible; a stalled poll is not. Returns false if
 // the card was busy — callers must NOT unlock in that case.
 inline bool tryLockSD(uint32_t waitMs) {
   if (!sdMutex) return true;

@@ -135,7 +135,7 @@ STATE = {
     # poll (do_GET) and every power-state change, both far more often than
     # each loop's actual fetch cadence, so it must NOT also interrupt a
     # loop's in-flight interval sleep (each body() computes and sleeps its
-    # own sleep_sec — e.g. limits_loop's 120s/300s — via plain time.sleep,
+    # own sleep_sec — e.g. limits_loop's 180s/300s — via plain time.sleep,
     # deliberately not activity_event.wait). Doing so would fire fetches on
     # every poll instead of on-interval, risking 429s on the OAuth endpoint.
     "activity_event": threading.Event(),
@@ -802,7 +802,7 @@ def market_intervals():
 
 
 def market_loop():
-    # BTC ~60s on AC / ~3 min on battery; weather 10 min / 30 min; AQI 15 min /
+    # BTC ~2 min on AC / ~3 min on battery; weather 10 min / 30 min; AQI 15 min /
     # 30 min (an hourly-updating station gains nothing from polling faster).
     # Each keeps its last good value on failure so a transient outage doesn't
     # blank tiles.
@@ -1050,7 +1050,7 @@ def maybe_log_stats():
 def compute_aggregates():
     # Rolls the bucketed state up into everything build_report() needs that
     # doesn't have to be fresh on every single request (today/week totals,
-    # top projects, 7-day trend). Called once per scan cycle (~15s) instead
+    # top projects, 7-day trend). Called once per scan cycle (~30s) instead
     # of once per HTTP request. last5h / models[] were dropped — no board,
     # simulator, or control-panel consumer.
     now = datetime.now(timezone.utc)
@@ -1406,7 +1406,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # ACAO only for the dev pages: the file:// case (Origin: null) --
-        # simulator.html fetches this endpoint directly from disk -- and, for
+        # simulator-s3.html fetches this endpoint directly from disk -- and, for
         # /api/usage only, a page served from this Mac's loopback
         # (USAGE_CORS_ORIGIN_RE). A blanket "*" would let any website's JS read
         # board usage data cross-origin over the LAN/loopback; nothing else
