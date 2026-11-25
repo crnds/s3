@@ -22,3 +22,20 @@ struct NoteLine {
 };
 // Classify the source line starting at s[i] (s has n characters).
 NoteLine noteLineContext(const char* s, int i, int n);
+
+// ── Layout: where each glyph of the note goes ──
+// One placed glyph. `role` is the word's role, else the line's, else NONE;
+// `code` (inside backticks, the ticks included) wins over both, and `marker`
+// is the line's leading list marker. The draw side maps these to colours.
+struct NoteCell {
+  int idx;          // index into the note text
+  int col, row;     // glyph grid position
+  NoteRole role;
+  bool code;
+  bool marker;
+};
+typedef void (*NoteCellFn)(void* ctx, const NoteCell& cell);
+// Word-wrap s[0..n) onto a grid `cols` wide, at most `maxRows` rows (the first
+// row is always allowed); the rest is clipped. Calls emit for each glyph in
+// reading order; spaces place nothing. Returns the rows used.
+int noteWrap(const char* s, int n, int cols, int maxRows, NoteCellFn emit, void* ctx);

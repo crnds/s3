@@ -91,6 +91,8 @@ tokAlias('TOK_NOTE_TEXT', () => TOK_COLOR_TEXT_PRIMARY);
 
 const TOK_TYPE_DISPLAY = 'XL', TOK_TYPE_TITLE = 'LG', TOK_TYPE_HEADLINE = 'MDB', TOK_TYPE_BODY = 'MD';
 const TOK_TYPE_LABEL = 'SMB', TOK_TYPE_CAPTION = 'SM';
+// Line boxes of the 13px / 17px roles (src/tokens.h TOK_LINE_*); tests/tools/test_type_metrics.py pins them.
+const TOK_LINE_CAPTION = 17, TOK_LINE_BODY = 23;
 const TOK_TYPE_MONO_S = 'MONO1', TOK_TYPE_MONO_M = 'MONO2', TOK_TYPE_MONO_L = 'MONO3';
 const TOK_TYPE_CALENDAR = 'CAL';   // 11/500 (month grid)
 const TOK_TYPE_CLOCK = 'CLK';   // 50/650, tracking -1

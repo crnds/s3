@@ -816,8 +816,12 @@ and after in §11.
   - The note tokenizer returns roles (`note_pure.cpp`, O4/O5): the C++ copy
     runs the shared corpus natively.
   - The image grew ~1.4 KB (lost cross-file inlining).
-  - Not done: the note wrap's layout/draw split, and the type-metric constants
-    (`17/23/11/22`), which need the sim in the same change.
+  - Follow-up (`refactor/p4-deferred`): the note wrap is a pure layout pass
+    (`noteWrap` in `note_pure.cpp`, native-tested) plus a thin draw loop; the 13px and
+    17px line boxes are `TOK_LINE_CAPTION` / `TOK_LINE_BODY` in `tokens.h` and
+    `sim/tokens.js`, pinned to the generated fonts by `tests/tools/test_type_metrics.py`;
+    `ensureSntp()`'s started flag is atomic (it runs on both cores). The other raw
+    metrics (28, 11, 22) stay literals.
 
 #### O11 · A media partition — L · M · FW Tools
 - **What.**

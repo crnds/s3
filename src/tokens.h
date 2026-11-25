@@ -128,6 +128,10 @@ const FontId TOK_TYPE_NUMERAL_HERO = TOK_TYPE_DISPLAY;
 const FontId TOK_TYPE_NUMERAL_LG = TOK_TYPE_TITLE;
 const FontId TOK_TYPE_NUMERAL_MD = TOK_TYPE_HEADLINE;
 const FontId TOK_TYPE_NUMERAL_SM = TOK_TYPE_CAPTION;
+// Line boxes of the 13px and 17px roles (fontLineH of FONT_SM/SMB and FONT_MD/MDB);
+// layout sums them without a font lookup. tests/tools/test_type_metrics.py pins them.
+const int TOK_LINE_CAPTION = 17;
+const int TOK_LINE_BODY = 23;
 
 // ── SPACING (design.md 6) ──────────────────────────────────
 const int TOK_SPACE_NONE = 0;

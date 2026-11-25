@@ -113,9 +113,77 @@ void test_line_corpus() {
   }
 }
 
+
+// ── layout (noteWrap): render the placed glyphs back into rows of text ──
+struct Grid {
+  std::vector<std::string> rows;
+  std::vector<NoteCell> cells;
+};
+static void gridEmit(void* ctx, const NoteCell& c) {
+  Grid& g = *static_cast<Grid*>(ctx);
+  if ((int)g.rows.size() <= c.row) g.rows.resize(c.row + 1);
+  std::string& r = g.rows[c.row];
+  if ((int)r.size() <= c.col) r.resize(c.col + 1, '.');
+  g.cells.push_back(c);
+}
+static std::string wrapped(const char* s, int cols, int maxRows, int* used = nullptr, Grid* keep = nullptr) {
+  Grid g;
+  int n = noteWrap(s, (int)strlen(s), cols, maxRows, gridEmit, &g);
+  for (auto& c : g.cells) g.rows[c.row][c.col] = s[c.idx];
+  if (used) *used = n;
+  if (keep) *keep = g;
+  std::string out;
+  for (size_t i = 0; i < g.rows.size(); i++) out += (i ? "|" : "") + g.rows[i];
+  return out;
+}
+
+void test_wrap_word_boundary() {
+  int rows;
+  TEST_ASSERT_EQUAL_STRING("aaa.bb|cc", wrapped("aaa bb cc", 6, 9, &rows).c_str());
+  TEST_ASSERT_EQUAL_INT(2, rows);
+}
+void test_wrap_hard_break_long_word() {
+  TEST_ASSERT_EQUAL_STRING("abcd|efgh|ij", wrapped("abcdefghij", 4, 9).c_str());
+}
+void test_wrap_empty_line_takes_a_row() {
+  int rows;
+  TEST_ASSERT_EQUAL_STRING("a||b", wrapped("a\n\nb", 8, 9, &rows).c_str());
+  TEST_ASSERT_EQUAL_INT(3, rows);
+}
+void test_wrap_indent_collapses() {
+  TEST_ASSERT_EQUAL_STRING("a...b", wrapped("a   b", 8, 9).c_str());  // inner spaces keep their width
+  TEST_ASSERT_EQUAL_STRING("x", wrapped("   x", 8, 9).c_str());
+}
+void test_wrap_clips_at_max_rows() {
+  int rows;
+  TEST_ASSERT_EQUAL_STRING("ab|cd", wrapped("abcdefgh", 2, 2, &rows).c_str());
+  TEST_ASSERT_EQUAL_INT(2, rows);
+  // The first row is always allowed.
+  TEST_ASSERT_EQUAL_STRING("ab", wrapped("abcd", 2, 0).c_str());
+}
+void test_wrap_roles_and_code() {
+  Grid g;
+  wrapped("# hi `x` TODO\n- it", 20, 9, nullptr, &g);
+  // '# hi' is a heading line; the backticked x is code even on that line;
+  // TODO is a word role over the heading's line role; the list marker is flagged.
+  for (auto& c : g.cells) {
+    if (c.row == 0 && c.col <= 3) { TEST_ASSERT_EQUAL_INT(NOTE_ROLE_HEADING, c.role); TEST_ASSERT_FALSE(c.code); }
+    if (c.row == 0 && c.col >= 5 && c.col <= 7) TEST_ASSERT_TRUE(c.code);
+    if (c.row == 0 && c.col >= 9) TEST_ASSERT_EQUAL_INT(NOTE_ROLE_BAD, c.role);
+    if (c.row == 1 && c.col == 0) TEST_ASSERT_TRUE(c.marker);
+    if (c.row == 1 && c.col > 0) TEST_ASSERT_FALSE(c.marker);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_word_corpus);
   RUN_TEST(test_line_corpus);
+  RUN_TEST(test_wrap_word_boundary);
+  RUN_TEST(test_wrap_hard_break_long_word);
+  RUN_TEST(test_wrap_empty_line_takes_a_row);
+  RUN_TEST(test_wrap_indent_collapses);
+  RUN_TEST(test_wrap_clips_at_max_rows);
+  RUN_TEST(test_wrap_roles_and_code);
   return UNITY_END();
 }

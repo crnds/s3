@@ -80,7 +80,7 @@ function drawMonthGrid(x, y, colW, rowH, rowH6, year, mon, mday, wday) {
 // Forecast columns (the status strip, the Overview's weather cell) from the
 // label row's top iy: label caption 17, the glyph centred 34 down, the
 // temperature 51 down, 68 in all.
-const WX_GLYPH_DY = 17 + 6 + 11, WX_TEMP_DY = 17 + 12 + 22, WX_ROWS_H = WX_TEMP_DY + 17;
+const WX_GLYPH_DY = TOK_LINE_CAPTION + 6 + 11, WX_TEMP_DY = TOK_LINE_CAPTION + 12 + 22, WX_ROWS_H = WX_TEMP_DY + TOK_LINE_CAPTION;
 // "Now" (a 44px column from x) and, past a 1px divider, the next `hours` hours.
 function drawWeatherNowAndHours(x, iy, hours) {
   const nowCx = x + 22;

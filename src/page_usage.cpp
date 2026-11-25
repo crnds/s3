@@ -16,7 +16,7 @@ static void drawLimitRow(int x, int r, int y, const char* label, int percent) {
   // Stale: secondary, as the limit cards' numerals (drawLimitCard).
   drawTextR(TOK_TYPE_NUMERAL_SM, r, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), pct,
             percent < 0 ? TOK_COLOR_TEXT_TERTIARY : dataStale() ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY);
-  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
+  drawMeter(x, y + TOK_LINE_BODY + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
 }
 
 // ── USAGE PAGE (page 1) ────────────────────────────────────
@@ -29,7 +29,7 @@ static void drawLimitRow(int x, int r, int y, const char* label, int percent) {
 //    name (body), meter.md, value (caption) right.
 static const int PROJ_CARD_H = 171, TREND_CARD_H = 105;
 static const int TREND_CARD_Y = TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H + TOK_SPACE_GUTTER;  // 187
-static const int PROJ_ROW_STEP = 23 + TOK_SPACE_STACK;                                  // 31
+static const int PROJ_ROW_STEP = TOK_LINE_BODY + TOK_SPACE_STACK;                                  // 31
 static const int PROJ_VALUE_W = 56;
 static const int PROJ_NAME_W = 116;                   // project name column (fitText)
 static const int TREND_BAR_W = 20, TREND_BAR_GAP = 4; // 7 bars = 164 px from the align line
@@ -39,7 +39,7 @@ static const int TREND_BAR_W = 20, TREND_BAR_GAP = 4; // 7 bars = 164 px from th
 void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, bool isError,
                     FontId titleFont, uint16_t titleColor) {
   int th = fontLineH(titleFont);
-  int total = th + TOK_SPACE_SM + 17;
+  int total = th + TOK_SPACE_SM + TOK_LINE_CAPTION;
   int y = y0 + (h - total) / 2;
   drawTextC(titleFont, cx, y, title, isError ? TOK_COLOR_STATUS_ERROR : titleColor);
   drawTextC(TOK_TYPE_CAPTION, cx, y + th + TOK_SPACE_SM, desc, TOK_COLOR_TEXT_SECONDARY);
@@ -52,7 +52,7 @@ void drawUsagePage() {
   const int ix = lx0 + TOK_SPACE_SM, ir = lx0 + lw - TOK_SPACE_SM;  // 16..128: 112 inner
   const int ltop = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
   drawSectionLabel(ix, ltop, "LIMITS");
-  int ly = ltop + 17 + TOK_SPACE_SM;
+  int ly = ltop + TOK_LINE_CAPTION + TOK_SPACE_SM;
   drawLimitRow(ix, ir, ly, "Context", STATE.ctxTokens >= 0 ? STATE.ctxPercent : -1);
   ly += ROW_STEP;
   drawLimitRow(ix, ir, ly, "5-hour", STATE.sessionPercent);
@@ -74,7 +74,7 @@ void drawUsagePage() {
   drawSectionLabel(px, top, "TOP PROJECTS 7D");
 
   if (STATE.projectCount == 0) {
-    int ey = top + 17;
+    int ey = top + TOK_LINE_CAPTION;
     drawEmptyState(x0 + w / 2, ey, TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H - ey, "No project data yet",
                    "Projects appear after the first poll", false);
   } else {
@@ -83,7 +83,7 @@ void drawUsagePage() {
     for (int i = 0; i < shown; i++)
       if (STATE.projectTokens[i] > maxTokens) maxTokens = STATE.projectTokens[i];
     const int meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - alignX;
-    int y = top + 17 + TOK_SPACE_SM;
+    int y = top + TOK_LINE_CAPTION + TOK_SPACE_SM;
     for (int i = 0; i < shown; i++, y += PROJ_ROW_STEP) {
       drawText(TOK_TYPE_BODY, px, y, fitText(TOK_TYPE_BODY, STATE.projectNames[i], PROJ_NAME_W), TOK_COLOR_TEXT_PRIMARY);
       int pct = (int)((float)STATE.projectTokens[i] / maxTokens * 100 + 0.5f);
@@ -103,12 +103,12 @@ void drawUsagePage() {
     total += STATE.trend[i];
     if (STATE.trend[i] > maxTrend) maxTrend = STATE.trend[i];
   }
-  drawText(TOK_TYPE_BODY, px, ty + 17 + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
-  drawText(TOK_TYPE_CAPTION, px, ty + 17 + TOK_SPACE_SM + 23, "this week", TOK_COLOR_TEXT_SECONDARY);
+  drawText(TOK_TYPE_BODY, px, ty + TOK_LINE_CAPTION + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, px, ty + TOK_LINE_CAPTION + TOK_SPACE_SM + TOK_LINE_BODY, "this week", TOK_COLOR_TEXT_SECONDARY);
 
   static const char* const DAY_LABELS[7] = {"-6", "-5", "-4", "-3", "-2", "-1", "Now"};
   const int barW = TREND_BAR_W, gap = TREND_BAR_GAP;
-  const int axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - 17;
+  const int axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - TOK_LINE_CAPTION;
   const int feet = axisY - TOK_SPACE_XS;  // bars end above the axis labels
   const int chartH = feet - ty;
   for (int i = 0; i < 7; i++) {

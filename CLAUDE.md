@@ -256,7 +256,7 @@ a twin.
 | `theme.cpp` | `applyThemeTokens`, `applyContrast` (runtime `TOK_COLOR_*`) |
 | `settings.cpp`, `nav.cpp` | Settings sheet, touch router + transitions |
 | `config_store.cpp`, `sd_store.cpp` | NVS config + saves; SD diag log, splash |
-| `format.cpp` + pure `format_pure`, `pace`, `timing`, `motion_math`, `note_pure` | native-tested logic (`pio test -e native`) |
+| `format.cpp` + pure `format_pure`, `pace`, `timing`, `motion_math`, `note_pure` (tokenizer + `noteWrap` layout) | native-tested logic (`pio test -e native`) |
 
 - **Graphics pipeline (`display.cpp`).** Every page draws into `frame`, a
   480×320 16bpp `LGFX_Sprite` in PSRAM (`g` points at it). LovyanGFX has no

@@ -71,8 +71,8 @@ static const int CAL_BASE_Y = CLOCK_CARD_Y + 27;                                
 static const int CAL_GRID_Y = CLOCK_CARD_Y + 56;                                                 // 64
 
 
-static const int WX_GLYPH_DY = 17 + 6 + 11, WX_TEMP_DY = 17 + 12 + 22, WX_ROWS_H = WX_TEMP_DY + 17;
+static const int WX_GLYPH_DY = TOK_LINE_CAPTION + 6 + 11, WX_TEMP_DY = TOK_LINE_CAPTION + 12 + 22, WX_ROWS_H = WX_TEMP_DY + TOK_LINE_CAPTION;
 
 // Row geometry: label (body) left, the percent right, a meter.md under it.
-static const int ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD;    // 35
+static const int ROW_H = TOK_LINE_BODY + TOK_SPACE_STACK_TIGHT + TOK_METER_MD;    // 35
 static const int ROW_STEP = ROW_H + TOK_SPACE_STACK;                   // 43

@@ -1,5 +1,6 @@
 // WiFi/mDNS, the /api/usage poll, and its SD-backed cache/archive siblings —
 // carried over from the CYD firmware's original "NETWORK" section.
+#include <atomic>
 #include "state.h"
 #include <sys/time.h>  // settimeofday() — NTP fallback in applyUsageJson
 
@@ -47,10 +48,10 @@ void applyTimezone() {
 // SNTP needs the network, so start it once, the first time WiFi is up -- at
 // boot, or later from fetchUsage() if the AP was slow. (configTime() also sets
 // TZ, to a differently spelled string with the same offset.)
-static bool sntpStarted = false;
+// Called from setup() (core 1) and networkTask (core 0), so the claim is atomic.
+static std::atomic<bool> sntpStarted{false};
 static void ensureSntp() {
-  if (sntpStarted) return;
-  sntpStarted = true;
+  if (sntpStarted.exchange(true)) return;
   configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
 }
 

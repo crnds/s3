@@ -12,7 +12,7 @@ static const int NOTE_Y = TOK_LAYOUT_CONTENT_Y0;
 static const int NOTE_W = TOK_LAYOUT_COL_RIGHT_W;
 static const int NOTE_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
 static const int NOTE_TX = NOTE_X + TOK_SPACE_CARD_PAD;            // 200, first glyph column
-static const int NOTE_TY = NOTE_Y + TOK_SPACE_CARD_PAD + 17 + TOK_SPACE_SM;  // 45 (>= 40, clear of the corner)
+static const int NOTE_TY = NOTE_Y + TOK_SPACE_CARD_PAD + TOK_LINE_CAPTION + TOK_SPACE_SM;  // 45 (>= 40, clear of the corner)
 // Exclusive bottom limit: a row is drawn only while y + lineH <= this.
 static const int NOTE_TY_MAX = NOTE_Y + NOTE_H - TOK_SPACE_CARD_PAD;  // 268
 // Usable width 304. Monospace advance per size (make_vlw.py):
@@ -42,88 +42,35 @@ static uint16_t noteRoleColor(NoteRole r) {
   }
 }
 
+namespace {
+struct NoteDraw {
+  const char* s;
+  int tx, ty, glyphW, lineH;
+  FontId font;
+};
+
+// The draw half: a placed glyph -> its colour (code, then role, then marker).
+void drawNoteCell(void* ctx, const NoteCell& cell) {
+  const NoteDraw& d = *static_cast<const NoteDraw*>(ctx);
+  uint16_t c;
+  if (cell.code) c = TOK_NOTE_CODE;
+  else if (cell.role != NOTE_ROLE_NONE) c = noteRoleColor(cell.role);
+  else if (cell.marker) c = TOK_NOTE_MARKER;
+  else c = TOK_NOTE_TEXT;
+  drawChar(d.font, d.tx + cell.col * d.glyphW, d.ty + cell.row * d.lineH, d.s[cell.idx], c);
+}
+}  // namespace
+
 // Word-wrapped, syntax-coloured render of STATE.note: glyph columns from tx,
 // rows from ty, widthPx wide. Overflow past tyMax (exclusive) is simply not
 // drawn ("wrap + clip"). Caller holds stateMutex; this must not re-lock.
 void drawNoteText(int tx, int ty, int widthPx, int tyMax, FontId font) {
-  const char* s = STATE.note;
-  const int glyphW = FONT_ADV[font]['0' - 0x20];  // monospace: every advance is equal
-  const int glyphH = fontLineH(font);
-  const int lineH = glyphH;
-  const int cols = widthPx / glyphW;
-
-  int y = ty;
-  int col = 0;
-  const int n = strlen(s);
-  int i = 0;
-
-  while (i < n) {
-    // ── line-level context, decided once ──
-    const NoteLine ln = noteLineContext(s, i, n);
-    const int lineEnd = ln.end;
-    const int markerIdx = ln.marker;
-    bool inCode = false;  // an unmatched backtick stains only its own line
-    col = 0;
-
-    // ── emit the source line as one or more visual rows ──
-    while (i < lineEnd) {
-      if (s[i] == ' ') {
-        // Leading spaces on a wrapped row collapse; a source line's own
-        // indentation collapses too.
-        if (col > 0) col++;
-        i++;
-        if (col >= cols) {
-          y += lineH; col = 0;
-          if (y + glyphH > tyMax) return;
-        }
-        continue;
-      }
-
-      // Word lookahead: [i, wEnd) is the next run of non-space characters.
-      int wEnd = i;
-      while (wEnd < lineEnd && s[wEnd] != ' ') wEnd++;
-      const int wLen = wEnd - i;
-
-      // Wrap before a word that doesn't fit here but would fit on a fresh
-      // row. A word longer than a whole row is hard-broken below instead.
-      if (col > 0 && col + wLen > cols && wLen <= cols) {
-        y += lineH; col = 0;
-        if (y + glyphH > tyMax) return;
-        continue;  // re-test on the new row
-      }
-
-      const NoteRole wordRole = noteWordRole(s, i, wEnd);
-
-      while (i < wEnd) {
-        if (col >= cols) {  // hard break inside an over-long word
-          y += lineH; col = 0;
-          if (y + glyphH > tyMax) return;
-        }
-        uint16_t c;
-        if (s[i] == '`') {
-          inCode = !inCode;
-          c = TOK_NOTE_CODE;  // colour the tick itself, so a stray one is visible
-        } else if (inCode) {
-          c = TOK_NOTE_CODE;
-        } else if (wordRole != NOTE_ROLE_NONE) {
-          c = noteRoleColor(wordRole);
-        } else if (ln.role != NOTE_ROLE_NONE) {
-          c = noteRoleColor(ln.role);
-        } else if (i == markerIdx) {
-          c = TOK_NOTE_MARKER;
-        } else {
-          c = TOK_NOTE_TEXT;
-        }
-        drawChar(font, tx + col * glyphW, y, s[i], c);
-        col++; i++;
-      }
-    }
-
-    // ── end of source line (an empty line consumes a row, as an editor implies) ──
-    i = lineEnd + 1;  // step over the '\n'
-    y += lineH; col = 0;
-    if (y + glyphH > tyMax) return;
-  }
+  NoteDraw d = {STATE.note, tx, ty, FONT_ADV[font]['0' - 0x20] /* monospace: all equal */,
+                fontLineH(font), font};
+  const int glyphH = d.lineH;
+  // A row r is drawn while ty + r * lineH + glyphH <= tyMax; the first row always is.
+  const int maxRows = tyMax - ty >= glyphH ? (tyMax - ty - glyphH) / d.lineH + 1 : 1;
+  noteWrap(d.s, strlen(d.s), widthPx / d.glyphW, maxRows, drawNoteCell, &d);
 }
 
 // The right column as one card: "NOTE", then the text at the editor's size.
