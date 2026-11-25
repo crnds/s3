@@ -6,6 +6,7 @@ from unittest import mock
 import helpers
 from helpers import u
 from s3srv import power
+from s3srv import market
 from s3srv import usage_scan as scan
 
 
@@ -29,14 +30,14 @@ class SanitizeNote(unittest.TestCase):
 
 class UsAqi(unittest.TestCase):
     def test_missing_readings(self):
-        self.assertIsNone(u.us_aqi("PM25", None))
-        self.assertIsNone(u.us_aqi("PM25", -1))
+        self.assertIsNone(market.us_aqi("PM25", None))
+        self.assertIsNone(market.us_aqi("PM25", -1))
 
     def test_pm25_breakpoints(self):
         cases = [(0, 0), (9.0, 50), (9.05, 50), (9.1, 51), (28.0, 86),
                  (35.4, 100), (35.45, 100), (35.5, 101), (500, 500)]
         for conc, want in cases:
-            self.assertEqual(u.us_aqi("PM25", conc), want, conc)
+            self.assertEqual(market.us_aqi("PM25", conc), want, conc)
 
     def test_one_decimal_truncation_is_stable(self):
         # floor(c*10)/10 must give every one-decimal value back unchanged
@@ -46,16 +47,16 @@ class UsAqi(unittest.TestCase):
             self.assertEqual(math.floor(c * 10) / 10, round(c, 1), c)
 
     def test_pm10_and_o3(self):
-        self.assertEqual(u.us_aqi("PM10", 54.9), 50)
-        self.assertEqual(u.us_aqi("PM10", 55), 51)
-        self.assertEqual(u.us_aqi("O3", 70.9), 100)
-        self.assertEqual(u.us_aqi("O3", 250), 300)  # clamped to the table's top
+        self.assertEqual(market.us_aqi("PM10", 54.9), 50)
+        self.assertEqual(market.us_aqi("PM10", 55), 51)
+        self.assertEqual(market.us_aqi("O3", 70.9), 100)
+        self.assertEqual(market.us_aqi("O3", 250), 300)  # clamped to the table's top
 
 
 class Distance(unittest.TestCase):
     def test_zero_and_one_degree(self):
-        self.assertAlmostEqual(u._km(13.75, 100.5, 13.75, 100.5), 0.0)
-        self.assertAlmostEqual(u._km(0, 0, 1, 0), 111.19, delta=0.2)
+        self.assertAlmostEqual(market._km(13.75, 100.5, 13.75, 100.5), 0.0)
+        self.assertAlmostEqual(market._km(0, 0, 1, 0), 111.19, delta=0.2)
 
 
 class Weather(unittest.TestCase):
@@ -64,26 +65,26 @@ class Weather(unittest.TestCase):
                 3: "Overcast", 45: "Fog", 53: "Drizzle", 63: "Rain", 73: "Snow",
                 81: "Showers", 86: "Snow Showers", 95: "Thunderstorm", 99: "Thunderstorm"}
         for code, text in want.items():
-            self.assertEqual(u.wmo_condition(code), text, code)
+            self.assertEqual(market.wmo_condition(code), text, code)
 
     def test_iso_hour(self):
-        self.assertEqual(u._iso_hour("2026-07-20T17:00"), 17)
-        self.assertEqual(u._iso_hour("2026-07-20 05:00"), 5)
-        self.assertIsNone(u._iso_hour(""))
-        self.assertIsNone(u._iso_hour("2026-07-20"))
-        self.assertIsNone(u._iso_hour("2026-07-20Txx:00"))
+        self.assertEqual(market._iso_hour("2026-07-20T17:00"), 17)
+        self.assertEqual(market._iso_hour("2026-07-20 05:00"), 5)
+        self.assertIsNone(market._iso_hour(""))
+        self.assertIsNone(market._iso_hour("2026-07-20"))
+        self.assertIsNone(market._iso_hour("2026-07-20Txx:00"))
 
     def test_iso_wday_is_sunday_zero(self):
-        self.assertEqual(u._iso_wday("2026-11-22"), 0)  # Sunday
-        self.assertEqual(u._iso_wday("2026-11-24"), 2)  # Tuesday
-        self.assertEqual(u._iso_wday("2026-11-28"), 6)  # Saturday
-        self.assertEqual(u._iso_wday("garbage"), 0)
+        self.assertEqual(market._iso_wday("2026-11-22"), 0)  # Sunday
+        self.assertEqual(market._iso_wday("2026-11-24"), 2)  # Tuesday
+        self.assertEqual(market._iso_wday("2026-11-28"), 6)  # Saturday
+        self.assertEqual(market._iso_wday("garbage"), 0)
 
     def test_weather_payload_shape(self):
-        p = u.weather_payload(33.3, 3, high=35, low=26)
+        p = market.weather_payload(33.3, 3, high=35, low=26)
         self.assertEqual(set(p), {"tempC", "code", "condition", "high", "low", "hourly", "daily"})
         self.assertEqual((p["condition"], p["hourly"], p["daily"]), ("Overcast", [], []))
-        self.assertEqual(u.weather_payload(1.0, None)["code"], -1)
+        self.assertEqual(market.weather_payload(1.0, None)["code"], -1)
 
 
 class Pricing(unittest.TestCase):
