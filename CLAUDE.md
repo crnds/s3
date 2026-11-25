@@ -38,7 +38,7 @@ fresh per request, so edits show up on reload with no restart.
 
 ## The one invariant that matters most
 
-`src/pages.cpp` + `src/settings.cpp` and `simulator-s3.html` render the **same
+`src/page_*.cpp`, `sheet_*.cpp`, `strip.cpp`, `pages_common.cpp` + `src/settings.cpp` and `simulator-s3.html` render the **same
 UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 
 - **Text parity is structural, not approximate.** `tools/make_vlw.py` renders
@@ -53,7 +53,7 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   `// 0x....` comment beside each. Change both together.
 - **Two themes (Settings > Theme, NVS `light_mode`).** Theme-dependent
   colour roles are runtime tokens (`extern uint16_t` in `tokens.h`), assigned by
-  `applyThemeTokens()` in `settings.cpp` (twin: the simulator's function of the
+  `applyThemeTokens()` in `theme.cpp` (twin: the simulator's function of the
   same name); design.md 4.6 lists them. Never capture one in a `static const`, and check
   new UI in both themes. `loadThemeEarly()` reads the key before the first boot frame.
 - **Deliberate non-twins:** speaker output (`src/audio.cpp`; the sim keeps the Settings > Sound
@@ -64,17 +64,17 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   through RGB565 too).
 - After any UI change: screenshot the sim headless **and** the board
   (`tools/grab_screen.py`) and compare (see Commands).
-- **Note tokenizer is a four-copy parity surface**: `src/pages.cpp`,
+- **Note tokenizer is a four-copy parity surface**: `src/note_pure.cpp` (+ `page_note.cpp`),
   `simulator-s3.html`, `note.html` and `tools/note.py`.
-  `grep -rln noteWordColor src simulator-s3.html note.html` finds the first
-  three; `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
+  `grep -rln noteWordColor simulator-s3.html note.html` finds the browser
+  copies (the C++ one is `noteWordRole` in `src/note_pure.cpp`); `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
   cols×rows grid; every size holds at least the CYD pane's columns, so the
   CYD-geometry fit check in `note.html`/`note.py` stays a safe bound.
 - **Tokenizer corpus (`tests/note_tokens.json`).** Word and line cases, run
   against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
   (CI `simulator` job) and against `tools/note.py` by
-  `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
-  `noteWordColor` returns a role instead of a colour. It checks logic; a
+  `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy (`src/note_pure.cpp`, roles mapped to colours in
+  `page_note.cpp`) runs it too, in `pio test -e native` (`tests/native/test_note`). It checks logic; a
   test in `test_note_tokens.py` also pins `note.py`'s yellow to the nearest
   256-colour match of the firmware's `note.number` colour.
 
@@ -86,7 +86,7 @@ $PIO run                                 # build (first run downloads pioarduino
 $PIO run -t upload                       # flash over native USB (port auto-detected)
 $PIO run -t publish                      # build and offer it to the board over WiFi (OTA, below)
 $PIO device monitor                      # serial log (baud is irrelevant on native USB)
-$PIO test -e native                      # host-side unit tests (tests/native/): format, pace, motion math, timing
+$PIO test -e native                      # host-side unit tests (tests/native/): format, pace, motion math, timing, note tokenizer
 python3 tools/size_check.py              # CI's size gate on the last build (--update after planned growth)
 ~/.pio-venv/bin/python tools/parity.py   # board vs simulator goldens, both themes (needs the board on USB + pyserial)
 node tools/sim_check.mjs                 # CI's sim goldens (--update after a deliberate UI change)
@@ -111,7 +111,7 @@ pause in seconds, and `g:name` writes `shots/<name>.ppm` (`.png` with Pillow). A
 frame, so it can't show a one-frame glitch (flash, tear): those need eyes on
 the panel.
 
-Serial debug keys (main.cpp `serialCommand`): `n`/`p` next/prev page,
+Serial debug keys (`serial_debug.cpp` `serialCommand`): `n`/`p` next/prev page,
 `w`/`d`/`s` Weather/Device/Settings, `x` close sheets, `h` play the hourly
 signal now, `z` toggle screen
 sleep, `m` slow motion (every motion token x10, design.md 17), `g` dump the frame
@@ -184,6 +184,26 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
 
 ## Firmware internals
 
+**File map (`src/`).** `state.h` keeps STATE, the cross-core globals and mutexes,
+and includes one header per module (`layout.h` hit/card boxes, `config_keys.h`,
+`pages.h`, `nav.h`, `settings.h`, `net.h`, `format.h`, `sd_store.h`, `ota.h`,
+`gif_player.h`, `movie.h`, `ap_setup.h`). Names mirror `sim/*.js` where the sim has
+a twin.
+
+| File | Holds |
+|---|---|
+| `main.cpp` | globals, `networkTask`, `setup()`, `loop()` as named steps (`loopWhileAsleep`, `loopNightMode`, `loopHourlySignal`, `loopDraw`, `loopTouch`, `loopEndPass`) |
+| `alerts.cpp`, `screen_sleep.cpp`, `serial_debug.cpp` | sound alerts, screen sleep, serial keys + the `F`/`f` fixture protocol |
+| `display.cpp` | panel driver, present-time effects, the present gate (`presentFrame`, `pixelShiftTick`) |
+| `pages_common.cpp` | AA fills, primitives, glyphs, corner, weather glyphs, pace sweep, left column + BTC, clocks, month grid |
+| `page_status.cpp`, `page_usage.cpp`, `page_note.cpp`, `page_overview.cpp` | one page each |
+| `sheet_device.cpp`, `sheet_weather.cpp`, `strip.cpp` | the two sheets, the status strip |
+| `pages.cpp` | `render()`, the media pages with a static half (`catPanePage` etc.), media overlays |
+| `theme.cpp` | `applyThemeTokens`, `applyContrast` (runtime `TOK_COLOR_*`) |
+| `settings.cpp`, `nav.cpp` | Settings sheet, touch router + transitions |
+| `config_store.cpp`, `sd_store.cpp` | NVS config + saves; SD diag log, splash |
+| `format.cpp` + pure `format_pure`, `pace`, `timing`, `motion_math`, `note_pure` | native-tested logic (`pio test -e native`) |
+
 - **Graphics pipeline (`display.cpp`).** Every page draws into `frame`, a
   480×320 16bpp `LGFX_Sprite` in PSRAM (`g` points at it). LovyanGFX has no
   AXS15231B driver, so it is a *canvas only*; the panel side is the seller's
@@ -246,7 +266,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   `presentHold` suppresses presents while nav composes an incoming screen
   off-screen. Drawing cost is dominated by PSRAM bandwidth (full clear ~8ms)
   and anti-aliased text (~1ms per string); the status page is ~54ms at 1Hz.
-  Smooth shapes use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages.cpp:
+  Smooth shapes use `aaFillRoundRect` / `aaFillCircle` / `aaRing` (pages_common.cpp:
   LovyanGFX's algorithm blended straight into the buffer).
 - **Two cores, two locks — unchanged from the CYD:**
   all blocking I/O on `networkTask` (core 0); `loop()` on core 1 only touches
@@ -265,7 +285,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   alert crossing), `motion_math.cpp` (springs, release velocity, rubber band)
   and `timing.cpp` (stale/offline thresholds, live countdown) include no
   Arduino or LovyanGFX header, so `pio test -e native` runs them in seconds
-  (`[env:native]`, `tests/native/test_*/`). `format.cpp`, `pages.cpp`,
+  (`[env:native]`, `tests/native/test_*/`). `format.cpp`, `pages_common.cpp`,
   `main.cpp` and `motion.cpp` call them through thin wrappers. Add a file to
   `build_src_filter` in `[env:native]` only if its headers stay clear of
   `state.h`. `fmtTokensBuf` copies the ESP32 core's `dtostrf` rather than
@@ -337,12 +357,12 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   CYD's old `OFFLINE_AFTER_CYCLES = 3` became a 15-second hair trigger at the
   5s poll setting and made the board flap OFFLINE on ordinary packet loss. The simulator's
   `offlineAfterMs()` mirrors it.
-- **Stale data (`dataStale()`, pages.cpp; design.md 13.4):** before offline,
+- **Stale data (`dataStale()`, pages_common.cpp; design.md 13.4):** before offline,
   once the last good *live* poll (`lastFetchSuccessMs`, 0 = none since boot,
   i.e. the SD cache) is older than max(2 poll intervals, 1 min), the strip's
   CPU readout becomes "Updated Nm ago" / "Saved data" and the limit numerals
   go `text.secondary`. Twinned in the simulator.
-- **Sound alerts (`pollAlerts`, main.cpp; design.md 12.10):** networkTask
+- **Sound alerts (`pollAlerts`, alerts.cpp; design.md 12.10):** networkTask
   reads them off each poll and calls `audioPlay()` (safe from any core; it
   applies the switches, volume and mute rules). Alerts = a limit projected to
   run out before its reset (`paceSecondsToLimit`, shared with the pace flag,
@@ -351,9 +371,9 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   (`STATE.claudeActive`, live polls only) falling true -> false. The first
   good poll after boot or an outage only primes them. `SND_ATTN` has no
   trigger yet (needs Claude Code hooks on the Mac, roadmap.md F1).
-- **Screen sleep (`enterScreenSleep`/`exitScreenSleep`, main.cpp):** the
+- **Screen sleep (`enterScreenSleep`/`exitScreenSleep`, screen_sleep.cpp):** the
   sleep icon button (a minimal grey pill in corner slot a, `drawSystemCorner`,
-  `SLEEP_HIT_*` in state.h) is drawn last on every screen, and its hit box is
+  `SLEEP_HIT_*` in layout.h) is drawn last on every screen, and its hit box is
   checked before every other touch target. Corner slot b (the Battery Save
   glyph) sits to its left; content ink stays 8px clear of both. Sleeping
   fades the backlight to 0, sends panel DISPOFF + SLPIN (`displaySetSleep`), drops the
@@ -471,8 +491,8 @@ Colours, type roles, spacing, radii, touch and motion values are design
 tokens in `src/tokens.h` (`TOK_*`, the upper snake of design.md's dotted
 names), mirrored line for line in the simulator's TOKENS block (RGB888 with
 the `// 0x....` beside). Screens use tokens only -- no raw colour, font id or
-magic spacing. Shared hit boxes and card boxes live in `state.h`'s LAYOUT
-block and are copied at the top of `simulator-s3.html`.
+magic spacing. Shared hit boxes and card boxes live in `layout.h`
+ and are copied at the top of `simulator-s3.html`.
 
 ## Cat library
 

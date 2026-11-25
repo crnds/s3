@@ -682,6 +682,10 @@ and after in §11.
   - Pure logic first. Refactor only what's needed to separate it from hardware.
 - **Done when.** `pio test -e native` runs in seconds and covers every function
   above.
+- **Shipped (2026-11-25).** `format_pure`, `pace`, `motion_math`, `timing` and
+  `note_pure` (the tokenizer, against `tests/note_tokens.json`): 42 tests, ~3 s.
+  Not covered: F5a's forecast (not built yet) and the offline state machine
+  beyond the pure thresholds in `timing.cpp`.
 
 #### O7 · Parity fixture mode — H · M · FW Sim Tools
 - **What.**
@@ -800,6 +804,20 @@ and after in §11.
   - `state.h` (35 KB) becomes `layout.h` plus `state.h`.
   - Mirror the split in the sim's sections.
 - **When.** Only after O4 and O7 exist, so the refactor is verifiably a no-op.
+- **Shipped, firmware half (2026-11-25).** Every commit kept the 20 sim goldens
+  unchanged and passed `tools/parity.py` against the baseline.
+  - `state.h` split into `layout.h`, `config_keys.h` and one header per module.
+  - `pages.cpp` is `pages_common.cpp`, one file per page/sheet, `strip.cpp`,
+    and `pages.cpp` (`render()` + the media pages with a static half, which
+    mirrors `sim/pages.js`; no `page_pane.cpp`).
+  - `main.cpp` lost `alerts.cpp`, `screen_sleep.cpp`, `serial_debug.cpp`, and
+    `loop()` is named steps. `theme.cpp` left `settings.cpp`; `config_store.cpp`
+    left `sd_store.cpp`.
+  - The note tokenizer returns roles (`note_pure.cpp`, O4/O5): the C++ copy
+    runs the shared corpus natively.
+  - The image grew ~1.4 KB (lost cross-file inlining).
+  - Not done: the note wrap's layout/draw split, and the type-metric constants
+    (`17/23/11/22`), which need the sim in the same change.
 
 #### O11 · A media partition — L · M · FW Tools
 - **What.**
