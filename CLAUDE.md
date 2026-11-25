@@ -14,7 +14,7 @@ here on 2026-11-09. "The CYD" in comments below means that lineage.
 ```
 Mac laptop                                   S3 board (on WiFi)
 server/usage_server.py  ──/api/usage──▶      src/*.cpp (polls every 20s, 7 pages)
-  :8787, launchd com.corner.s3usage           simulator-s3.html = browser twin
+  :8787, launchd com.corner.s3usage           simulator-s3.html + sim/*.js = browser twin
 server/control_server.py (:8788, localhost; com.corner.s3control)
   ▲ POST /api/note (localhost): note.html (served by :8787), tools/note.py (CLI)
 ```
@@ -30,16 +30,23 @@ Mac-side internals are in **"Mac server"** below. The browser pages:
   served by `server/control_server.py` at `http://127.0.0.1:8788/`
   (`HTML_PATH`, repo-relative).
 - **`note.html`** — Note page editor, served by
-  `server/usage_server.py` at `http://127.0.0.1:8787/` (`NOTE_HTML_PATH`).
+  `server/usage_server.py` at `http://127.0.0.1:8787/` (`NOTE_HTML_PATH`, `server/s3srv/notes.py`).
 
 Both follow the `~/CLAUDE.md` static-web conventions and are **not** bound
 by the parity rule (except `note.html`'s tokenizer, below). Both are read
-fresh per request, so edits show up on reload with no restart.
+fresh per request, so edits show up on reload with no restart. They share
+no CSS/JS file on purpose (each server serves exactly one page), so keep the
+duplicated bits in step by hand: the `:root` tokens use the same names
+(`--good` green, `--bad` rose, `--warn` amber) and `escapeHtml` is the same
+five-character escape in both. `note.html` keeps an unsent draft in
+localStorage `s3note_v1_draft`, moving one left under the old
+`cydnote_v1_draft` key on first read.
 
 ## The one invariant that matters most
 
-`src/pages.cpp` + `src/settings.cpp` and `simulator-s3.html` render the **same
-UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
+`src/pages.cpp` + `src/settings.cpp` and the simulator (`simulator-s3.html` +
+`sim/*.js`, below) render the **same UI** and must be kept in lockstep: same
+coordinates, fonts, colours, text.
 
 - **Text parity is structural, not approximate.** `tools/make_vlw.py` renders
   every font once and writes both the firmware's VLW arrays
@@ -49,11 +56,11 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   Never swap the simulator to browser `fillText` — that breaks line-fit
   predictions, the whole point of the sim (the S3 version of the CYD's
   "6px per character" rule).
-- **Colours:** firmware RGB565 in `tokens.h`, simulator RGB888 with the
-  `// 0x....` comment beside each. Change both together.
+- **Colours:** firmware RGB565 in `tokens.h`, simulator RGB888 in
+  `sim/tokens.js` with the `// 0x....` comment beside each. Change both together.
 - **Two themes (Settings > Theme, NVS `light_mode`).** Theme-dependent
   colour roles are runtime tokens (`extern uint16_t` in `tokens.h`), assigned by
-  `applyThemeTokens()` in `settings.cpp` (twin: the simulator's function of the
+  `applyThemeTokens()` in `settings.cpp` (twin: `sim/theme.js`'s function of the
   same name); design.md 4.6 lists them. Never capture one in a `static const`, and check
   new UI in both themes. `loadThemeEarly()` reads the key before the first boot frame.
 - **Deliberate non-twins:** speaker output (`src/audio.cpp`; the sim keeps the Settings > Sound
@@ -65,18 +72,62 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 - After any UI change: screenshot the sim headless **and** the board
   (`tools/grab_screen.py`) and compare (see Commands).
 - **Note tokenizer is a four-copy parity surface**: `src/pages.cpp`,
-  `simulator-s3.html`, `note.html` and `tools/note.py`.
-  `grep -rln noteWordColor src simulator-s3.html note.html` finds the first
+  `sim/page_note.js`, `note.html` and `tools/note.py`.
+  `grep -rln noteWordColor src sim note.html` finds the first
   three; `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
   cols×rows grid; every size holds at least the CYD pane's columns, so the
   CYD-geometry fit check in `note.html`/`note.py` stays a safe bound.
 - **Tokenizer corpus (`tests/note_tokens.json`).** Word and line cases, run
-  against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
+  against the simulator and `note.html` by `node tools/note_corpus.mjs`
   (CI `simulator` job) and against `tools/note.py` by
   `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
   `noteWordColor` returns a role instead of a colour. It checks logic; a
   test in `test_note_tokens.py` also pins `note.py`'s yellow to the nearest
   256-colour match of the firmware's `note.number` colour.
+
+## Simulator (`simulator-s3.html` + `sim/`)
+
+`simulator-s3.html` holds the CSS, the control-panel markup and the
+`<script src>` tags; the code is classic scripts in `sim/`, named after the
+firmware file each one twins, loaded in this order:
+
+| File | Holds (firmware twin) |
+|---|---|
+| `fonts.js` | glyph atlas, **generated** by `tools/make_vlw.py` -- never edit |
+| `tokens.js` | `TOK_*` (`tokens.h`), incl. the `TOK_NOTE_*` aliases as global getters |
+| `layout.js` | screen constants + LAYOUT boxes (`state.h`) |
+| `state.js` | storage keys, `lsGet`/`lsSet`, device figures, `STATE` |
+| `display.js` | frame buffers, `scrimPx`/`fadePx`, `presentFrame`, `displayPresent*`, `pixelShiftTick` (`display.cpp`) |
+| `fonts_draw.js` | `drawText*`, `textW` (`fonts.cpp`) |
+| `gfx.js` | the LovyanGFX calls (AA fills, rings, clip) |
+| `format.js` / `pace.js` / `timing.js` | `format.cpp` / `pace.cpp` / `timing.cpp` (+ the Bangkok clock) |
+| `motion.js` | springs, velocity, rubber band, backlight animator (`motion.cpp`) |
+| `pages_common.js` | primitives, glyphs, corner, weather icons, pace sweep, left column, clock |
+| `page_status.js`, `page_usage.js`, `page_note.js`, `page_overview.js` | one page each |
+| `sheet_device.js`, `sheet_weather.js`, `strip.js` | the two sheets, the status strip |
+| `pages.js` | media pages (placeholder cats/movies, pane pages) and `render()` |
+| `theme.js` | `applyThemeTokens`, `applyContrast` |
+| `settings.js` | `SETTINGS[]`, the Settings screens, `applyEffectivePoll`, persistence (`settings.cpp`, `sd_store.cpp`) |
+| `nav.js` | touch router, gestures, transitions (`nav.cpp`) |
+| `net.js` | `fetchUsage`, `applyUsageDoc`, `applyWeatherDoc`, poll timer (`net.cpp`) |
+| `mock.js`, `fixture.js`, `chrome.js` | sim-only: `MOCK`, `?fixture=` mode + `simNowMs()`, the control panel and pointer/key input |
+| `main.js` | `tick()` (= `loop()`), screen sleep, boot (`main.cpp`) |
+
+Rules:
+- **No build step, no modules:** it must run from `file://`, so no
+  `type="module"` and no fetch except the fixture load. Top-level `const`/`let`
+  and functions are shared globals (`STATE` and `render` stay global: tools
+  and the MCP recipe below call them).
+- **Load order:** a file may *call* anything at run time, but at load time
+  (top-level initialisers, `addEventListener(…, fn)`) it may only use what an
+  earlier file defined: a `const` read before its file has run is a TDZ error.
+  A new file goes into the script list at the right place.
+- `render()` → `presentFrame()` stays synchronous; draw code reads the clock
+  through `simNowMs()` only (fixtures freeze it).
+- Draw and poll code never read the DOM: `chrome.js` copies the Connection
+  card's controls into `STATE.sim*` / `STATE.cfgPollIntervalSec`. Only
+  `display.js` (the canvas) and `chrome.js` touch the document.
+- Use the firmware's names for twinned functions, so `git grep` finds both.
 
 ## Commands
 
@@ -150,8 +201,9 @@ data from `tests/fixtures/default.json`, no polling, `window.simFixture.show()`)
 draws every page and sheet in both themes and compares each with
 `tests/golden/default/*.png` (per-channel tolerance 2 for blending
 differences between machines; failures leave actual + diff PNGs in
-`tests/out/`). **Any visible UI change updates the goldens in the same
-commit.** Playwright is pinned to 1.63.0 with no package.json: locally
+`tests/out/`); any page error or console error in the sim (e.g. a
+missing `sim/*.js`) fails it too. **Any visible UI change updates the goldens
+in the same commit.** Playwright is pinned to 1.63.0 with no package.json: locally
 `npm install --no-save playwright@1.63.0 && npx playwright install chromium`
 (node_modules/ is gitignored), or point `NODE_PATH` at an install. Goldens
 made on the Mac pass on Linux within the tolerance; if they ever drift, run
@@ -209,7 +261,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   so sheets and static screens flash too) on the even seconds of hh:00:00..05;
   serial `h` plays it now. `motion.cpp`'s backlight animator fades sleep, wake,
   Night Mode edges and brightness changes.
-- **Navigation (`nav.cpp`, twin: the simulator's NAV block).** The touch
+- **Navigation (`nav.cpp`, twin: `sim/nav.js`).** The touch
   router, gesture recogniser and every transition, stepped once per `loop()`
   pass -- nothing blocks, so a touch during motion is always read. Commit on
   touch-up with a 10px slop and a 120ms rearm from the last up; pressed states
@@ -302,7 +354,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   (design.md 7.5) is a 3x3 grid of the cards in miniature; its weather cell
   opens the Weather sheet. Offline both show the full-screen cat.
 - **OTA (`ota.cpp`, roadmap O9).** `pio run -t publish` (`tools/ota_publish.py`)
-  copies the build to `~/.s3_firmware/s3.bin`; `server/usage_server.py` announces
+  copies the build to `~/.s3_firmware/s3.bin`; the usage server (`s3srv/firmware.py`) announces
   it in `/api/usage` as `firmware.s3.{sha256,size}` and serves it at
   `/firmware/s3.bin` (to this Mac and to boards that poll it). The sha256 is the
   image digest esptool appends -- what `esp_partition_get_sha256()` returns for
@@ -339,6 +391,13 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   CYD's old `OFFLINE_AFTER_CYCLES = 3` became a 15-second hair trigger at the
   5s poll setting and made the board flap OFFLINE on ordinary packet loss. The simulator's
   `offlineAfterMs()` mirrors it.
+- **Time (`net.cpp`).** The timezone (`GMT_OFFSET_SEC`, UTC+7, no DST) is applied
+  by `applyTimezone()` at the start of `connectWifi()`, whatever WiFi does. It
+  used to ride along with `configTime()`, which only ran if WiFi came up within 20 s
+  of boot, so on a slow AP the clock stayed on UTC (7 h behind) until a reboot.
+  SNTP starts once, the first time WiFi is up (`ensureSntp()`, called at boot and
+  from `fetchUsage()`). With no SNTP yet, `applyUsageDoc` seeds the clock from the
+  server's `epoch`, and the timezone is already right.
 - **Stale data (`dataStale()`, pages.cpp; design.md 13.4):** before offline,
   once the last good *live* poll (`lastFetchSuccessMs`, 0 = none since boot,
   i.e. the SD cache) is older than max(2 poll intervals, 1 min), the strip's
@@ -388,7 +447,31 @@ curl -s localhost:8787/api/usage | python3 -m json.tool
 launchctl kickstart -k gui/$UID/com.corner.s3usage   # restart after editing
 tail -f /tmp/s3usage.log                          # one line per board poll = heartbeat
 tools/note.py "buy milk"                          # set the Note page from a terminal
+/usr/bin/python3 -m unittest discover -s tests/server   # server tests (CI `server` job)
 ```
+
+**Code layout.** `usage_server.py` is only the launchd entry point
+(`build_report()` wiring, `main()`); the code is the `server/s3srv/` package
+beside it, which `control_server.py` also imports from. Both files are run
+by absolute path with no WorkingDirectory, so `sys.path[0]` is `server/`:
+import with absolute imports (`from s3srv import state`; a relative import
+breaks in a file run by path) and never name a module after a stdlib one.
+
+| Module | Owns |
+|---|---|
+| `s3srv/common.py` | `log_err`/`log_out`, `REPO_DIR`, the ports and `USAGE_LOCAL_URL`, `fetch_json()`, `load_secret()`, `JsonHandler` (CORS hook, body reader), `Server` |
+| `s3srv/state.py` | `STATE` + lock, `state_set()` (every loop's write), client registry (`note_client()` records and prunes), `activity_gated_loop` |
+| `s3srv/power.py` | `pmset` battery read, battery save, `battery_guard_loop(start_server)` |
+| `s3srv/usage_scan.py` | jsonl tail: `parse_line` → `ingest_lines` (dedupe) → `merge_buckets`/`commit_batch`; `compute_aggregates`, `scan_loop`, prices |
+| `s3srv/limits.py` | Keychain token, `fetch_limits` (HTTP) + `parse_limits` (pure), `limits_loop` |
+| `s3srv/market.py` | BTC, weather (`parse_openmeteo_weather`), AQI chain (`parse_air4thai`), `market_loop` |
+| `s3srv/notes.py` | `sanitize_note`, load/save/`set_note`, `NOTE_HTML_PATH`, `NOTE_ALLOWED_ORIGINS` |
+| `s3srv/firmware.py` | OTA offer, board reports, install requests (its dicts, under its own lock) |
+| `s3srv/report.py` | `build_report(offer)`: the `/api/usage` document, a pure read of `STATE` |
+| `s3srv/routes.py` | `Handler` route tables, poll heartbeat log, `start_http_server(report_fn)` |
+
+Tests (`tests/server/`, stdlib `unittest`) import the modules directly;
+`test_report_contract.py` pins the `/api/usage` key tree to `usage_keys.json`.
 
 Local state outside the repo: `~/.s3_note.json` (the note), `~/.s3_firmware/`
 (published OTA builds; outside the repo because an image carries the WiFi
@@ -472,10 +555,10 @@ targets are 56x40, reaching up to y 280 (design.md 9.6). Page navigation
 splits at the screen half (x 240), independent of the grid.
 Colours, type roles, spacing, radii, touch and motion values are design
 tokens in `src/tokens.h` (`TOK_*`, the upper snake of design.md's dotted
-names), mirrored line for line in the simulator's TOKENS block (RGB888 with
+names), mirrored line for line in `sim/tokens.js` (RGB888 with
 the `// 0x....` beside). Screens use tokens only -- no raw colour, font id or
 magic spacing. Shared hit boxes and card boxes live in `state.h`'s LAYOUT
-block and are copied at the top of `simulator-s3.html`.
+block and are copied in `sim/layout.js`.
 
 ## Cat library
 
