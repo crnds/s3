@@ -70,6 +70,12 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   three; `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
   cols×rows grid; every size holds at least the CYD pane's columns, so the
   CYD-geometry fit check in `note.html`/`note.py` stays a safe bound.
+- **Tokenizer corpus (`tests/note_tokens.json`).** Word and line cases, run
+  against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
+  (CI `simulator` job) and against `tools/note.py` by
+  `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
+  `noteWordColor` returns a role instead of a colour. It checks logic, not
+  colours: `note.py`'s palette still has the old CYD yellow.
 
 ## Commands
 
@@ -148,8 +154,9 @@ commit.** Playwright is pinned to 1.63.0 with no package.json: locally
 `npm install --no-save playwright@1.63.0 && npx playwright install chromium`
 (node_modules/ is gitignored), or point `NODE_PATH` at an install. Goldens
 made on the Mac pass on Linux within the tolerance; if they ever drift, run
-the workflow by hand with `update_goldens` and commit its artifact. Native
-tests (O4) and the tokenizer corpus (O5) get CI steps when they exist.
+the workflow by hand with `update_goldens` and commit its artifact. The same
+job runs `node tools/note_corpus.mjs`; the `firmware` job runs
+`pio test -e native`; the `server` job runs the Python tests (Python 3.9).
 
 A `src/config.h` must exist (copy `src/config.example.h`; gitignored).
 Git remote is `origin` (github.com/crnds/s3). `docs/`, `shots/` and `config.h`

@@ -3,11 +3,12 @@
 #              slot, no growth past the committed baseline unless it moved too)
 #              + `pio test -e native` (host-side unit tests, tests/native/)
 #   simulator  every page and sheet, both themes, from tests/fixtures/ against
-#              tests/golden/ (tools/sim_check.mjs)
+#              tests/golden/ (tools/sim_check.mjs), and the note tokenizer
+#              corpus (tools/note_corpus.mjs; note.py's half is in `server`)
 #   server     the Mac server's unit tests + contract snapshot, on Python 3.9
 #              (the language level launchd's /usr/bin/python3 runs it with)
-# The board-vs-sim compare stays local: it needs the board. The tokenizer
-# corpus (O5) gets a step here when it lands.
+# The board-vs-sim compare (tools/parity.py) stays local: it needs the board.
+# The C++ tokenizer joins the corpus when it returns roles (refactor Phase 4c).
 name: CI
 
 on:
@@ -57,6 +58,9 @@ jobs:
       - name: Simulator goldens
         if: ${{ !inputs.update_goldens }}
         run: node tools/sim_check.mjs
+      - name: Note tokenizer corpus (simulator, note.html)
+        if: ${{ !inputs.update_goldens }}
+        run: node tools/note_corpus.mjs
       - name: Regenerate goldens
         if: ${{ inputs.update_goldens }}
         run: node tools/sim_check.mjs --update
