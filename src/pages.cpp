@@ -35,6 +35,11 @@ void presentFrame() {
   shiftDirty = false;
 }
 
+// Pixel-shift orbit: <=2 px, eight steps (design.md, panel type).
+static const int8_t SHIFT_ORBIT[8][2] = {
+  {0, 0}, {1, 0}, {2, 0}, {2, -1}, {2, -2}, {1, -2}, {0, -2}, {0, -1}
+};
+
 // Advance the pixel-shift orbit (core 1 only, like everything display-side).
 // Returns true on a step so the caller can repaint immediately.
 bool pixelShiftTick(uint32_t now) {
@@ -239,8 +244,10 @@ static void drawGearGlyph(int cx, int cy, uint16_t c, uint16_t bg) {
                     cx + lroundf(cosf(a) * 9), cy + lroundf(sinf(a) * 9), TOK_STROKE_GLYPH_R, c);
   }
 }
-// Icon button pressed state (design.md 11.10): a 40px fill.pressed disc.
-void drawIconButtonPressed(int cx, int cy) {
+// Icon button pressed state (design.md 11.10): only the 40px fill.pressed disc
+// behind the glyph -- the caller draws the glyph (primary) on top. Used by the
+// modal header's close/back; the sleep pill and shuffle disc press differently.
+static void drawIconButtonPressed(int cx, int cy) {
   aaFillCircle(cx, cy, TOK_PRESSED_DISC_R, TOK_COLOR_FILL_PRESSED);
 }
 

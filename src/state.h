@@ -277,7 +277,6 @@ enum SettingsScreen { SET_OFF, SET_LIST, SET_LEAF };
 extern SettingsScreen settingsScreen;
 extern int settingsScrollOffset;  // vertical scroll position (px) of the SET_LIST list (may overshoot while rubber-banding)
 extern int settingsLeafIndex;
-const uint32_t CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
 extern uint32_t confirmArmedMs;
 extern int confirmArmedRow;
 // Written by networkTask() (core 0), read by drawFooter()/loop()'s progress
@@ -295,18 +294,15 @@ extern uint32_t lastTouchMs;
 extern volatile bool screenSleeping;
 
 // ── PIXEL SHIFT (anti image-retention) ─────────────────────
-const int8_t SHIFT_ORBIT[8][2] = {
-  {0, 0}, {1, 0}, {2, 0}, {2, -1}, {2, -2}, {1, -2}, {0, -2}, {0, -1}
-};
+// The orbit itself (SHIFT_ORBIT) is pages.cpp's.
 extern uint32_t cfgShiftStepMs;  // dwell per step; flash "pixel_shift_min", 0 disables
 extern uint8_t shiftIdx;
 extern int shiftX, shiftY;
 extern uint32_t lastShiftMs;
 extern bool shiftDirty;
 
-// CPU load estimate + touch edge tracking.
+// CPU load estimate.
 extern float cpuPercentAvg;
-extern bool touchWasDown;
 // Did the most recent fetch reach the server? Written by networkTask() (core
 // 0), read by drawFooter()/loop()'s progress line (core 1) with no lock --
 // volatile for the same cross-core-visibility reason as STATE.haveData.
@@ -364,7 +360,6 @@ extern int cfgServerPort;
 extern int cfgBrightness;
 extern bool cfgNightModeOn;
 extern bool nightDimActive;
-const uint8_t NIGHT_MODE_DIM_VALUE = 64;  // ~25%, matches the brightness preset
 // Battery Save: floor usage-poll interval only (no backlight change). User's
 // Poll Interval preference stays stored; applyEffectivePoll() applies the floor.
 // Mode is Settings OFF/ON/AUTO (persisted as flash key "battery_save"):
@@ -520,7 +515,6 @@ extern bool mdnsStarted;
 void loadRuntimeConfig();
 const char* resetReasonStr();
 void logDiag(const char* event);
-bool drawBmpFromSD(const char* path, int dx, int dy);
 void showBootSplash();
 void saveWifiCredsToFlash(const String& ssid, const String& password);
 void saveIntConfigToFlash(const char* key, int32_t value);
@@ -556,12 +550,11 @@ void drawMediaPageStatic();
 // System corner glyphs, drawn LAST on every screen (design.md 11.21).
 // overMedia puts each occupied slot on a color.plate backing.
 void drawSystemCorner(bool overMedia);
-// Shared icon/component primitives settings.cpp and gif_player.cpp reuse.
+// Shared icon/component primitives (pages.cpp; settings.cpp and gif_player.cpp reuse these).
 void drawCloseGlyph(int cx, int cy, uint16_t c);
 void drawBackGlyph(int cx, int cy, uint16_t c);
 void drawChevron(int cx, int cy, uint16_t c);
 void drawShuffleButton(int cx, int cy, bool pressed);
-void drawIconButtonPressed(int cx, int cy);
 void drawModalHeader(bool back, const char* title, bool pressed);
 void drawCardSurface(int x, int y, int w, int h, uint16_t fill);
 // Anti-aliased fills (design.md 8.1): LovyanGFX's fillSmoothRoundRect /

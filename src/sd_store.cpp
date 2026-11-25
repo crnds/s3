@@ -208,7 +208,7 @@ void logDiag(const char* event) {
 // RGB565, and drawn into `frame` (the caller presents). Returns false
 // (silently) for a missing file or any unsupported format -- callers treat the
 // asset as simply absent.
-bool drawBmpFromSD(const char* path, int dx, int dy) {
+static bool drawBmpFromSD(const char* path, int dx, int dy) {
   if (!STATE.sdOk) return false;
   lockSD();
   File f = SD_MMC.open(path, FILE_READ);

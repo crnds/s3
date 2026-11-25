@@ -63,7 +63,7 @@ looks arbitrary, look for its reason here.
 | Memory | 8 MB PSRAM; one full frame is 300 KB | spec | An extra frame buffer (for a slide, a swipe preview, or a sheet) is affordable. The limit is bus time, not RAM. |
 | Flash | 6.25 MB app slot, build ~1.55 MB | `CLAUDE.md` | Flash size isn't a design constraint. The **parity cost** is: every asset exists twice, once in the firmware and once in the simulator. |
 | Panel type | IPS: wide viewing angles, a slightly lifted black, and some image retention | spec | Near-black (gray.0) and true black look the same. Pixel shift (≤2 px orbit, `SHIFT_ORBIT`) needs a margin at every edge. Avoid large, static, saturated blocks. |
-| Backlight | PWM, 0–255; Night Mode dims to 25% (`NIGHT_MODE_DIM_VALUE = 64`) | `state.h:365` | Dimming scales everything, so contrast ratios hold. Absolute luminance falls, though, and low-contrast non-text (tracks, separators) nearly disappears at 25%. So grouping must never depend on a separator alone. |
+| Backlight | PWM, 0–255; Night Mode dims to 25% (`NIGHT_MODE_DIM_VALUE = 64`) | `settings.cpp` | Dimming scales everything, so contrast ratios hold. Absolute luminance falls, though, and low-contrast non-text (tracks, separators) nearly disappears at 25%. So grouping must never depend on a separator alone. |
 | Audio | NS4168 I2S amp and speaker socket | spec | A feedback channel (§12.10), on at a quiet default level; Settings > Sound holds every control (§13.3). |
 
 ---

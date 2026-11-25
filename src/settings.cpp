@@ -66,6 +66,9 @@ struct SettingDef {
 
 static const int BRIGHTNESS_VALUES[5] = {0, 64, 128, 191, 255};
 static const char* const BRIGHTNESS_LABELS[5] = {"0%", "25%", "50%", "75%", "100%"};
+static const uint8_t NIGHT_MODE_DIM_VALUE = 64;  // ~25%, matches the brightness preset
+// Destructive rows: how long the first tap keeps the row armed (design.md 9.5).
+static const uint32_t CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
 
 // Config keys persisted through the generic queue (see pendingConfigSave in
 // state.h and sd_store.cpp's saveIntConfigToFlash()/main.cpp's

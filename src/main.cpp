@@ -56,7 +56,7 @@ bool shiftDirty = false;
 // is the render loop's duty cycle -- work time per pass vs the pass period,
 // minus time spent idle waiting on the panel's TE edge -- smoothed with an EMA.
 float cpuPercentAvg = 0;
-bool touchWasDown = false;
+static bool touchWasDown = false;
 bool wifiOk = false;
 volatile bool connected = false;  // did the most recent fetch reach the server?
 volatile bool fixtureMode = false;  // serial 'F' loaded canned data: polling is frozen until 'f'
