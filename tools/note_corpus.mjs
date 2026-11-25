@@ -70,6 +70,9 @@ try {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
+    // The sim must load clean (a missing sim/*.js is a 404 console error).
+    // note.html's own GET /api/note 404s here: this static server has no API.
+    if (copy === 'sim') page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
     await page.goto(base + url);
     if (copy === 'sim') await page.waitForFunction(() => window.simFixtureReady || window.simFixtureError, null, { timeout: 15000 });
     const bad = await page.evaluate(run, { words: corpus.words, lines: corpus.lines, copy });
