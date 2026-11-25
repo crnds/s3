@@ -58,3 +58,12 @@ uint32_t displayTeCount();          // TE edges seen since boot
 uint32_t displayLastPresentUs();    // wall time of the most recent displayPresent()
 uint32_t displayPresentCount();
 uint32_t displayLastTeWaitUs();     // part of the last present spent idle waiting for TE
+
+// Materials without alpha (design.md 8.4). Frames hold big-endian RGB565, so each
+// op swaps to native order, halves every channel with one shift and mask, and
+// swaps back. material.scrim = 50%; used by the present-time scrim (display.cpp)
+// and the Settings scroll-edge shade (settings.cpp).
+static inline uint16_t rgb565Swap(uint16_t c) { return (uint16_t)((c >> 8) | (c << 8)); }
+static inline uint16_t rgb565HalfBE(uint16_t be) {
+  return rgb565Swap((uint16_t)((rgb565Swap(be) >> 1) & 0x7BEF));
+}

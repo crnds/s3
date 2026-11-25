@@ -431,7 +431,6 @@ void settingsUndoLeaveSection() {
 // ── LIST GEOMETRY (design.md 11.7 / 11.14) ─────────────────
 // Viewport y 44..319 under the modal header; the first row rests at y 52.
 static const int LIST_X = TOK_LAYOUT_CONTENT_X0, LIST_W = TOK_LAYOUT_CONTENT_W;
-static const int LIST_VIEW_Y0 = TOK_LAYOUT_HEADER_H;
 static const int LIST_ROW0_Y = TOK_LAYOUT_HEADER_CONTENT_Y;
 static const int LIST_STEP = TOK_LIST_ROW_H + TOK_SPACE_LIST_GAP;   // 64
 static const int LIST_TRAIL_R = LIST_X + LIST_W - TOK_LIST_ROW_INSET;  // 456 (exclusive right of the trailing element)
@@ -467,17 +466,12 @@ static void drawTogglePill(int xRight, int cy, bool on) {
 
 // Scroll-edge shade (design.md 8.4): once scrolled, the 8 rows passing under
 // the header (y 44..51) are drawn at material.scrim, so the list visibly
-// slides under it -- never a divider line. The sprite holds big-endian
-// RGB565, hence the swaps around the shift-and-mask.
+// slides under it -- never a divider line.
 static void shadeRows(int y0, int y1) {
   uint16_t* fb = (uint16_t*)frame.getBuffer();
   for (int y = y0; y < y1; y++) {
     uint16_t* p = fb + y * SCREEN_W;
-    for (int x = 0; x < SCREEN_W; x++) {
-      uint16_t c = (uint16_t)((p[x] >> 8) | (p[x] << 8));
-      c = (c >> 1) & 0x7BEF;
-      p[x] = (uint16_t)((c >> 8) | (c << 8));
-    }
+    for (int x = 0; x < SCREEN_W; x++) p[x] = rgb565HalfBE(p[x]);
   }
 }
 

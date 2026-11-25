@@ -67,3 +67,8 @@ const int SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W;
 // gif_player.cpp agree. The Overview page's pane is its cat cell (OV_CAT_*).
 const int MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
 const int MIXED_GIF_Y0 = TOK_LAYOUT_CONTENT_Y0, MIXED_GIF_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
+
+// Settings list viewport: under the modal header, to the bottom of the screen (settings.cpp
+// draws and hit-tests it, nav.cpp scrolls it). The first row rests at TOK_LAYOUT_HEADER_CONTENT_Y.
+const int LIST_VIEW_Y0 = TOK_LAYOUT_HEADER_H;
+const int LIST_VIEW_H = SCREEN_H - LIST_VIEW_Y0;

@@ -202,16 +202,16 @@ uint32_t displayPresentCount() { return presentCount; }
 uint32_t displayLastTeWaitUs() { return lastTeWaitUs; }
 
 // ── PIXEL OPS ─────────────────────────────────────────────
-static inline uint16_t swap16(uint16_t c) { return (uint16_t)((c >> 8) | (c << 8)); }
+static inline uint16_t swap16(uint16_t c) { return rgb565Swap(c); }
 
 // Materials without alpha (design.md 8.4): the frames hold big-endian RGB565,
 // so each op swaps to native order, halves/quarters every channel with one
 // shift and mask, and swaps back.
 static inline uint16_t scrimPx(uint16_t be, int level) {
   if (level <= 0) return be;
+  if (level >= 2) return rgb565HalfBE(be);        // material.scrim, 50%
   uint16_t c = swap16(be);
-  if (level == 1) c = c - ((c >> 2) & 0x39E7);   // material.scrim.light, 75%
-  else c = (c >> 1) & 0x7BEF;                     // material.scrim, 50%
+  c = c - ((c >> 2) & 0x39E7);                    // material.scrim.light, 75%
   return swap16(c);
 }
 
