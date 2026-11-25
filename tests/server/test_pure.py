@@ -1,6 +1,7 @@
 import math
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
 import helpers
 from helpers import u
@@ -128,6 +129,37 @@ class Buckets(unittest.TestCase):
         self.assertEqual(u.project_name(""), "unknown")
         self.assertEqual(u.project_name(None), "unknown")
         self.assertEqual(u.project_name("/"), "/")
+
+
+class BatteryStatus(unittest.TestCase):
+    """pmset failing used to look exactly like a desktop Mac on AC."""
+
+    def setUp(self):
+        u._battery_failure_logged = False
+        self.addCleanup(setattr, u, "_battery_failure_logged", False)
+        p = mock.patch.object(u, "log_err")
+        self.log = p.start()
+        self.addCleanup(p.stop)
+
+    def run_pmset(self, stdout="", returncode=0, raises=None):
+        done = mock.Mock(stdout=stdout, returncode=returncode)
+        with mock.patch.object(u.subprocess, "run", side_effect=raises, return_value=done):
+            return u.battery_status()
+
+    def test_battery_on_battery_and_on_ac(self):
+        self.assertEqual(self.run_pmset("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t72%; discharging"), (72, False))
+        self.assertEqual(self.run_pmset("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged"), (100, True))
+        self.log.assert_not_called()
+
+    def test_desktop_without_battery_is_none_and_silent(self):
+        self.assertIsNone(self.run_pmset("Now drawing from 'AC Power'\n"))
+        self.log.assert_not_called()
+
+    def test_failure_is_none_and_logged_once(self):
+        self.assertIsNone(self.run_pmset(returncode=1))
+        self.assertIsNone(self.run_pmset(raises=OSError("no pmset")))
+        self.assertEqual(self.log.call_count, 1)
+        self.assertIn("pmset failed", self.log.call_args[0][0])
 
 
 if __name__ == "__main__":

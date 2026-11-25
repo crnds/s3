@@ -323,16 +323,31 @@ BATTERY_LOW_PCT = 50
 BATTERY_CHECK_INTERVAL_SEC = 120
 
 
+_battery_failure_logged = False
+
+
+def _battery_failed(why):
+    # None from battery_status() reads as "desktop Mac, treat as AC", which
+    # silently disables the low-battery guard. A desktop is normal (no battery
+    # line); pmset itself failing is not, so say so once.
+    global _battery_failure_logged
+    if not _battery_failure_logged:
+        _battery_failure_logged = True
+        log_err(f"battery_status: pmset failed ({why}); treating as AC power, "
+                "so the low-battery guard is off until it works")
+    return None
+
+
 def battery_status():
-    # Returns (percent, on_ac) or None (desktop Macs / parse failure / no
-    # battery report yet). Parsed from `pmset -g batt` text since the stdlib
-    # has no battery API; on_ac comes from the first line, percent from the
-    # "NN%" in the battery detail line below it.
+    # Returns (percent, on_ac) or None (desktop Macs / no battery report yet /
+    # pmset failing, which is logged once). Parsed from `pmset -g batt` text
+    # since the stdlib has no battery API; on_ac comes from the first line,
+    # percent from the "NN%" in the battery detail line below it.
     try:
         out = subprocess.run(["/usr/bin/pmset", "-g", "batt"],
                               capture_output=True, text=True, timeout=5)
         if out.returncode != 0:
-            return None
+            return _battery_failed(f"exit {out.returncode}")
         lines = out.stdout.splitlines()
         on_ac = "AC Power" in (lines[0] if lines else "")
         for line in lines[1:]:
@@ -346,8 +361,8 @@ def battery_status():
                 continue
             return int(line[start:idx]), on_ac
         return None
-    except Exception:
-        return None
+    except Exception as e:
+        return _battery_failed(f"{type(e).__name__}: {e}")
 
 
 def fmt_reset_time(iso_ts, with_date):
