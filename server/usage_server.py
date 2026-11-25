@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 
 from s3srv.common import (USAGE_PORT as PORT, REPO_DIR, USER_AGENT, JsonHandler, Server,
                           fetch_json, load_secret, log_err)
+from s3srv.state import (STATE, CLIENT_RETENTION, activity_gated_loop, is_known_client,
+                         note_client, state_set, wake_loops)
 
 LOG_GLOB = os.path.expanduser("~/.claude/projects/*/*.jsonl")
 
@@ -96,73 +98,6 @@ PRICING = {
 }
 DEFAULT_PRICING = PRICING["sonnet"]
 
-STATE = {
-    "offsets": {},      # file path -> byte offset already consumed
-    "buckets": {},      # bucket_epoch -> {(project, model): {tokens, cost}}
-    "seen": {},         # (message_id, request_id) -> ts, dedupes streamed rewrites
-    "last_ts": None,    # exact ts of the newest ingested event (active_now)
-    "aggregates": None, # cached output of compute_aggregates(), refreshed once per scan
-    "clients": {},      # client ip -> last request ts, shows who is polling us
-    "limits": None,     # latest plan-limit snapshot from the OAuth usage endpoint
-    "context": None,    # {tokens, ts} — newest assistant event's context size
-    "btc": None,        # {price, changePct} from Binance — fetched here so the board needs no TLS
-    # Bangkok weather for the status card + Weather page: current + next-6h
-    # hourly + next-5d daily, fetched here so the board needs no TLS.
-    "weather": None,
-    "aqi": None,        # {aqi, source} Bangkok US AQI (fetch_aqi) — fetched here so the board needs no TLS
-    # Power / battery-save. battery_guard_loop writes on_ac/percent/paused;
-    # battery_save_manual is set by POST /api/battery-save (control panel):
-    #   None  → auto (follow AC: unplugged = save on)
-    #   True  → force low-power cadences on
-    #   False → force full-speed cadences (even on battery)
-    # on_ac=True until the first pmset sample so desktop Macs stay full-speed.
-    "power": {
-        "on_ac": True,
-        "percent": None,
-        "paused": False,
-        "battery_save_manual": None,
-    },
-    # Note page text + board text size (1-3). Seeded from NOTE_PATH at startup
-    # by load_note() and rewritten there on every POST /api/note, so a server
-    # restart doesn't wipe what's on the board. Never None — an empty string
-    # means "cleared", which the board must be able to tell from "absent".
-    "note": {"text": "", "size": 1},
-    # Only wakes a loop that is idle-parked in activity_gated_loop's own
-    # clear-then-wait (see its comment below) -- it is set on every client
-    # poll (do_GET) and every power-state change, both far more often than
-    # each loop's actual fetch cadence, so it must NOT also interrupt a
-    # loop's in-flight interval sleep (each body() computes and sleeps its
-    # own sleep_sec — e.g. limits_loop's 180s/300s — via plain time.sleep,
-    # deliberately not activity_event.wait). Doing so would fire fetches on
-    # every poll instead of on-interval, risking 429s on the OAuth endpoint.
-    "activity_event": threading.Event(),
-    "lock": threading.Lock(),
-}
-
-CLIENT_RETENTION = timedelta(hours=24)
-# How long after the last board/sim poll we treat the Mac as "no clients".
-CLIENT_ACTIVE_SEC = 180
-# Idle park timeout while clients are absent but the HTTP server is still up.
-IDLE_WAIT_SEC = 60
-# Harder park while battery_guard has unbound the socket — nothing can wake us
-# via HTTP, so don't spin every minute just to re-check is_client_active.
-PAUSED_WAIT_SEC = 300
-
-
-def is_client_active():
-    now = datetime.now(timezone.utc)
-    with STATE["lock"]:
-        for ip, ts in STATE["clients"].items():
-            if (now - ts).total_seconds() <= CLIENT_ACTIVE_SEC:
-                return True
-    return False
-
-
-def is_http_paused():
-    with STATE["lock"]:
-        return bool(STATE["power"].get("paused"))
-
-
 def power_snapshot():
     # Read-only view of power + effective battery_save for API/status.
     with STATE["lock"]:
@@ -199,33 +134,9 @@ def set_battery_save_manual(enabled):
         p = dict(STATE["power"])
         p["battery_save_manual"] = enabled
         STATE["power"] = p
-    STATE["activity_event"].set()
+    wake_loops()
     log_err("battery_save: manual override %s"
             % ("on" if enabled is True else "off" if enabled is False else "cleared (auto)"))
-
-
-def activity_gated_loop(body):
-    # Shared "skip work while no client has polled recently" wrapper for
-    # scan_loop/limits_loop/market_loop. The first iteration always runs (so
-    # state is populated even before any client connects); after that, idle
-    # stretches park on activity_event instead of spinning a poll loop.
-    # While battery_guard has unbound the listener, park harder — no HTTP
-    # client can set the event until the socket is rebound.
-    first_run = True
-    while True:
-        if not first_run and (is_http_paused() or not is_client_active()):
-            # clear-then-recheck: a poll between is_client_active and clear
-            # would otherwise lose its wake signal for a full idle timeout.
-            STATE["activity_event"].clear()
-            if is_http_paused():
-                STATE["activity_event"].wait(timeout=PAUSED_WAIT_SEC)
-                continue
-            if is_client_active():
-                continue
-            STATE["activity_event"].wait(timeout=IDLE_WAIT_SEC)
-            continue
-        first_run = False
-        body()
 
 
 # 180s on AC: the display's countdown stays smooth regardless — build_report()
@@ -484,7 +395,7 @@ def limits_loop():
             try:
                 limits = fetch_limits()
                 if limits:
-                    STATE["limits"] = limits
+                    state_set("limits", limits)
                     last_fetch = now
                     if was_empty:
                         log_err("limits_loop: recovered, snapshot refreshed")
@@ -785,7 +696,7 @@ def market_loop():
         try:
             btc = fetch_btc()
             if btc:
-                STATE["btc"] = btc
+                state_set("btc", btc)
         except Exception as e:
             log_err(f"market_loop btc: {type(e).__name__}: {e}")
         now = time.time()
@@ -794,7 +705,7 @@ def market_loop():
             try:
                 weather = fetch_weather()
                 if weather:
-                    STATE["weather"] = weather
+                    state_set("weather", weather)
             except Exception as e:
                 log_err(f"market_loop weather: {type(e).__name__}: {e}")
         if now - last_aqi >= aqi_iv:
@@ -802,7 +713,7 @@ def market_loop():
             try:
                 aqi = fetch_aqi()
                 if aqi:
-                    STATE["aqi"] = aqi
+                    state_set("aqi", aqi)
             except Exception as e:
                 log_err(f"market_loop aqi: {type(e).__name__}: {e}")
         time.sleep(btc_iv)
@@ -1410,8 +1321,7 @@ class Handler(JsonHandler):
         name = self.path[len("/firmware/"):]
         board = name[:-4] if name.endswith(".bin") else ""
         ip = self.client_address[0]
-        with STATE["lock"]:
-            known = ip in STATE["clients"]
+        known = is_known_client(ip)
         if board not in FIRMWARE_BOARDS:
             self._send(b"not found", "text/plain", status=404)
             return
@@ -1465,9 +1375,7 @@ class Handler(JsonHandler):
         # active_now and un-parks the activity-gated background loops, and a
         # browser loading the note editor is not a dashboard client.
         ip = self.client_address[0]
-        with STATE["lock"]:
-            STATE["clients"][ip] = datetime.now(timezone.utc)
-            STATE["activity_event"].set()
+        note_client(ip)
         # The S3 reports its running build + OTA state on every poll.
         if self.headers.get("X-S3-Firmware"):
             note_board_firmware(ip, self.headers.get("X-S3-Firmware", ""), self.headers.get("X-S3-OTA", ""))
@@ -1626,7 +1534,7 @@ def set_power_state(on_ac, percent, paused):
     if changed:
         # Wake gated loops so they pick up the new cadence / hard-park promptly
         # instead of waiting out a full idle timeout.
-        STATE["activity_event"].set()
+        wake_loops()
 
 
 def battery_guard_loop():
