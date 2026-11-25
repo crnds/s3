@@ -205,7 +205,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   `displaySetInvert()` writes INVON/INVOFF straight from `loop()` (no present,
   so sheets and static screens flash too) on the even seconds of hh:00:00..05;
   serial `h` plays it now. `motion.cpp`'s backlight animator fades sleep, wake,
-  Night Mode edges and brightness changes (its breath is currently unused).
+  Night Mode edges and brightness changes.
 - **Navigation (`nav.cpp`, twin: the simulator's NAV block).** The touch
   router, gesture recogniser and every transition, stepped once per `loop()`
   pass -- nothing blocks, so a touch during motion is always read. Commit on

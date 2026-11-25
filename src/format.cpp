@@ -8,10 +8,6 @@ String fmtTokens(int64_t t) {
   return String(b);
 }
 
-String fmtCost(float c) {
-  return "$" + String(c, 2);
-}
-
 String fmtBtc(double p) {
   char b[FMT_BUF_MIN];
   fmtBtcBuf(b, sizeof(b), p);

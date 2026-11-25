@@ -474,7 +474,6 @@ extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
 // without ever reading the clock (~0.2% of calls; blanked the clock/calendar cards).
 bool haveLocalTime(struct tm* ti);
 String fmtTokens(int64_t t);
-String fmtCost(float c);
 String fmtBtc(double p);
 String fmtChangePct(double pct);  // "+5%" / "-3%" (whole percent, sign always)
 String fmtCountdown(long sec);     // "4h 03m" / "42m"

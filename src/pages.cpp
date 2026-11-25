@@ -482,20 +482,9 @@ static long liveResetsInSec(long baseSec) {
 }
 
 // ── DATA ROWS (Usage page limits column, Device page) ─────
-// One row: label (body) left, optional detail (body, secondary) + the percent
-// (numeral.md) right, a meter.md under it.
+// Row geometry: label (body) left, the percent right, a meter.md under it.
 static const int ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD;    // 35
 static const int ROW_STEP = ROW_H + TOK_SPACE_STACK;                   // 43
-
-static void drawDataRow(int x, int r, int y, const String& label, const String& detail,
-                        int percent, uint16_t meterColor) {
-  drawText(TOK_TYPE_BODY, x, y, label, TOK_COLOR_TEXT_PRIMARY);
-  String pct = percent >= 0 ? String(percent) + "%" : String("--");
-  drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
-  int vx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
-  if (detail.length()) drawTextR(TOK_TYPE_BODY, vx, y, detail, TOK_COLOR_TEXT_SECONDARY);
-  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, meterColor);
-}
 
 // A limits-column row in 112 px: label (body) left, percent (numeral.sm, on the
 // label's baseline) right, meter.md under it. No detail text -- the Status

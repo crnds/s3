@@ -528,7 +528,7 @@ Emphasis within a size comes from weight (headline vs body), never from colour.
    | Weekday / month | 3-letter | `Thu`, `Sep` |
    | Date | `Www D Mmm` | `Thu 24 Sep` |
    | Large counts | `fmtTokens` | `1.2M` |
-   | Money | `fmtCost` | `$12.40` |
+   | Money | no screen shows money today; if one does, `$12.40` (two decimals) | `$12.40` |
    | BTC | `fmtBtc` | `84,194` |
    | BTC 24h change | `fmtChangePct` | `+5%` / `-3%` |
    | Temperature | integer + ring glyph (or `C` in caption on compact tiles) | `27` |
@@ -894,7 +894,7 @@ rotate copy on the way to the panel, so a darkened layer applied there costs not
 
 | Token | Value | Physical | Rule |
 |---|---|---|---|
-| `touch.min` | 44 × 44 px | 6.7 mm | Every target's **hit box** is at least this. |
+| `touch.min` | 44 × 44 px | 6.7 mm | Every target's **hit box** is at least this. (A design rule: the layout meets it, and `tokens.h` defines no constant for it.) |
 | `touch.comfortable` | 56 px tall | 8.6 mm | Default height for rows, buttons and option cells. |
 | `touch.edge.min` | 40 px | 6.1 mm | Allowed in the dimension *normal to the physical edge* for edge-anchored targets (the status strip, the corners). The bezel stops the finger, so the touch centroid lands inside the band. |
 | `touch.hit.outset.max` | 8 px | 1.2 mm | A hit box may extend up to 8 px beyond its **component box** into margins and gutters, **never** into another target. A control's component box is its visible shape. An icon button's component box is 44 × 44 centred on the glyph (§11.10), even though only the glyph is drawn. |
@@ -1659,7 +1659,7 @@ brightness jumps are easiest to avoid.
 | `motion.backlight.wake` | DISPON, then 200 ms up to the target | Waking. The frame is still intact, so the screen is effectively there at once, and the fade starts on the touch itself. |
 | `motion.backlight.night` | 2 s | Night Mode starting and ending (today these are instant cuts) |
 | `motion.backlight.adjust` | 150 ms | Picking a new brightness, so you see the change you chose |
-| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Currently unused; the hourly signal is the panel inversion (§12.7) |
+| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Not implemented: the animator and its tokens were removed as unused (the hourly signal is the panel inversion, §12.7). Reintroduce from git history if the F1 attention pattern wants it |
 
 **Sound** (NS4168 amp, `src/audio.cpp`) follows Apple's three rules:
 - **Causality:** sound only for meaningful events. A *committed* tap (touch-up on a target, never the
