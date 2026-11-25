@@ -262,6 +262,7 @@ extern float cpuPercentAvg;
 // 0), read by drawFooter()/loop()'s progress line (core 1) with no lock --
 // volatile for the same cross-core-visibility reason as STATE.haveData.
 extern bool wifiOk;
+extern volatile long fixtureEpoch;   // the wall clock fixtureMode holds still
 extern volatile bool fixtureMode;  // serial 'F': canned data, polling frozen (tools/parity.py)
 extern volatile bool connected;
 
