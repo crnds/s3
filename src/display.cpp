@@ -1,6 +1,7 @@
 // AXS15231B panel bring-up + the rotate-and-stream present path. See
 // display.h for the contract and lib/axs15231b's header for why every update
 // is a whole frame.
+#include "state.h"
 #include "display.h"
 #include "pins.h"
 
@@ -384,3 +385,37 @@ void displayPresentFade(const uint16_t* from, const uint16_t* to, int level,
   p.level = constrain(level, 1, 3);
   presentSrc(p);
 }
+// ── PRESENTATION ───────────────────────────────────────────
+bool presentHold = false;
+volatile uint32_t teWaitAccumUs = 0;
+volatile uint32_t pollOkSeq = 0;
+// Set when a present was asked for while a transition owns the panel; nav.cpp
+// composites it on its next tick.
+bool transitionDirty = false;
+
+void presentFrame() {
+  if (presentHold) return;
+  if (navTransitionActive()) { transitionDirty = true; return; }
+  displayPresent((const uint16_t*)frame.getBuffer(), shiftX, shiftY, TOK_COLOR_BG_CANVAS);
+  teWaitAccumUs += displayLastTeWaitUs();
+  shiftDirty = false;
+}
+
+// Pixel-shift orbit: <=2 px, eight steps (design.md, panel type).
+static const int8_t SHIFT_ORBIT[8][2] = {
+  {0, 0}, {1, 0}, {2, 0}, {2, -1}, {2, -2}, {1, -2}, {0, -2}, {0, -1}
+};
+
+// Advance the pixel-shift orbit (core 1 only, like everything display-side).
+// Returns true on a step so the caller can repaint immediately.
+bool pixelShiftTick(uint32_t now) {
+  if (cfgShiftStepMs == 0) return false;
+  if (now - lastShiftMs < cfgShiftStepMs) return false;
+  lastShiftMs = now;
+  shiftIdx = (uint8_t)((shiftIdx + 1) % 8);
+  shiftX = SHIFT_ORBIT[shiftIdx][0];
+  shiftY = SHIFT_ORBIT[shiftIdx][1];
+  shiftDirty = true;
+  return true;
+}
+

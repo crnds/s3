@@ -48,3 +48,15 @@ void shuffleCentre(bool offline, int& cx, int& cy);
 // older than max(2 poll intervals, 1 min), or there has been none since boot
 // (the SD cache). The strip says how old; the limit numerals go secondary.
 bool dataStale();
+
+// Per-page / per-sheet draw entry points (render() and nav.cpp dispatch on them),
+// one per file: page_status, page_usage, page_note, page_overview, sheet_device,
+// sheet_weather, strip.
+void drawStatusPage();
+void drawUsagePage();
+void drawNotePage();
+void drawNoteText(int tx, int ty, int widthPx, int tyMax, FontId font);
+void drawOverviewCells();
+void drawDevicePage();
+void drawWeatherPage();
+void drawStatusStrip();
