@@ -250,6 +250,10 @@ pre {
 <script src="sim/display.js"></script>
 <script src="sim/fonts_draw.js"></script>
 <script src="sim/gfx.js"></script>
+<script src="sim/format.js"></script>
+<script src="sim/pace.js"></script>
+<script src="sim/timing.js"></script>
+<script src="sim/motion.js"></script>
 <script>
 // ── SETTINGS TABLE (mirrors settings.cpp's SETTINGS[]) ────────
 // Night mode: fixed 23:00-07:00, dims to 25%. The backlight is the canvas
@@ -497,34 +501,6 @@ const SETTINGS = [
 const CONFIRM_ARM_MS = TOK_TOUCH_ARM_WINDOW_MS;
 let toastText = '', toastUntilMs = 0;
 
-// ── FORMATTING (mirroring format.cpp) ─────────────────────────
-function fmtTokens(t) {
-  if (t >= 1e9) return (t / 1e9).toFixed(2) + 'B';
-  if (t >= 1e6) return (t / 1e6).toFixed(1) + 'M';
-  if (t >= 1e3) return (t / 1e3).toFixed(1) + 'K';
-  return String(t);
-}
-function fmtBtc(p) { return p < 0 ? '--' : Math.round(p).toLocaleString('en-US'); }
-function fmtChangePct(pct) { return (pct < 0 ? '-' : '+') + Math.trunc(Math.abs(pct) + 0.5) + '%'; }
-function fmtCountdown(sec) {
-  if (sec < 0) return '';
-  let m = Math.floor((sec + 30) / 60);
-  const h = Math.floor(m / 60);
-  m %= 60;
-  return h > 0 ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm';
-}
-function fmtCountdownDHM(sec) {
-  if (sec < 0) return '';
-  const totalMin = Math.floor((sec + 30) / 60);
-  const days = Math.floor(totalMin / 1440);
-  if (days > 0) return days + 'd ' + Math.floor((totalMin % 1440) / 60) + 'h';
-  return Math.floor(totalMin / 60) + 'h ' + String(totalMin % 60).padStart(2, '0') + 'm';
-}
-function fmtKB(bytes) { return (bytes / 1024).toFixed(1) + 'KB'; }
-function fmtGB(bytes) { return (bytes / (1024 ** 3)).toFixed(1) + 'GB'; }
-const WDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const WDAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
 // ── PRIMITIVES (pages.cpp twin) ───────────────────────────────
 function drawCardSurface(x, y, w, h, fill) {
   gfx.fillSmoothRoundRect(x, y, w, h, TOK_RADIUS_MD, fill);
@@ -727,22 +703,6 @@ function pulseTick(nowMs) {
   gfx.clearClipRect();
   return true;
 }
-
-// Stale data (pages.cpp twin): the last good poll is older than max(2 polls,
-// 1 min), or there has been none since load and this is the cached copy.
-const STALE_AFTER_MIN_MS = 60000;
-function dataStale() {
-  if (!STATE.haveData) return false;
-  if (STATE.lastFetchSuccessMs === 0) return true;
-  return performance.now() - STATE.lastFetchSuccessMs > Math.max(effectivePollMs() * 2, STALE_AFTER_MIN_MS);
-}
-
-function liveResetsInSec(baseSec) {
-  if (baseSec < 0) return -1;
-  const rem = baseSec - Math.floor((performance.now() - STATE.lastFetchOkMs) / 1000);
-  return rem < 0 ? 0 : rem;
-}
-
 // ── DATA ROWS (Usage page limits column, Device page) ────────
 const ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD, ROW_STEP = ROW_H + TOK_SPACE_STACK;
 // A limits-column row in 112 px: label (body) left, percent (numeral.sm, on the
@@ -1038,21 +998,6 @@ function shineTick(nowMs) {
 }
 
 // ── SHARED LEFT COLUMN ────────────────────────────────────────
-const SESSION_WINDOW_SEC = 5 * 3600, WEEK_WINDOW_SEC = 7 * 24 * 3600;
-function elapsedPercentOfWindow(remainingSec, windowSec) {
-  if (remainingSec < 0) return -1;
-  const elapsed = Math.max(0, windowSec - remainingSec);
-  return Math.max(0, Math.min(100, Math.floor(elapsed * 100 / windowSec)));
-}
-function formatPaceDur(currentPct, elapsedSec, remainingSec) {
-  if (currentPct <= 0 || elapsedSec <= 0 || remainingSec < 0) return '';
-  const remainingPct = 100 - currentPct;
-  if (remainingPct <= 0) return '';
-  const secToExhaust = remainingPct / (currentPct / elapsedSec);
-  if (secToExhaust >= remainingSec) return '';
-  if (secToExhaust < 3600) return Math.max(1, Math.floor(secToExhaust / 60 + 0.5)) + 'm';
-  return Math.floor(secToExhaust / 3600 + 0.5) + 'h';
-}
 function drawPaceFlag(x, baseline, ahead, currentPct, elapsedSec, remainingSec, xMax) {
   if (!ahead) return;
   const x2 = drawText(TOK_TYPE_HEADLINE, x, baseline - fontAscent(TOK_TYPE_HEADLINE), '!', TOK_COLOR_STATUS_ERROR);
@@ -1941,67 +1886,6 @@ function settingsLeafActivate(i, now) {
   d.apply(d.values[i]);
 }
 
-// ── MOTION (motion.cpp twin) ──────────────────────────────────
-function makeSpring() { return { x: 0, v: 0, target: 0, zeta: 1, w: 25.13, active: false }; }
-function springTo(s, target, [zeta100, responseMs]) {
-  s.target = target;
-  s.zeta = zeta100 / 100;
-  s.w = 2 * Math.PI / (responseMs / 1000 * motionTimeScale);
-  s.active = true;
-}
-function springStep(s, dt) {
-  if (!s.active) return false;
-  if (dt > 0.05) dt = 0.05;
-  const h = dt / 4;
-  for (let i = 0; i < 4; i++) {
-    const a = -s.w * s.w * (s.x - s.target) - 2 * s.zeta * s.w * s.v;
-    s.v += a * h;
-    s.x += s.v * h;
-  }
-  if (Math.abs(s.x - s.target) < 0.5 && Math.abs(s.v) < 15) { s.x = s.target; s.v = 0; s.active = false; }
-  return true;
-}
-function makeVelocity() { return { s: [] }; }
-function velocityAdd(vt, x, y, t) { vt.s.push({ x, y, t }); if (vt.s.length > 4) vt.s.shift(); }
-function velocityGet(vt, now) {
-  const s = vt.s;
-  if (s.length < 2) return [0, 0];
-  const newest = s[s.length - 1];
-  if (now - newest.t > 50) return [0, 0];
-  let oldest = newest;
-  for (let k = s.length - 2; k >= 0; k--) {
-    if (newest.t - s[k].t > TOK_TOUCH_VELOCITY_WINDOW_MS) break;
-    oldest = s[k];
-  }
-  const dt = newest.t - oldest.t;
-  if (dt <= 0) return [0, 0];
-  const clamp = (v) => Math.max(-4000, Math.min(4000, v));
-  return [clamp((newest.x - oldest.x) * 1000 / dt), clamp((newest.y - oldest.y) * 1000 / dt)];
-}
-function projectDistance(v) { return (v / 1000) * TOK_TOUCH_DECEL / (1 - TOK_TOUCH_DECEL); }
-function rubberband(over, dim) { return over * dim * TOK_TOUCH_RUBBERBAND / (dim + TOK_TOUCH_RUBBERBAND * Math.abs(over)); }
-
-// Backlight animator: the canvas brightness filter stands in for the PWM.
-const BL = { level: 0, from: 0, target: 0, start: 0, dur: 0 };
-let panelInverted = false;  // INVON/INVOFF twin: same filter chain as the backlight
-function blApply() { canvas.style.filter = 'brightness(' + (BL.level / 255 * 100).toFixed(1) + '%)' + (panelInverted ? ' invert(1)' : ''); }
-function displaySetInvert(on) { if (on === panelInverted) return; panelInverted = on; blApply(); }
-function backlightFadeTo(target, fadeMs) {
-  BL.from = BL.level; BL.target = target; BL.start = performance.now(); BL.dur = fadeMs * motionTimeScale;
-  if (BL.dur === 0) { BL.level = target; blApply(); }
-}
-function backlightTick(now) {
-  let base = BL.target;
-  if (BL.dur > 0) {
-    const el = now - BL.start;
-    if (el >= BL.dur) BL.dur = 0;
-    else { const t = el / BL.dur; base = BL.from + (BL.target - BL.from) * t * t * (3 - 2 * t); }
-  }
-  let level = base;
-  if (BL.dur === 0) level = BL.target;
-  if (Math.abs(level - BL.level) >= 0.5 || level !== BL.level) { BL.level = level; blApply(); }
-}
-
 // ── NAV (nav.cpp twin) ────────────────────────────────────────
 const NAV = {
   pressedId: null, pressedIndex: -1,
@@ -2705,32 +2589,6 @@ function loadWeatherCache() {
   } catch { /* ignore corrupt cache */ }
 }
 
-// Bangkok time (no DST, fixed UTC+7 -- the firmware's GMT_OFFSET_SEC).
-// Weekday name (Intl 'short', matches WDAY_ABBR) at now + offsetSec, in
-// Bangkok time -- used to relabel the week-reset date with a weekday name.
-function bangkokWeekdayAt(offsetSec) {
-  const d = new Date(simNowMs() + offsetSec * 1000);
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Bangkok', weekday: 'short' }).format(d);
-}
-
-function bangkokParts() {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Bangkok', hour12: false,
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-  const parts = {};
-  for (const p of fmt.formatToParts(new Date(simNowMs()))) parts[p.type] = p.value;
-  const out = {
-    weekday: parts.weekday, month: parts.month, day: parts.day, year: parts.year,
-    hour: parts.hour === '24' ? '00' : parts.hour, minute: parts.minute, second: parts.second,
-  };
-  return out;
-}
-
-// Offline after max(OFFLINE_AFTER_MS, 3 polls) of wall time without a
-// successful poll -- main.cpp's offlineAfterMs(), not a cycle count.
-function offlineAfterMs() { return Math.max(OFFLINE_AFTER_MS, effectivePollMs() * 3); }
 function markFetchFailed() {
   const now = performance.now();
   if (now - STATE.lastFetchSuccessMs >= offlineAfterMs()) STATE.haveData = false;
