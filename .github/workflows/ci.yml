@@ -5,8 +5,9 @@
 #   simulator  every page and sheet, both themes, from tests/fixtures/ against
 #              tests/golden/ (tools/sim_check.mjs), and the note tokenizer
 #              corpus (tools/note_corpus.mjs; note.py's half is in `server`)
-#   server     the Mac server's unit tests + contract snapshot, on Python 3.9
-#              (the language level launchd's /usr/bin/python3 runs it with)
+#   server     the Mac server's unit tests + contract snapshot, and the tools'
+#              tests (tests/tools/), on Python 3.9 (the language level
+#              launchd's /usr/bin/python3 runs it with)
 # The board-vs-sim compare (tools/parity.py) stays local: it needs the board.
 # The C++ tokenizer joins the corpus when it returns roles (refactor Phase 4c).
 name: CI
@@ -92,8 +93,10 @@ jobs:
       - name: Python version
         run: python3 --version
       - name: Syntax (3.9)
-        run: python3 -m py_compile server/*.py server/s3srv/*.py tools/note.py
+        run: python3 -m py_compile server/*.py server/s3srv/*.py tools/*.py
       - name: Note wrap selftest
         run: python3 tools/note.py --selftest
       - name: Server unit tests
         run: python3 -m unittest discover -s tests/server -v
+      - name: Tools unit tests
+        run: python3 -m unittest discover -s tests/tools -v

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Enlarge small cat GIFs so they fill the S3's 480x320 screen.
+"""Upscale cat GIFs that are already prepared but smaller than 480x320.
 
-The S3 plays the old CYD board's library (cats_raw/ or any folder built by
-tools/prepare_cat_gifs.py to fit 320x240, many smaller still: 240x240,
-320x180...). Copied as-is they would play as a small island in a black frame
-on the 480x320 panel. This pass scales every GIF that fits inside 480x320 up until it
-touches the box (aspect ratio kept), with gifsicle's Catmull-Rom filter, and
-re-applies the same palette/lossy settings. Files already touching the box
-are left alone, so it is safe to re-run after adding more cats.
+For sources that are already prepared -- thinned, palette-reduced, optimized
+GIFs that are just too small for the S3's panel, such as an old CYD library
+(fitted to 320x240, many smaller still: 240x240, 320x180...). Copied as-is they
+would play as a small island in a black frame. This pass scales every GIF that
+fits inside 480x320 up until it touches the box (aspect ratio kept), with
+gifsicle's Catmull-Rom filter, and re-applies prepare_cat_gifs.py's
+palette/lossy settings (tools/common.py). Files already touching the box are
+left alone, so it is safe to re-run after adding more cats.
+
+It does not download, thin frames or shrink: for new cats run
+tools/prepare_cat_gifs.py, which now fits straight to 480x320.
 
     cp <library>/cat_NNN.gif cats/            # pick a subset: all 120 won't fit in 16MB flash
     python3 tools/fit_cats.py                  # upscale in place (./cats)
@@ -24,15 +28,17 @@ import sys
 
 from PIL import Image
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BOX_W, BOX_H = 480, 320
+import common
+from common import BOX_W, BOX_H, ROOT
 
 
 def main():
     ap = argparse.ArgumentParser(description="Upscale small cat GIFs to touch 480x320.")
     ap.add_argument("--dir", default=os.path.join(ROOT, "cats"), help="library folder (default ./cats)")
-    ap.add_argument("--colors", type=int, default=128, help="palette size (default 128, as prepare_cat_gifs.py)")
-    ap.add_argument("--lossy", type=int, default=80, help="gifsicle lossy level (default 80, as prepare_cat_gifs.py)")
+    ap.add_argument("--colors", type=int, default=common.GIF_COLORS,
+                    help="palette size (default %d, as prepare_cat_gifs.py)" % common.GIF_COLORS)
+    ap.add_argument("--lossy", type=int, default=common.GIF_LOSSY,
+                    help="gifsicle lossy level (default %d, as prepare_cat_gifs.py)" % common.GIF_LOSSY)
     ap.add_argument("--min-scale", type=float, default=1.05,
                     help="skip GIFs that would grow by less than this factor (default 1.05)")
     args = ap.parse_args()
@@ -54,10 +60,8 @@ def main():
         if scale < args.min_scale:
             continue
         tmp = path + ".tmp"
-        cmd = ["gifsicle", "-O3", "--resize-touch", f"{BOX_W}x{BOX_H}", "--resize-method", "catrom",
-               "--colors", str(args.colors)]
-        if args.lossy > 0:
-            cmd.append(f"--lossy={args.lossy}")
+        cmd = ["gifsicle", "-O3", "--resize-touch", f"{BOX_W}x{BOX_H}", "--resize-method", "catrom"]
+        cmd += common.gifsicle_quality_args(args.colors, args.lossy)
         cmd += [path, "-o", tmp]
         r = subprocess.run(cmd, capture_output=True)
         if r.returncode != 0 or not os.path.exists(tmp):
