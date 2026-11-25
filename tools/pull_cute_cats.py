@@ -7,8 +7,8 @@ run tools/fit_cats.py.
 
     python3 tools/pull_cute_cats.py --out /tmp/cutecats
 
-The API key comes from GIPHY_API_KEY or secrets.local.json at the repo root (the
-same lookup tools/pull_giphy_cats.py uses; its helpers are reused here).
+The API key comes from GIPHY_API_KEY or secrets.local.json at the repo root
+(tools/common.py's load_secret); the GIPHY search is pull_giphy_cats.py's.
 """
 import argparse
 import hashlib
@@ -17,10 +17,11 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pull_giphy_cats import load_giphy_api_key, query_giphy_search, download_gif  # noqa: E402
+from PIL import Image, ImageDraw
 
-from PIL import Image, ImageDraw  # noqa: E402
+import common
+from common import download_gif
+from pull_giphy_cats import query_giphy_search
 
 QUERIES = [
     "kawaii cat cartoon",
@@ -142,7 +143,7 @@ def main():
     SKIP_WORDS = tuple(w.strip().lower() for w in args.skip_words.split(",") if w.strip())
     prior = {c["id"] for c in json.load(open(args.exclude))} if args.exclude else set()
 
-    key = load_giphy_api_key()
+    key = common.load_secret("GIPHY_API_KEY")
     if not key:
         sys.exit("No GIPHY_API_KEY (env or secrets.local.json at the repo root).")
     os.makedirs(args.out, exist_ok=True)
