@@ -37,7 +37,7 @@ static void drawWifiSpinner(int frameNum) {
 // called if WiFi came up within connectWifi()'s 20 s: on a slow AP the board
 // then stayed on UTC (a clock 7 h behind, 05:31 at 12:31) until the next reboot,
 // even after the link came up and the server's epoch had set the time.
-static void applyTimezone() {
+void applyTimezone() {
   char tz[16];  // POSIX TZ, sign inverted: UTC+7 is "<+07>-7"
   snprintf(tz, sizeof(tz), "<%+03ld>%+ld", GMT_OFFSET_SEC / 3600, -GMT_OFFSET_SEC / 3600);
   setenv("TZ", tz, 1);
@@ -45,8 +45,8 @@ static void applyTimezone() {
 }
 
 // SNTP needs the network, so start it once, the first time WiFi is up -- at
-// boot, or later from fetchUsage() if the AP was slow. (configTime() also
-// re-applies the timezone, to the same value.)
+// boot, or later from fetchUsage() if the AP was slow. (configTime() also sets
+// TZ, to a differently spelled string with the same offset.)
 static bool sntpStarted = false;
 static void ensureSntp() {
   if (sntpStarted) return;
@@ -238,7 +238,7 @@ static bool applyUsageDoc(const JsonDocument& doc, bool fromNetwork) {
   // sync never lands and getLocalTime() fails forever, even though the plain
   // HTTP poll to the Mac (this very payload) works fine over the LAN. Whenever
   // we still don't have a wall clock, seed one from the server's epoch instead;
-  // configTime()'s TZ (GMT_OFFSET_SEC/DST_OFFSET_SEC) was already set at boot
+  // the timezone (applyTimezone(), at the start of connectWifi()) is already set
   // and keeps applying regardless of how time-of-day got set. Skipped once
   // getLocalTime() succeeds so a working NTP sync is never fought/overridden.
   // Live polls only: the SD cache (loadCachedUsage) carries the epoch of when

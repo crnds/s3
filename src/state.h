@@ -129,6 +129,7 @@ const int NOTE_BUF_MAX = 512;
 
 // Bangkok has no DST, so a fixed UTC+7 offset is exact year-round.
 const long GMT_OFFSET_SEC = 7 * 3600;
+static_assert(GMT_OFFSET_SEC % 3600 == 0, "applyTimezone() formats whole hours only");
 const int DST_OFFSET_SEC = 0;
 
 const int SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;

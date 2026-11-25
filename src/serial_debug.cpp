@@ -63,13 +63,7 @@ void serialCommand(char c) {
         realEpochAtFixture = (long)time(nullptr);
         realMsAtFixture = millis();
       }
-      // The board's own timezone, set here rather than trusted: configTime()
-      // only runs if WiFi came up within 20 s of boot, and without it the fixture's
-      // 17:09 (+07:00) would show as 10:09.
-      char tz[16];
-      snprintf(tz, sizeof(tz), "<%+03ld>%+ld", GMT_OFFSET_SEC / 3600, -GMT_OFFSET_SEC / 3600);
-      setenv("TZ", tz, 1);
-      tzset();
+      applyTimezone();  // idempotent; keeps the fixture's 17:09 (+07:00) from showing as 10:09
       struct timeval tv = { (time_t)epoch, 0 };
       settimeofday(&tv, nullptr);
       fixtureEpoch = epoch;
