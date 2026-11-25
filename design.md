@@ -1659,7 +1659,7 @@ brightness jumps are easiest to avoid.
 | `motion.backlight.wake` | DISPON, then 200 ms up to the target | Waking. The frame is still intact, so the screen is effectively there at once, and the fade starts on the touch itself. |
 | `motion.backlight.night` | 2 s | Night Mode starting and ending (today these are instant cuts) |
 | `motion.backlight.adjust` | 150 ms | Picking a new brightness, so you see the change you chose |
-| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Not implemented: the animator and its tokens were removed as unused (the hourly signal is the panel inversion, §12.7). Reintroduce from git history if the F1 attention pattern wants it |
+| `motion.backlight.breath` | Dip to 40% and back over 1 s, three times | Not implemented: the animator was removed as unused; its tokens (`TOK_MOTION_BACKLIGHT_BREATH_*`) are kept (the hourly signal is the panel inversion, §12.7). Reintroduce from git history if the F1 attention pattern wants it |
 
 **Sound** (NS4168 amp, `src/audio.cpp`) follows Apple's three rules:
 - **Causality:** sound only for meaningful events. A *committed* tap (touch-up on a target, never the
