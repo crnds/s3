@@ -16,6 +16,7 @@ from s3srv.market import market_loop, weather_payload
 from s3srv.firmware import (FIRMWARE_BOARDS, firmware_offer, firmware_status,
                             note_board_firmware, note_download, read_image,
                             request_firmware_install)
+from s3srv import report
 from s3srv.notes import (NOTE_ALLOWED_ORIGINS, NOTE_HTML_PATH, load_note, note_snapshot,
                          sanitize_note, set_note)
 
@@ -25,87 +26,12 @@ from s3srv.notes import (NOTE_ALLOWED_ORIGINS, NOTE_HTML_PATH, load_note, note_s
 # exactly, never "*": a website's JS can't send a loopback Origin, so no other
 # site can read the usage data.
 USAGE_CORS_ORIGIN_RE = re.compile(r"http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?")
-ACTIVE_WINDOW_SEC = 180
-# Assumed model context size for the "context window" percent — the jsonl
-# events don't carry the model's actual limit, so 200K is hardcoded.
-CONTEXT_WINDOW_TOKENS = 200000
 
 
 def build_report():
-    now = datetime.now(timezone.utc)
-
-    with STATE["lock"]:
-        agg = STATE["aggregates"] or {
-            "today": {"tokens": 0, "cost": 0.0},
-            "week": {"tokens": 0, "cost": 0.0},
-            "projects": [], "trend": [0] * 7,
-        }
-        ctx = STATE["context"]
-        last_ts = STATE["last_ts"]
-        limits = STATE["limits"]
-        # Prune clients that haven't polled in 24h so this dict (and the
-        # `clients` array in every response) doesn't grow forever.
-        cutoff_client = now - CLIENT_RETENTION
-        STATE["clients"] = {ip: ts for ip, ts in STATE["clients"].items() if ts >= cutoff_client}
-        client_snapshot = list(STATE["clients"].items())
-
-    # active_now is archive-only on the board (not drawn); kept for SD CSV.
-    active_now = last_ts is not None and (now - last_ts).total_seconds() <= ACTIVE_WINDOW_SEC
-
-    clients = [
-        {"ip": ip, "last_seen_sec": int((now - ts).total_seconds())}
-        for ip, ts in sorted(client_snapshot, key=lambda kv: kv[1], reverse=True)
-    ]
-
-    # Countdown to the session reset, computed at request time so it stays
-    # accurate between OAuth refreshes. Mutate per-request copies only —
-    # STATE["limits"] stays pristine with internal epochs.
-    if limits:
-        limits = dict(limits)
-        limits.pop("fetched_at_epoch", None)
-        for key in ("session", "week", "week_model"):
-            win = limits.get(key) or {}
-            if not isinstance(win, dict):
-                continue
-            win = dict(win)
-            epoch = win.pop("resets_at_epoch", None)
-            if epoch:
-                remaining = int(epoch - time.time())
-                if remaining <= 0:
-                    # Window ended; OAuth loop may not have a fresh snapshot
-                    # yet. Serve reset rather than a stale percent.
-                    win["percent"] = 0
-                    win["resets"] = ""
-                    remaining = 0
-                if key in ("session", "week"):
-                    win["resets_in_sec"] = remaining
-            limits[key] = win
-
-    return {
-        "generated_at": now.isoformat(),
-        "epoch": int(now.timestamp()),
-        "today": agg["today"],
-        "week": agg["week"],
-        "active_now": active_now,
-        "projects": agg["projects"],
-        "trend": agg["trend"],
-        "limits": limits,
-        "context": ({"tokens": ctx["tokens"],
-                     "percent": round(ctx["tokens"] / CONTEXT_WINDOW_TOKENS * 100)}
-                    if ctx else None),
-        "btc": STATE["btc"],
-        "weather": STATE["weather"],
-        "aqi": STATE["aqi"],
-        # Board page 6. Always an object (never null) so an empty "text" reads
-        # as "the user cleared the note" rather than "no data yet" — the
-        # firmware keeps its previous value for absent keys.
-        "note": STATE["note"],
-        "clients": clients,
-        "power": power_snapshot(),
-        # Published OTA builds per board ({} when none): additive, and the CYD
-        # ignores it.
-        "firmware": firmware_offer(),
-    }
+    """GET /api/usage. firmware_offer is looked up here, at call time, so the
+    contract test can patch usage_server.firmware_offer."""
+    return report.build_report(firmware_offer())
 
 
 HEARTBEAT_LOG_INTERVAL_SEC = 300
