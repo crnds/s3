@@ -10,8 +10,23 @@ function initDataSource() {
   const q = new URLSearchParams(location.search).get('data');
   const v = DATA_SOURCES.includes(q) ? q : lsGet(DATA_SOURCE_KEY);
   if (DATA_SOURCES.includes(v)) document.getElementById('data-source').value = v;
+  syncControls();
 }
-function dataSource() { return document.getElementById('data-source').value; }
+
+// The Connection card's controls live in STATE (simOffline, simSdMissing,
+// simServerUrl, simDataSource, cfgPollIntervalSec): copied here on load and on
+// every change, so draw and poll code never read the DOM.
+function syncControls() {
+  const $ = (id) => document.getElementById(id);
+  STATE.simOffline = $('sim-offline').checked;
+  STATE.simSdMissing = $('sim-sd-missing').checked;
+  STATE.simServerUrl = $('server-url').value.trim();
+  STATE.simDataSource = $('data-source').value;
+  STATE.cfgPollIntervalSec = Number($('poll-interval').value) / 1000;
+}
+// Settings > Poll interval writes back to the menu.
+function showPollInterval(sec) { document.getElementById('poll-interval').value = String(sec * 1000); }
+function showRawDoc(doc) { document.getElementById('raw-json').textContent = JSON.stringify(doc, null, 2); }
 
 // ── UI WIRING ─────────────────────────────────────────────────
 function setConn(ok, detail) {
@@ -112,13 +127,19 @@ canvas.addEventListener('keydown', (event) => {
   event.preventDefault();
 });
 
+syncControls();
 document.getElementById('poll-now').addEventListener('click', fetchUsage);
-document.getElementById('poll-interval').addEventListener('change', restartPollTimer);
-document.getElementById('sim-offline').addEventListener('change', fetchUsage);
+document.getElementById('server-url').addEventListener('input', syncControls);
+document.getElementById('poll-interval').addEventListener('change', () => { syncControls(); restartPollTimer(); });
+document.getElementById('sim-offline').addEventListener('change', () => { syncControls(); fetchUsage(); });
 document.getElementById('data-source').addEventListener('change', (e) => {
+  syncControls();
   lsSet(DATA_SOURCE_KEY, e.target.value);
   fetchUsage();
 });
-document.getElementById('sim-sd-missing').addEventListener('change', () => { if (!navTransitionActive()) redrawScreen(); });
+document.getElementById('sim-sd-missing').addEventListener('change', () => {
+  syncControls();
+  if (!navTransitionActive()) redrawScreen();
+});
 let hourlyTestStartMs = 0;  // serial 'h' twin
 document.getElementById('hourly-signal').addEventListener('click', () => { hourlyTestStartMs = performance.now(); });

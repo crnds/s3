@@ -21,7 +21,7 @@ function drawDevicePage() {
   drawDeviceRow(y, 'Flash (app partition)', fmtKB(FLASH_USED_BYTES) + ' / ' + fmtKB(FLASH_TOTAL_BYTES), pct(FLASH_USED_BYTES, FLASH_TOTAL_BYTES)); y += ROW_STEP;
   drawDeviceRow(y, 'Internal RAM', fmtKB(RAM_USED_BYTES) + ' / ' + fmtKB(RAM_TOTAL_BYTES), pct(RAM_USED_BYTES, RAM_TOTAL_BYTES)); y += ROW_STEP;
   drawDeviceRow(y, 'PSRAM', fmtKB(PSRAM_USED_BYTES) + ' / ' + fmtKB(PSRAM_TOTAL_BYTES), pct(PSRAM_USED_BYTES, PSRAM_TOTAL_BYTES)); y += ROW_STEP;
-  const sdMissing = document.getElementById('sim-sd-missing').checked;
+  const sdMissing = STATE.simSdMissing;
   const sdPct = sdMissing ? -1 : pct(SD_USED_BYTES, SD_TOTAL_BYTES);
   drawDeviceRow(y, 'SD card', sdPct >= 0 ? fmtGB(SD_USED_BYTES) + ' / ' + fmtGB(SD_TOTAL_BYTES) : 'Not found', sdPct);
 }

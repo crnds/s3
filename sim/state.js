@@ -83,5 +83,9 @@ const STATE = {
   settingsSection: -1,  // -1 = main list, else the SETTINGS row whose children the list shows
   cfgScreenRotation: 1,
   pollOkSeq: 0,
+  cfgPollIntervalSec: POLL_DEFAULT_MS / 1000,  // the Poll interval preference (applyEffectivePoll floors it)
+  // Sim-only test switches, copied from the Connection card by chrome.js so
+  // that drawing and polling never read the DOM.
+  simOffline: false, simSdMissing: false, simServerUrl: '', simDataSource: 'auto',
 };
 let motionTimeScale = 1;

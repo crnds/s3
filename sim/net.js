@@ -52,7 +52,7 @@ function applyUsageDoc(doc, fromNetwork = true) {
     }
   }
   STATE.lastFetchOkMs = performance.now();
-  document.getElementById('raw-json').textContent = JSON.stringify(doc, null, 2);
+  showRawDoc(doc);
 }
 
 function applyWeatherDoc(w) {
@@ -93,8 +93,8 @@ async function fetchUsage() {
   if (fetchInFlight) return;
   fetchInFlight = true;
   STATE.lastPollMs = performance.now();
-  const offline = document.getElementById('sim-offline').checked;
-  const source = dataSource();
+  const offline = STATE.simOffline;
+  const source = STATE.simDataSource;
   const ok = (detail) => {
     STATE.haveData = true;
     STATE.pollOkSeq++;  // one pace sweep (main.cpp's pollOkSeq)
@@ -122,7 +122,7 @@ async function fetchUsage() {
       return;
     }
     if (source === 'mock') { useMock('mock only'); return; }
-    const url = document.getElementById('server-url').value.trim();
+    const url = STATE.simServerUrl;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
     try {

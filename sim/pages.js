@@ -25,7 +25,7 @@ function drawMediaPageStatic() {
 // can't, so this shows the firmware's own placeholder layout plus the same
 // overlays (reset plate, shuffle button, corner plates).
 // Cats are embedded in the firmware, so only the SD-backed movie page depends on the card.
-function moviesAvailable() { return !document.getElementById('sim-sd-missing').checked; }
+function moviesAvailable() { return !STATE.simSdMissing; }
 function drawResetPlate() {
   const percent = STATE.sessionPercent, resets = STATE.sessionResets;
   if (percent < 0 || !resets) return;

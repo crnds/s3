@@ -17,7 +17,7 @@ function batterySaveActive() {
 // Battery Save / screen-sleep floor. The firmware stores it in
 // POLL_INTERVAL_MS; the sim returns it to each caller instead.
 function applyEffectivePoll() {
-  let sec = Number(document.getElementById('poll-interval').value) / 1000;
+  let sec = STATE.cfgPollIntervalSec;
   if (!Number.isFinite(sec) || sec <= 0) sec = POLL_DEFAULT_MS / 1000;
   if ((batterySaveActive() || STATE.screenSleeping) && sec < BATTERY_SAVE_POLL_SEC) sec = BATTERY_SAVE_POLL_SEC;
   return sec * 1000;
@@ -36,9 +36,10 @@ function applyForgetWifi() {
   console.log('[sim] Forget Wi-Fi: on hardware this erases wifi_ssid/wifi_password from flash and restarts.');
   setTimeout(() => location.reload(), 300);
 }
-function getCurrentPollInterval() { return Number(document.getElementById('poll-interval').value) / 1000; }
+function getCurrentPollInterval() { return STATE.cfgPollIntervalSec; }
 function applyPollInterval(v) {
-  document.getElementById('poll-interval').value = String(v * 1000);
+  STATE.cfgPollIntervalSec = v;
+  showPollInterval(v);
   restartPollTimer();
 }
 function getCurrentPixelShift() { return SHIFT_STEP_MS / 60000; }
