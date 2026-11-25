@@ -14,8 +14,9 @@
   --text2: #94a3b8;
   --muted: #64748b;
   --accent: #F4620E;
+  /* status roles, named alike in note.html and server.html: good = green, bad = rose, warn = amber */
   --good: #22c55e;
-  --danger: #f43f5e;
+  --bad: #f43f5e;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.2);
 
@@ -128,8 +129,8 @@ main {
 .chip[data-state="unsaved"] { color: var(--accent); }
 .chip[data-state="unsaved"]::before { background: var(--accent); }
 .chip[data-state="saving"]::before { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
-.chip[data-state="error"] { color: var(--danger); }
-.chip[data-state="error"]::before { background: var(--danger); }
+.chip[data-state="error"] { color: var(--bad); }
+.chip[data-state="error"]::before { background: var(--bad); }
 
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
 
@@ -204,7 +205,7 @@ main {
 .warn.is-error {
   background: rgba(244,63,94,0.10);
   border-color: rgba(244,63,94,0.35);
-  color: var(--danger);
+  color: var(--bad);
 }
 
 @media (max-width: 768px) {
@@ -252,7 +253,9 @@ main {
 // Same-origin when served by usage_server.py; absolute when opened from disk.
 const API_BASE = location.protocol === 'file:' ? 'http://127.0.0.1:8787' : '';
 const NOTE_API = API_BASE + '/api/note';
-const DRAFT_KEY = 'cydnote_v1_draft';
+const DRAFT_KEY = 's3note_v1_draft';
+// The key from the CYD lineage; readDraft() moves a draft left there once.
+const LEGACY_DRAFT_KEY = 'cydnote_v1_draft';
 const FETCH_TIMEOUT_MS = 5000;
 const SAVE_DEBOUNCE_MS = 800;
 const RETRY_BASE_MS = 1000;
@@ -261,7 +264,7 @@ const RETRY_MAX_MS = 16000;
 const NOTE_MAX_CHARS = 480;
 
 // Board palette: RGB888 twins of the firmware's RGB565 constants, with the
-// original hex in the comment — the convention simulator.html uses. Defined
+// original hex in the comment — the convention simulator-s3.html uses. Defined
 // here rather than as CSS custom properties because only this script reads
 // them (the highlighter emits inline colours), and one definition can't drift.
 const COL_TEXT   = 'rgb(255,255,255)'; // 0xFFFF
@@ -436,8 +439,12 @@ function noteFits(s, size) {
 // ── HIGHLIGHTING (textarea backdrop) ──────────────────────
 // Same rules as the board's drawNotePane, but no wrapping — the textarea does
 // its own, and forcing the board's 24-column wrap here would fight the caret.
+// The same five-character escape as server.html's, so either copy is safe in
+// an attribute as well as in text.
 function escapeHtml(s) {
-  return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 function highlightHtml(s) {
@@ -674,8 +681,20 @@ function clearDraft() {
   try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* ignore */ }
 }
 
+// Reads the draft, first moving one saved under LEGACY_DRAFT_KEY to DRAFT_KEY.
+// setItem runs before removeItem, so a failed write leaves the old copy alone.
 function readDraft() {
-  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); }
+  let raw = null;
+  try {
+    raw = localStorage.getItem(DRAFT_KEY);
+    const legacy = localStorage.getItem(LEGACY_DRAFT_KEY);
+    if (raw === null && legacy !== null) {
+      raw = legacy;
+      localStorage.setItem(DRAFT_KEY, legacy);
+    }
+    if (legacy !== null) localStorage.removeItem(LEGACY_DRAFT_KEY);
+  } catch (e) { /* storage unavailable: use whatever was read */ }
+  try { return JSON.parse(raw || 'null'); }
   catch (e) { return null; }
 }
 

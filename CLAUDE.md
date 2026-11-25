@@ -34,7 +34,13 @@ Mac-side internals are in **"Mac server"** below. The browser pages:
 
 Both follow the `~/CLAUDE.md` static-web conventions and are **not** bound
 by the parity rule (except `note.html`'s tokenizer, below). Both are read
-fresh per request, so edits show up on reload with no restart.
+fresh per request, so edits show up on reload with no restart. They share
+no CSS/JS file on purpose (each server serves exactly one page), so keep the
+duplicated bits in step by hand: the `:root` tokens use the same names
+(`--good` green, `--bad` rose, `--warn` amber) and `escapeHtml` is the same
+five-character escape in both. `note.html` keeps an unsent draft in
+localStorage `s3note_v1_draft`, moving one left under the old
+`cydnote_v1_draft` key on first read.
 
 ## The one invariant that matters most
 

@@ -14,6 +14,7 @@
   --text2: #94a3b8;
   --muted: #64748b;
   --accent: #F4620E;
+  /* status roles, named alike in note.html and server.html: good = green, bad = rose, warn = amber */
   --good: #22c55e;
   --bad: #f43f5e;
   --warn: #f59e0b;
@@ -665,29 +666,24 @@ function boardClients(endpoint) {
   return clients.filter(c => c.ip !== '127.0.0.1' && c.ip !== '::1');
 }
 
-function render() {
-  const banner = document.getElementById('control-banner');
+// One renderer per page section; render() runs them in page order.
+function renderControlDown() {
+  document.getElementById('control-banner').style.display = 'block';
+  document.getElementById('status-pill').className = 'status-pill unknown';
+  document.getElementById('status-label').textContent = 'CONTROL DOWN';
+  const btn = document.getElementById('toggle-btn');
+  btn.textContent = '…';
+  btn.disabled = true;
+}
+
+// Header pill + enable/disable button.
+function renderHeader(ld, ep) {
   const pill = document.getElementById('status-pill');
   const label = document.getElementById('status-label');
   const btn = document.getElementById('toggle-btn');
-
-  if (!STATE.controlUp) {
-    banner.style.display = 'block';
-    pill.className = 'status-pill unknown';
-    label.textContent = 'CONTROL DOWN';
-    btn.textContent = '…';
-    btn.disabled = true;
-    return;
-  }
-  banner.style.display = 'none';
-
-  const st = STATE.status;
-  const ld = st.launchd || {};
-  const ep = st.endpoint || {};
   const running = !!(ld.loaded && ld.pid) && ep.up;
   const stopped = !ld.loaded;
 
-  // Header pill + toggle button
   pill.className = 'status-pill ' + (running ? 'running' : (stopped ? 'stopped' : 'unknown'));
   label.textContent = running ? 'RUNNING' : (stopped ? 'STOPPED' : (ld.loaded ? 'STARTING…' : 'UNKNOWN'));
   btn.disabled = STATE.busy;
@@ -700,8 +696,9 @@ function render() {
     btn.className = 'toggle-btn disable';
     btn.onclick = () => postAction('disable');
   }
+}
 
-  // Stat cards
+function renderStatCards(ld, ep, boards) {
   setCard('launchd',
     ld.loaded ? (ld.pid ? 'loaded' : 'loaded, no pid') : 'not loaded',
     ld.loaded && ld.pid ? 'good' : (ld.loaded ? '' : 'bad'),
@@ -724,7 +721,6 @@ function render() {
     setCard('limits', '—', 'dim', 'server not responding');
   }
 
-  const boards = boardClients(ep);
   if (!ep.up) {
     setCard('board', '—', 'dim', 'server not responding');
   } else if (boards.length === 0) {
@@ -735,8 +731,9 @@ function render() {
     setCard('board', fresh ? 'alive' : 'stale', fresh ? 'good' : 'bad',
       newest.ip + ' · ' + fmtAgo(newest.last_seen_sec));
   }
+}
 
-  // Battery saver panel
+function renderBatterySaver(ep) {
   const power = ep.power || null;
   const bsVal = document.getElementById('v-battery-save');
   const bsSub = document.getElementById('s-battery-save');
@@ -758,43 +755,42 @@ function render() {
     bsBtn.onclick = null;
     bsResetBtn.hidden = true;
     bsResetBtn.onclick = null;
-  } else {
-    const on = !!power.battery_save;
-    bsVal.textContent = on ? 'ON' : 'OFF';
-    bsVal.className = 'value ' + (on ? 'good' : 'dim');
-    const src = power.source === 'manual' ? 'manual override' : 'auto from AC';
-    bsSub.textContent = on
-      ? 'low-power cadences active · ' + src
-      : 'full-speed cadences · ' + src;
-    document.getElementById('v-power-source').textContent =
-      power.on_ac ? 'AC power' : 'Battery';
-    document.getElementById('v-power-pct').textContent =
-      power.percent == null ? 'n/a (desktop?)' : power.percent + '%';
-    document.getElementById('v-power-source-mode').textContent =
-      power.battery_save_manual === true ? 'forced on'
-        : power.battery_save_manual === false ? 'forced off'
-        : 'auto';
-    document.getElementById('v-power-paused').textContent =
-      power.paused ? 'paused (≤50% battery)' : 'listening';
-    bsBtn.disabled = STATE.batteryBusy || STATE.busy;
-    if (on) {
-      bsBtn.textContent = 'Turn off';
-      bsBtn.className = 'power-toggle on';
-      bsBtn.onclick = () => postBatterySave(false);
-    } else {
-      bsBtn.textContent = 'Turn on';
-      bsBtn.className = 'power-toggle off';
-      bsBtn.onclick = () => postBatterySave(true);
-    }
-    const isOverridden = power.battery_save_manual !== null && power.battery_save_manual !== undefined;
-    bsResetBtn.hidden = !isOverridden;
-    bsResetBtn.disabled = STATE.batteryBusy || STATE.busy;
-    bsResetBtn.onclick = isOverridden ? () => postBatterySave(null) : null;
+    return;
   }
+  const on = !!power.battery_save;
+  bsVal.textContent = on ? 'ON' : 'OFF';
+  bsVal.className = 'value ' + (on ? 'good' : 'dim');
+  const src = power.source === 'manual' ? 'manual override' : 'auto from AC';
+  bsSub.textContent = on
+    ? 'low-power cadences active · ' + src
+    : 'full-speed cadences · ' + src;
+  document.getElementById('v-power-source').textContent =
+    power.on_ac ? 'AC power' : 'Battery';
+  document.getElementById('v-power-pct').textContent =
+    power.percent == null ? 'n/a (desktop?)' : power.percent + '%';
+  document.getElementById('v-power-source-mode').textContent =
+    power.battery_save_manual === true ? 'forced on'
+      : power.battery_save_manual === false ? 'forced off'
+      : 'auto';
+  document.getElementById('v-power-paused').textContent =
+    power.paused ? 'paused (≤50% battery)' : 'listening';
+  bsBtn.disabled = STATE.batteryBusy || STATE.busy;
+  if (on) {
+    bsBtn.textContent = 'Turn off';
+    bsBtn.className = 'power-toggle on';
+    bsBtn.onclick = () => postBatterySave(false);
+  } else {
+    bsBtn.textContent = 'Turn on';
+    bsBtn.className = 'power-toggle off';
+    bsBtn.onclick = () => postBatterySave(true);
+  }
+  const isOverridden = power.battery_save_manual !== null && power.battery_save_manual !== undefined;
+  bsResetBtn.hidden = !isOverridden;
+  bsResetBtn.disabled = STATE.batteryBusy || STATE.busy;
+  bsResetBtn.onclick = isOverridden ? () => postBatterySave(null) : null;
+}
 
-  renderFirmware(st);
-
-  // Diagnostics checklist
+function renderChecks(ld, ep, boards) {
   const age = ep.up ? generatedAgeSec(ep.generated_at) : null;
   const powerOn = !!(ep.power && ep.power.battery_save);
   const checks = [
@@ -815,8 +811,9 @@ function render() {
       '<span>' + escapeHtml(name) + '</span>' +
       '<span class="detail">' + escapeHtml(detail) + '</span>' +
     '</div>').join('');
+}
 
-  // Clients list
+function renderClients(ep) {
   const allClients = (ep.clients || []);
   document.getElementById('clients').innerHTML = allClients.length === 0
     ? '<div class="client-row"><span style="color:var(--muted)">no requests since server start</span></div>'
@@ -829,8 +826,9 @@ function render() {
           '<span class="ago">' + fmtAgo(c.last_seen_sec) + '</span>' +
         '</div>';
       }).join('');
+}
 
-  // Logs
+function renderLogs(st) {
   const logs = st.logs || {};
   const outBox = document.getElementById('log-out');
   const errBox = document.getElementById('log-err');
@@ -838,6 +836,26 @@ function render() {
   errBox.textContent = (logs.err || []).join('\n') || '(empty)';
   outBox.scrollTop = outBox.scrollHeight;
   errBox.scrollTop = errBox.scrollHeight;
+}
+
+function render() {
+  if (!STATE.controlUp) {
+    renderControlDown();
+    return;
+  }
+  document.getElementById('control-banner').style.display = 'none';
+
+  const st = STATE.status;
+  const ld = st.launchd || {};
+  const ep = st.endpoint || {};
+  const boards = boardClients(ep);
+  renderHeader(ld, ep);
+  renderStatCards(ld, ep, boards);
+  renderBatterySaver(ep);
+  renderFirmware(st);
+  renderChecks(ld, ep, boards);
+  renderClients(ep);
+  renderLogs(st);
 }
 
 // ── BOOT ───────────────────────────────────────────────────
