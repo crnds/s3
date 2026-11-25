@@ -4,28 +4,28 @@ from datetime import datetime, timezone
 from unittest import mock
 
 import helpers
-from helpers import u
 from s3srv import power
 from s3srv import market
+from s3srv import notes
 from s3srv import usage_scan as scan
 
 
 class SanitizeNote(unittest.TestCase):
     def test_non_string_is_empty(self):
         for v in (None, 5, b"x", ["a"]):
-            self.assertEqual(u.sanitize_note(v), "")
+            self.assertEqual(notes.sanitize_note(v), "")
 
     def test_newlines_and_tabs_fold(self):
-        self.assertEqual(u.sanitize_note("a\r\nb\rc\td"), "a\nb\nc d")
+        self.assertEqual(notes.sanitize_note("a\r\nb\rc\td"), "a\nb\nc d")
 
     def test_non_ascii_becomes_question_mark_not_dropped(self):
-        self.assertEqual(u.sanitize_note("aกb\U0001F600c"), "a?b?c")
+        self.assertEqual(notes.sanitize_note("aกb\U0001F600c"), "a?b?c")
 
     def test_control_chars_become_question_mark(self):
-        self.assertEqual(u.sanitize_note("a\x00b\x7fc"), "a?b?c")
+        self.assertEqual(notes.sanitize_note("a\x00b\x7fc"), "a?b?c")
 
     def test_caps_at_note_max(self):
-        self.assertEqual(len(u.sanitize_note("x" * 1000)), u.NOTE_MAX_CHARS)
+        self.assertEqual(len(notes.sanitize_note("x" * 1000)), notes.NOTE_MAX_CHARS)
 
 
 class UsAqi(unittest.TestCase):
