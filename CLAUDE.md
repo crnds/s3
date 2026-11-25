@@ -14,7 +14,7 @@ here on 2026-11-09. "The CYD" in comments below means that lineage.
 ```
 Mac laptop                                   S3 board (on WiFi)
 server/usage_server.py  ──/api/usage──▶      src/*.cpp (polls every 20s, 7 pages)
-  :8787, launchd com.corner.s3usage           simulator-s3.html = browser twin
+  :8787, launchd com.corner.s3usage           simulator-s3.html + sim/*.js = browser twin
 server/control_server.py (:8788, localhost; com.corner.s3control)
   ▲ POST /api/note (localhost): note.html (served by :8787), tools/note.py (CLI)
 ```
@@ -38,8 +38,9 @@ fresh per request, so edits show up on reload with no restart.
 
 ## The one invariant that matters most
 
-`src/pages.cpp` + `src/settings.cpp` and `simulator-s3.html` render the **same
-UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
+`src/pages.cpp` + `src/settings.cpp` and the simulator (`simulator-s3.html` +
+`sim/*.js`, below) render the **same UI** and must be kept in lockstep: same
+coordinates, fonts, colours, text.
 
 - **Text parity is structural, not approximate.** `tools/make_vlw.py` renders
   every font once and writes both the firmware's VLW arrays
@@ -49,11 +50,11 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
   Never swap the simulator to browser `fillText` — that breaks line-fit
   predictions, the whole point of the sim (the S3 version of the CYD's
   "6px per character" rule).
-- **Colours:** firmware RGB565 in `tokens.h`, simulator RGB888 with the
-  `// 0x....` comment beside each. Change both together.
+- **Colours:** firmware RGB565 in `tokens.h`, simulator RGB888 in
+  `sim/tokens.js` with the `// 0x....` comment beside each. Change both together.
 - **Two themes (Settings > Theme, NVS `light_mode`).** Theme-dependent
   colour roles are runtime tokens (`extern uint16_t` in `tokens.h`), assigned by
-  `applyThemeTokens()` in `settings.cpp` (twin: the simulator's function of the
+  `applyThemeTokens()` in `settings.cpp` (twin: `sim/theme.js`'s function of the
   same name); design.md 4.6 lists them. Never capture one in a `static const`, and check
   new UI in both themes. `loadThemeEarly()` reads the key before the first boot frame.
 - **Deliberate non-twins:** speaker output (`src/audio.cpp`; the sim keeps the Settings > Sound
@@ -65,18 +66,62 @@ UI** and must be kept in lockstep: same coordinates, fonts, colours, text.
 - After any UI change: screenshot the sim headless **and** the board
   (`tools/grab_screen.py`) and compare (see Commands).
 - **Note tokenizer is a four-copy parity surface**: `src/pages.cpp`,
-  `simulator-s3.html`, `note.html` and `tools/note.py`.
-  `grep -rln noteWordColor src simulator-s3.html note.html` finds the first
+  `sim/page_note.js`, `note.html` and `tools/note.py`.
+  `grep -rln noteWordColor src sim note.html` finds the first
   three; `note.py` holds its copy under `NOTE TOKENIZER + WRAP`. The S3 pane uses a monospace font so the wrap walk stays a
   cols×rows grid; every size holds at least the CYD pane's columns, so the
   CYD-geometry fit check in `note.html`/`note.py` stays a safe bound.
 - **Tokenizer corpus (`tests/note_tokens.json`).** Word and line cases, run
-  against `simulator-s3.html` and `note.html` by `node tools/note_corpus.mjs`
+  against the simulator and `note.html` by `node tools/note_corpus.mjs`
   (CI `simulator` job) and against `tools/note.py` by
   `tests/server/test_note_tokens.py` (CI `server` job). The C++ copy joins once
   `noteWordColor` returns a role instead of a colour. It checks logic; a
   test in `test_note_tokens.py` also pins `note.py`'s yellow to the nearest
   256-colour match of the firmware's `note.number` colour.
+
+## Simulator (`simulator-s3.html` + `sim/`)
+
+`simulator-s3.html` holds the CSS, the control-panel markup and the
+`<script src>` tags; the code is classic scripts in `sim/`, named after the
+firmware file each one twins, loaded in this order:
+
+| File | Holds (firmware twin) |
+|---|---|
+| `fonts.js` | glyph atlas, **generated** by `tools/make_vlw.py` -- never edit |
+| `tokens.js` | `TOK_*` (`tokens.h`), incl. the `TOK_NOTE_*` aliases as global getters |
+| `layout.js` | screen constants + LAYOUT boxes (`state.h`) |
+| `state.js` | storage keys, `lsGet`/`lsSet`, device figures, `STATE` |
+| `display.js` | frame buffers, `scrimPx`/`fadePx`, `presentFrame`, `displayPresent*`, `pixelShiftTick` (`display.cpp`) |
+| `fonts_draw.js` | `drawText*`, `textW` (`fonts.cpp`) |
+| `gfx.js` | the LovyanGFX calls (AA fills, rings, clip) |
+| `format.js` / `pace.js` / `timing.js` | `format.cpp` / `pace.cpp` / `timing.cpp` (+ the Bangkok clock) |
+| `motion.js` | springs, velocity, rubber band, backlight animator (`motion.cpp`) |
+| `pages_common.js` | primitives, glyphs, corner, weather icons, pace sweep, left column, clock |
+| `page_status.js`, `page_usage.js`, `page_note.js`, `page_overview.js` | one page each |
+| `sheet_device.js`, `sheet_weather.js`, `strip.js` | the two sheets, the status strip |
+| `pages.js` | media pages (placeholder cats/movies, pane pages) and `render()` |
+| `theme.js` | `applyThemeTokens`, `applyContrast` |
+| `settings.js` | `SETTINGS[]`, the Settings screens, `applyEffectivePoll`, persistence (`settings.cpp`, `sd_store.cpp`) |
+| `nav.js` | touch router, gestures, transitions (`nav.cpp`) |
+| `net.js` | `fetchUsage`, `applyUsageDoc`, `applyWeatherDoc`, poll timer (`net.cpp`) |
+| `mock.js`, `fixture.js`, `chrome.js` | sim-only: `MOCK`, `?fixture=` mode + `simNowMs()`, the control panel and pointer/key input |
+| `main.js` | `tick()` (= `loop()`), screen sleep, boot (`main.cpp`) |
+
+Rules:
+- **No build step, no modules:** it must run from `file://`, so no
+  `type="module"` and no fetch except the fixture load. Top-level `const`/`let`
+  and functions are shared globals (`STATE` and `render` stay global: tools
+  and the MCP recipe below call them).
+- **Load order:** a file may *call* anything at run time, but at load time
+  (top-level initialisers, `addEventListener(…, fn)`) it may only use what an
+  earlier file defined: a `const` read before its file has run is a TDZ error.
+  A new file goes into the script list at the right place.
+- `render()` → `presentFrame()` stays synchronous; draw code reads the clock
+  through `simNowMs()` only (fixtures freeze it).
+- Draw and poll code never read the DOM: `chrome.js` copies the Connection
+  card's controls into `STATE.sim*` / `STATE.cfgPollIntervalSec`. Only
+  `display.js` (the canvas) and `chrome.js` touch the document.
+- Use the firmware's names for twinned functions, so `git grep` finds both.
 
 ## Commands
 
@@ -150,8 +195,9 @@ data from `tests/fixtures/default.json`, no polling, `window.simFixture.show()`)
 draws every page and sheet in both themes and compares each with
 `tests/golden/default/*.png` (per-channel tolerance 2 for blending
 differences between machines; failures leave actual + diff PNGs in
-`tests/out/`). **Any visible UI change updates the goldens in the same
-commit.** Playwright is pinned to 1.63.0 with no package.json: locally
+`tests/out/`); any page error or console error in the sim (e.g. a
+missing `sim/*.js`) fails it too. **Any visible UI change updates the goldens
+in the same commit.** Playwright is pinned to 1.63.0 with no package.json: locally
 `npm install --no-save playwright@1.63.0 && npx playwright install chromium`
 (node_modules/ is gitignored), or point `NODE_PATH` at an install. Goldens
 made on the Mac pass on Linux within the tolerance; if they ever drift, run
@@ -207,7 +253,7 @@ are gitignored (`cats/` is tracked: its GIFs are embedded in the firmware).
   so sheets and static screens flash too) on the even seconds of hh:00:00..05;
   serial `h` plays it now. `motion.cpp`'s backlight animator fades sleep, wake,
   Night Mode edges and brightness changes.
-- **Navigation (`nav.cpp`, twin: the simulator's NAV block).** The touch
+- **Navigation (`nav.cpp`, twin: `sim/nav.js`).** The touch
   router, gesture recogniser and every transition, stepped once per `loop()`
   pass -- nothing blocks, so a touch during motion is always read. Commit on
   touch-up with a 10px slop and a 120ms rearm from the last up; pressed states
@@ -469,10 +515,10 @@ targets are 56x40, reaching up to y 280 (design.md 9.6). Page navigation
 splits at the screen half (x 240), independent of the grid.
 Colours, type roles, spacing, radii, touch and motion values are design
 tokens in `src/tokens.h` (`TOK_*`, the upper snake of design.md's dotted
-names), mirrored line for line in the simulator's TOKENS block (RGB888 with
+names), mirrored line for line in `sim/tokens.js` (RGB888 with
 the `// 0x....` beside). Screens use tokens only -- no raw colour, font id or
 magic spacing. Shared hit boxes and card boxes live in `state.h`'s LAYOUT
-block and are copied at the top of `simulator-s3.html`.
+block and are copied in `sim/layout.js`.
 
 ## Cat library
 
