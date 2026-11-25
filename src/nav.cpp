@@ -499,7 +499,6 @@ void navFinishTransition() {
 static bool listCoasting = false;
 static float listPos = 0, listV = 0;   // scroll offset (px) and its velocity (px/s)
 static Spring listSpring;              // rubber-band spring-back at an end
-static const int LIST_VIEW_H = SCREEN_H - TOK_LAYOUT_HEADER_H;
 
 static void listStop() { listCoasting = false; listSpring.active = false; }
 

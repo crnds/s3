@@ -1,6 +1,7 @@
 // AXS15231B panel bring-up + the rotate-and-stream present path. See
 // display.h for the contract and lib/axs15231b's header for why every update
 // is a whole frame.
+#include "state.h"
 #include "display.h"
 #include "pins.h"
 
@@ -201,16 +202,16 @@ uint32_t displayPresentCount() { return presentCount; }
 uint32_t displayLastTeWaitUs() { return lastTeWaitUs; }
 
 // ── PIXEL OPS ─────────────────────────────────────────────
-static inline uint16_t swap16(uint16_t c) { return (uint16_t)((c >> 8) | (c << 8)); }
+static inline uint16_t swap16(uint16_t c) { return rgb565Swap(c); }
 
 // Materials without alpha (design.md 8.4): the frames hold big-endian RGB565,
 // so each op swaps to native order, halves/quarters every channel with one
 // shift and mask, and swaps back.
 static inline uint16_t scrimPx(uint16_t be, int level) {
   if (level <= 0) return be;
+  if (level >= 2) return rgb565HalfBE(be);        // material.scrim, 50%
   uint16_t c = swap16(be);
-  if (level == 1) c = c - ((c >> 2) & 0x39E7);   // material.scrim.light, 75%
-  else c = (c >> 1) & 0x7BEF;                     // material.scrim, 50%
+  c = c - ((c >> 2) & 0x39E7);                    // material.scrim.light, 75%
   return swap16(c);
 }
 
@@ -384,3 +385,37 @@ void displayPresentFade(const uint16_t* from, const uint16_t* to, int level,
   p.level = constrain(level, 1, 3);
   presentSrc(p);
 }
+// ── PRESENTATION ───────────────────────────────────────────
+bool presentHold = false;
+volatile uint32_t teWaitAccumUs = 0;
+volatile uint32_t pollOkSeq = 0;
+// Set when a present was asked for while a transition owns the panel; nav.cpp
+// composites it on its next tick.
+bool transitionDirty = false;
+
+void presentFrame() {
+  if (presentHold) return;
+  if (navTransitionActive()) { transitionDirty = true; return; }
+  displayPresent((const uint16_t*)frame.getBuffer(), shiftX, shiftY, TOK_COLOR_BG_CANVAS);
+  teWaitAccumUs += displayLastTeWaitUs();
+  shiftDirty = false;
+}
+
+// Pixel-shift orbit: <=2 px, eight steps (design.md, panel type).
+static const int8_t SHIFT_ORBIT[8][2] = {
+  {0, 0}, {1, 0}, {2, 0}, {2, -1}, {2, -2}, {1, -2}, {0, -2}, {0, -1}
+};
+
+// Advance the pixel-shift orbit (core 1 only, like everything display-side).
+// Returns true on a step so the caller can repaint immediately.
+bool pixelShiftTick(uint32_t now) {
+  if (cfgShiftStepMs == 0) return false;
+  if (now - lastShiftMs < cfgShiftStepMs) return false;
+  lastShiftMs = now;
+  shiftIdx = (uint8_t)((shiftIdx + 1) % 8);
+  shiftX = SHIFT_ORBIT[shiftIdx][0];
+  shiftY = SHIFT_ORBIT[shiftIdx][1];
+  shiftDirty = true;
+  return true;
+}
+
