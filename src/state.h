@@ -39,6 +39,18 @@
 #include "format_pure.h"
 #include "pace.h"
 #include "timing.h"
+#include "layout.h"
+#include "config_keys.h"
+#include "ota.h"
+#include "net.h"
+#include "format.h"
+#include "sd_store.h"
+#include "pages.h"
+#include "gif_player.h"
+#include "movie.h"
+#include "settings.h"
+#include "nav.h"
+#include "ap_setup.h"
 
 // ── DISPLAY ────────────────────────────────────────────────
 // Every page draws into `frame`, a 480x320 16bpp LGFX_Sprite in PSRAM (via
@@ -119,63 +131,6 @@ const int NOTE_BUF_MAX = 512;
 const long GMT_OFFSET_SEC = 7 * 3600;
 const int DST_OFFSET_SEC = 0;
 
-// ── LAYOUT (480x320 landscape) ──────────────────────────────
-// design.md section 7 is the source of truth; the numbers here are the
-// shared hit boxes and card boxes the touch router (nav.cpp), pages.cpp,
-// settings.cpp and gif_player.cpp all need. simulator-s3.html carries the
-// same numbers. Colours, type, spacing and component sizes are tokens
-// (tokens.h) -- no COL_* literals any more.
-//   - 8px screen margin and card gutter; content x 8..471, y 8..291
-//   - left column x 8..135 (fixed 128px), right column x 144..471
-//   - status strip y 300..318, progress hairline y 319
-// Page navigation splits at the screen half, independent of the grid.
-const int SWIPE_SPLIT_X = TOK_LAYOUT_HALF_SPLIT_X;
-
-// Status page cards (design.md 7.4).
-const int LIMIT_CARD_H = 104, BTC_CARD_H = 60;
-const int LIMIT5H_Y = TOK_LAYOUT_CONTENT_Y0;                              // 8
-const int LIMITWK_Y = LIMIT5H_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;       // 120
-const int BTC_Y = LIMITWK_Y + LIMIT_CARD_H + TOK_SPACE_GUTTER;           // 232
-const int CLOCK_CARD_H = 192, WEATHER_CARD_H = 84;
-const int CLOCK_CARD_Y = TOK_LAYOUT_CONTENT_Y0;                           // 8
-const int WEATHER_CARD_Y = CLOCK_CARD_Y + CLOCK_CARD_H + TOK_SPACE_GUTTER;  // 208
-
-// Weather card (status page) = its own hit box: the whole card is the
-// target, with a disclosure chevron as its affordance. Tap opens the Weather
-// sheet.
-const int WEATHER_HIT_X0 = TOK_LAYOUT_COL_RIGHT_X, WEATHER_HIT_X1 = TOK_LAYOUT_CONTENT_X1;
-const int WEATHER_HIT_Y0 = WEATHER_CARD_Y, WEATHER_HIT_Y1 = TOK_LAYOUT_CONTENT_Y1;
-
-// Overview page grid (design.md 7.5): 3 x 3 cells in the 464 x 284 content
-// area with 8px gutters -- 149 + 8 + 150 + 8 + 149 = 464, 89 + 8 + 90 + 8 + 89
-// = 284. Row by row: 5H, WK, clock / date, month calendar, BTC / weather,
-// cat, note.
-const int OV_COL_X[3] = {8, 165, 323}, OV_COL_W[3] = {149, 150, 149};
-const int OV_ROW_Y[3] = {8, 105, 203}, OV_ROW_H[3] = {89, 90, 89};
-// The cat cell (bottom-middle, the GIF player's pane on this page) and the
-// weather cell (bottom-left), whose whole box opens the Weather sheet -- bar
-// its bottom-left corner, which the Device Stats strip target takes first.
-const int OV_CAT_X0 = 165, OV_CAT_Y0 = 203, OV_CAT_W = 150, OV_CAT_H = 89;
-const int OV_WX_HIT_X0 = 8, OV_WX_HIT_X1 = 157, OV_WX_HIT_Y0 = 203, OV_WX_HIT_Y1 = 292;
-
-// Status strip targets (design.md 11.12): 56x40 each (touch.edge.min for a
-// bottom-edge target) -- the 20px strip, the 8px gap and the bottom 12px of the
-// content area. nav.cpp's hit order gives them that strip of content ahead of a
-// card, but not ahead of the shuffle button (design.md 9.2).
-const int STRIP_HIT_Y0 = SCREEN_H - TOK_TOUCH_EDGE_MIN;                   // 280
-const int HEALTH_HIT_X0 = 0, HEALTH_HIT_X1 = 56;                          // -> Device Stats
-const int SETTINGS_HIT_X0 = 424, SETTINGS_HIT_X1 = SCREEN_W;              // -> Settings
-const int STRIP_CY = 309;                                                 // glyph centre line
-const int STRIP_CAPTION_Y = 301;                                          // caption text top (design.md 11.12)
-
-// Media control (design.md 11.20): a shuffle icon button, only while Cat
-// Shuffle is Fixed, bottom-right of the media area, 8px in from its edges.
-// It replaces the old invisible "next cat" zones.
-const int SHUFFLE_DISC_R = 16;
-const int SHUFFLE_HIT = 48;
-
-// Sleep button (corner slot a) -- checked before every other target.
-const int SLEEP_HIT_X0 = TOK_CORNER_HIT_X0, SLEEP_HIT_X1 = SCREEN_W;
 const int SLEEP_HIT_Y0 = 0, SLEEP_HIT_Y1 = TOK_CORNER_HIT_Y1;
 
 // Weather forecast slots delivered by /api/usage (Mac-proxied Open-Meteo)
@@ -413,25 +368,6 @@ extern int cfgTapVol, cfgAlertVol;
 extern bool cfgHourlyChime, cfgClaudeDing, cfgSoundAlerts;
 extern bool cfgMuteSleep, cfgMuteNight;
 
-// ── OTA UPDATES (ota.cpp, roadmap O9) ──────────────────────
-// The Mac offers a published build in /api/usage; networkTask (core 0) does
-// all of it, Settings > Firmware only reads otaState / otaProgress and sets
-// pendingOtaInstall. cfgOtaAuto ("ota_auto", default on): install a newly
-// published build by itself.
-enum OtaState : uint8_t { OTA_NONE, OTA_CURRENT, OTA_AVAILABLE, OTA_INSTALLING, OTA_FAILED, OTA_ROLLED_BACK };
-extern volatile OtaState otaState;
-extern volatile int otaProgress;  // 0..100 while OTA_INSTALLING
-extern volatile bool pendingOtaInstall;
-extern bool cfgOtaAuto;
-void otaBoot();
-void otaNoteOffer(const char* sha256, int size, uint32_t installId);
-const char* otaRunningSha();  // for the X-S3-Firmware poll header
-const char* otaReport();      // X-S3-OTA: "<state>; auto=<0|1>"
-void otaAfterPoll(bool connected);
-void otaInstall();
-// "http://<server ip>:<port><path>" for the resolved Mac (net.cpp); false
-// before the server has ever resolved.
-bool serverUrl(const char* path, String& out);
 
 // Generic Settings-page persistence queue: a leaf's apply() (loop(), core 1)
 // mutates its live global directly, then queues the flash key/value here;
@@ -449,251 +385,3 @@ extern volatile bool pendingForgetWifi;
 // is in flight.
 extern volatile bool pendingRestart;
 
-// Config keys persisted through the generic queue above (see
-// sd_store.cpp's saveIntConfigToFlash and settings.cpp's queueConfigSave).
-enum ConfigKeyId {
-  CFGKEY_BRIGHTNESS = 0, CFGKEY_POLL_INTERVAL, CFGKEY_PIXEL_SHIFT, CFGKEY_BOOT_PAGE,
-  CFGKEY_CAT_SHUFFLE, CFGKEY_NIGHT_MODE, CFGKEY_ROTATION, CFGKEY_SHOW_COUNTDOWN,
-  CFGKEY_BATTERY_SAVE, CFGKEY_SHOW_AQI, CFGKEY_HOURLY_FLASH, CFGKEY_SHOW_PROGRESS,
-  CFGKEY_LAST_PAGE, CFGKEY_REDUCE_MOTION, CFGKEY_HIGH_CONTRAST,
-  CFGKEY_LIGHT_MODE, CFGKEY_ALERT_VOL, CFGKEY_TAP_VOL, CFGKEY_HOURLY_CHIME,
-  CFGKEY_CLAUDE_DING, CFGKEY_SOUND_ALERTS, CFGKEY_MUTE_SLEEP, CFGKEY_MUTE_NIGHT,
-  CFGKEY_OTA_AUTO,
-  CFGKEY_COUNT
-};
-extern const char* const CONFIG_KEY_NAMES[CFGKEY_COUNT];
-
-// ── FORMATTING (format.cpp) ────────────────────────────────
-// Non-blocking "is the wall clock set?" + local broken-down time. Use this, never
-// getLocalTime(&ti, 0): with ms == 0 the core's loop is `while (millis() - start
-// <= 0)`, so a 1 ms tick between its two millis() reads makes it return false
-// without ever reading the clock (~0.2% of calls; blanked the clock/calendar cards).
-bool haveLocalTime(struct tm* ti);
-String fmtTokens(int64_t t);
-String fmtBtc(double p);
-String fmtChangePct(double pct);  // "+5%" / "-3%" (whole percent, sign always)
-String fmtCountdown(long sec);     // "4h 03m" / "42m"
-String fmtCountdownDHM(long sec);  // "6d 16h" / "4h 03m"
-String fmtKB(uint32_t bytes);
-String fmtGB(uint64_t bytes);
-int flashPercent(uint32_t &usedOut, uint32_t &totalOut);
-// Internal-SRAM heap in use as a % of its total (heap_caps MALLOC_CAP_INTERNAL),
-// and the same for the 8MB PSRAM -- the S3's two real memory pools, replacing
-// the CYD's single fixed DRAM constant.
-int staticRamPercent(uint32_t &usedOut, uint32_t &totalOut);
-int psramPercent(uint32_t &usedOut, uint32_t &totalOut);
-// SD_MMC.totalBytes()/usedBytes() touch the card that sdMutex serializes
-// between networkTask (core 0) and the render core's cat-GIF reads (core 1)
-// -- see sdMutex's contract above. refreshSdCapacityCache() does the live
-// query under lockSD()/unlockSD() and must only be called from networkTask;
-// drawDevicePage() (core 1, called from inside render()'s stateMutex-held
-// section, so it cannot also take sdMutex -- only sdMutex -> stateMutex
-// nesting is allowed, never the reverse) reads the cached result instead via
-// cachedSdCapacityPercent(), no lock needed.
-void refreshSdCapacityCache();
-int cachedSdCapacityPercent(uint64_t &usedOut, uint64_t &totalOut);
-
-// ── NETWORK (net.cpp) ──────────────────────────────────────
-void ensureMdns();
-void connectWifi();
-bool resolveServer();
-bool fetchUsage();
-bool loadCachedUsage();
-void loadEnvCache();
-void loadWeatherCache();
-// fromNetwork=true only for a live /api/usage fetch — applies power.battery_save
-// into serverBatterySave. SD cache loads pass false so a stale Mac power flag
-// can't floor the poll across an overnight offline boot.
-bool applyUsageJson(const String& payload, bool fromNetwork = false);
-// Set false by networkTask() (main.cpp) on WiFi loss, so ensureMdns()
-// re-initializes once WiFi returns.
-extern bool mdnsStarted;
-
-// ── SD STORE (sd_store.cpp) ────────────────────────────────
-// Runtime settings/config now persist to internal flash (NVS, via
-// Preferences) rather than the SD card -- see loadRuntimeConfig()'s comment
-// in sd_store.cpp. SD is still used here for diagnostics and the boot splash.
-void loadRuntimeConfig();
-const char* resetReasonStr();
-void logDiag(const char* event);
-void showBootSplash();
-void saveWifiCredsToFlash(const String& ssid, const String& password);
-void saveIntConfigToFlash(const char* key, int32_t value);
-// Cached last-known server IPv4 (raw 4 bytes in an int32). Not a Settings-area
-// key — see the comment on loadServerIpFromFlash() in sd_store.cpp.
-const char* const SERVER_IP_KEY = "server_ip";
-uint32_t loadServerIpFromFlash();
-
-// Floor on how often the poll loop touches the SD card for the JSON caches,
-// /archive.csv and the capacity stats. Decoupled from Poll Interval so the 5s
-// setting doesn't turn every poll into five file operations — see the comments
-// at fetchUsage()'s persist block (net.cpp) and networkTask() (the .ino).
-const uint32_t SD_PERSIST_MIN_MS = 60000UL;
-void forgetWifiFromFlash();
-
-// ── PAGES / RENDER (pages.cpp) ─────────────────────────────
-// render() composes the current screen (a page, or the Weather / Device
-// Stats sheet) into `frame` and presents it. Settings has its own
-// renderSettings().
-void render();
-// Mixed page's cat pane = the right column (design.md 7.4): the GIF player
-// cover-fits the cat into it. Defined here so pages.cpp's placeholder and
-// gif_player.cpp agree. The Overview page's pane is its cat cell (OV_CAT_*).
-const int MIXED_GIF_X0 = TOK_LAYOUT_COL_RIGHT_X, MIXED_GIF_W = TOK_LAYOUT_COL_RIGHT_W;
-const int MIXED_GIF_Y0 = TOK_LAYOUT_CONTENT_Y0, MIXED_GIF_H = TOK_LAYOUT_CONTENT_Y1 - TOK_LAYOUT_CONTENT_Y0;
-// The media pages with a static half around a cat pane: Mixed and Overview,
-// online only (offline, every page is the full-screen cat).
-bool catPanePage(bool offline);
-// The cat's box on a catPanePage().
-void catPaneRect(int& x, int& y, int& w, int& h);
-// A catPanePage()'s static half: everything but the pane, plus the strip.
-void drawMediaPageStatic();
-// System corner glyphs, drawn LAST on every screen (design.md 11.21).
-// overMedia puts each occupied slot on a color.plate backing.
-void drawSystemCorner(bool overMedia);
-// Shared icon/component primitives (pages.cpp; settings.cpp and gif_player.cpp reuse these).
-void drawCloseGlyph(int cx, int cy, uint16_t c);
-void drawBackGlyph(int cx, int cy, uint16_t c);
-void drawChevron(int cx, int cy, uint16_t c);
-void drawShuffleButton(int cx, int cy, bool pressed);
-void drawModalHeader(bool back, const char* title, bool pressed);
-void drawCardSurface(int x, int y, int w, int h, uint16_t fill);
-// Anti-aliased fills (design.md 8.1): LovyanGFX's fillSmoothRoundRect /
-// fillSmoothCircle algorithm, blended straight into the frame buffer.
-void aaFillRoundRect(int x, int y, int w, int h, int r, uint16_t c);
-void aaFillCircle(int x, int y, int r, uint16_t c);
-void aaRing(int cx, int cy, int r, int t, uint16_t c);  // AA ring, outer radius r, thickness t
-void aaMaskRoundCorners(int x, int y, int w, int h, int r, uint16_t bg);  // round the corners of media in the frame
-// The full-screen cat page's reset readout, on a color.plate (design.md 11.20).
-void drawResetPlate();
-// Empty / error state (design.md 13.4), centred in a box: a title, space.sm,
-// a caption description. isError puts the title in status.error.
-void drawEmptyState(int cx, int y0, int h, const char* title, const char* desc, bool isError,
-                    FontId titleFont = TOK_TYPE_HEADLINE, uint16_t titleColor = TOK_COLOR_TEXT_PRIMARY);
-// The shuffle button's centre for the current media layout (full screen or
-// the mixed pane).
-void shuffleCentre(bool offline, int& cx, int& cy);
-// The two usage windows, and the pace projection: seconds until the limit at
-// the window's average rate so far, or -1 when unknown or the reset lands
-// first. Shared by the pace flag and networkTask's sound alerts.
-// SESSION_WINDOW_SEC, WEEK_WINDOW_SEC and paceSecondsToLimit() live in pace.h.
-// Stale data (design.md 13.4): the dashboard is up, but the last good poll is
-// older than max(2 poll intervals, 1 min), or there has been none since boot
-// (the SD cache). The strip says how old; the limit numerals go secondary.
-bool dataStale();
-
-// ── GIF PLAYER (gif_player.cpp) ─────────────────────────────
-// Returns true when it changed `frame` -- loop() presents once per pass.
-bool gifTick(bool offline);
-// Encapsulate what used to be loop() reaching directly into gif/gifOpen/
-// gifNextFrameMs — narrows the extern surface to three intent-named calls
-// instead of four raw globals.
-void gifPlayerEnterCatMode();       // allocate the decoder on entering a cat page (or offline)
-void gifPlayerExitCatMode();        // free the decoder on leaving
-void gifPlayerResetForPageChange(); // force a fresh random GIF on the next tick
-// Decode + draw the first frame right now (into `frame`, then presentFrame()
-// -- held during a page slide), instead of waiting for the next gifTick().
-void gifPlayerPrimeFrame(bool offline);
-// Stage the page for a slide onto it without opening the player: the
-// poster (the page's last screen, or nullptr for the plain plate) + overlays,
-// into `frame`, no present. The next gifTick() after the slide lands opens
-// and decodes the first frame (loop() gates it on navPageTransitionActive()).
-void gifPlayerStagePage(bool offline, const uint16_t* poster);
-// Re-blit the whole open GIF canvas (+ the page's static parts and
-// overlays) into `frame` -- after a sheet or a cancelled lean overwrote it.
-void gifPlayerRepaint(bool offline);
-// Redraw just the overlays (reset plate, shuffle button, corner) and present
-// -- a pressed state changed; each overlay keeps its footprint, so nothing
-// under it needs restoring.
-void gifPlayerRedrawOverlays(bool offline);
-// Reset plate + shuffle button + corner glyphs, drawn over whichever media is
-// active. Shared with movie_player.cpp: MOVIE_PAGE uses the same overlays.
-void drawMediaOverlays(bool offline);
-
-// ── MOVIE PLAYER (movie_player.cpp) ─────────────────────────
-// Random .mjpeg playback on MOVIE_PAGE, the same shape as the GIF player
-// above but for raw MJPEG streams from /movies/ on the SD card. Reuses
-// catShuffleMs/catShuffleFixed (the "Cat Shuffle" setting) for its own
-// rotation timing -- see movie_player.cpp for why. gif_player.cpp's gifTick()
-// and its five sibling entry points each dispatch into this module's
-// equivalents when currentPage == MOVIE_PAGE, so main.cpp/nav.cpp need no
-// separate call sites for movies.
-void scanMovies();
-bool movieTick(bool offline);
-void moviePlayerEnter();
-void moviePlayerExit();
-void moviePlayerResetForPageChange();
-void moviePlayerPrimeFrame(bool offline);
-void moviePlayerStagePage(bool offline, const uint16_t* poster);
-void moviePlayerRepaint(bool offline);
-
-// ── SETTINGS (settings.cpp) ────────────────────────────────
-// The Settings sheet: SET_LIST (scrolling list of rows) and SET_LEAF (a
-// detail screen with an option grid or an arm button). nav.cpp owns the
-// gestures and transitions; these are the drawing, hit-testing and commit
-// halves.
-void renderSettings();          // compose + present
-void drawSettingsScreen();      // compose only (transitions snapshot around it)
-void queueConfigSave(uint8_t keyId, int32_t value);
-// Recompute live backlight (night mode) / poll cadence (battery save). Call
-// after any of those inputs change (and once after loadRuntimeConfig).
-// fadeMs picks the backlight motion token (0 = cut).
-void applyEffectiveBrightness(uint32_t fadeMs = 0);
-void applyEffectivePoll();
-void applyContrast();
-void applyThemeTokens();
-// Reads only the theme key from NVS so the very first frame is painted in the
-// right theme (setup(), before loadRuntimeConfig()).
-void loadThemeEarly();
-int settingsListHit(int32_t x, int32_t y);        // row index, or -1
-// Tap on a list row (commit on up): toggles and buttons act in place and
-// return SG_NONE; navigation/action rows set settingsLeafIndex and return
-// SG_LEAF (push the detail); a section row returns SG_SECTION (push the child
-// list: nav.cpp snapshots the screen, then calls settingsEnterSection()).
-enum SettingsGo { SG_NONE, SG_LEAF, SG_SECTION };
-SettingsGo settingsListActivate(int idx);
-// -1 = the main list; else the SETTINGS row whose children the list shows.
-extern int settingsSection;
-void settingsEnterSection();
-void settingsLeaveSection();
-void settingsUndoLeaveSection();
-int settingsLeafHit(int32_t x, int32_t y);        // option cell / arm button, or -1
-void settingsLeafActivate(int idx, uint32_t now);
-int settingsScrollMax();
-// Toast (design.md 11.17): confirms an action with no other visible result.
-extern char toastText[40];
-extern uint32_t toastUntilMs;
-
-// ── NAVIGATION (nav.cpp) ───────────────────────────────────
-// The touch router, gesture recogniser and every transition (page slide,
-// lean, swipe, sheet rise/drop with scrim, Settings push/pop, reduced-motion
-// cross-fade). design.md sections 9 and 12.
-enum PressId {
-  PRESS_NONE = 0, PRESS_SLEEP, PRESS_CLOSE, PRESS_WEATHER, PRESS_HEALTH, PRESS_GEAR,
-  PRESS_SHUFFLE, PRESS_ROW, PRESS_CELL
-};
-extern PressId pressedId;
-extern int pressedIndex;          // row / cell index for PRESS_ROW / PRESS_CELL
-void navTouch(bool down, int32_t x, int32_t y, uint32_t now);
-// Steps the running spring / momentum and presents. Returns true if it
-// presented this pass (loop() then skips its own present).
-bool navTick(uint32_t now);
-bool navTransitionActive();       // a composite (slide / sheet / fade) is on screen
-bool navPageTransitionActive();   // a page slide (or Reduce Motion page fade): media players hold
-void navInvalidatePosters();      // theme changed: the media pages' slide-in posters are stale
-bool navSheetOpen();              // Weather, Device Stats or Settings is up
-void navGoToPage(int page, bool forward);   // serial keys; animated unless offline
-void navOpenSheet(int which);     // 0 weather, 1 device, 2 settings
-void navRefreshBehind();          // theme changed under an open sheet: recompose the page behind it
-void navCloseSheet();
-void navFinishTransition();       // snap any running transition to its end
-bool navCatLayout();              // the cat player owns the current page
-void navSyncCatMode(bool catMode);  // allocate / free the GIF decoder on catMode edges
-void navResetGesture();           // drop any gesture in progress (screen sleep)
-// Screen sleep (main.cpp): backlight fade to 0, panel DISPOFF + SLPIN, CPU
-// 80MHz, WiFi modem sleep; the next press anywhere wakes (and is swallowed).
-void enterScreenSleep();
-void exitScreenSleep();
-
-// ── AP SETUP (ap_setup.cpp) ────────────────────────────────
-void runApSetup();  // blocks until configured, then ESP.restart()s — never returns
