@@ -436,8 +436,12 @@ function noteFits(s, size) {
 // ── HIGHLIGHTING (textarea backdrop) ──────────────────────
 // Same rules as the board's drawNotePane, but no wrapping — the textarea does
 // its own, and forcing the board's 24-column wrap here would fight the caret.
+// The same five-character escape as server.html's, so either copy is safe in
+// an attribute as well as in text.
 function escapeHtml(s) {
-  return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 function highlightHtml(s) {
