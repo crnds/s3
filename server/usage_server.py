@@ -7,35 +7,17 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from s3srv.common import USAGE_PORT as PORT, JsonHandler, Server, log_err
+from s3srv.common import USAGE_PORT as PORT, JsonHandler, Server, log_err, log_out
 from s3srv.state import STATE, CLIENT_RETENTION, is_known_client, note_client
 from s3srv.power import battery_guard_loop, power_snapshot, set_battery_save_manual
 from s3srv.usage_scan import compute_aggregates, scan_loop, scan_once
 from s3srv.limits import limits_loop
 from s3srv.market import market_loop, weather_payload
+from s3srv.firmware import (FIRMWARE_BOARDS, firmware_offer, firmware_status,
+                            note_board_firmware, note_download, read_image,
+                            request_firmware_install)
 from s3srv.notes import (NOTE_ALLOWED_ORIGINS, NOTE_HTML_PATH, load_note, note_snapshot,
                          sanitize_note, set_note)
-
-# ── OTA firmware (S3 board, roadmap O9) ─────────────────────────────
-# `pio run -t publish` (tools/ota_publish.py) copies a build here; this server only offers
-# what was published, never a half-finished `pio run`. The board compares the
-# offered image digest with its own running image and pulls the file from
-# /firmware/<board>.bin into its idle app slot. Outside the repo on purpose:
-# a build carries the WiFi credentials compiled into it.
-FIRMWARE_DIR = os.path.expanduser("~/.s3_firmware")
-FIRMWARE_BOARDS = ("s3",)
-FIRMWARE_MAX_BYTES = 6553600  # the S3's app slot (default_16MB.csv)
-_firmware_cache = {}  # board -> ((mtime_ns, size), info)
-# The control panel's "Install on board": board -> {"id", "sha256", "ts"}. The
-# id rides in the offer (firmware.<board>.install) until a board reports
-# running that build, a newer one is published, or FIRMWARE_REQUEST_TTL_SEC.
-FIRMWARE_REQUEST_TTL_SEC = 15 * 60
-FIRMWARE_DOWNLOAD_RECENT_SEC = 180  # "installing" in the panel this long after a download
-_firmware_requests = {}
-# What each board reports on every poll (X-S3-Firmware / X-S3-OTA headers):
-# ip -> {"sha256", "ota", "auto", "ts"}; and when each ip last downloaded.
-_board_firmware = {}
-_firmware_downloads = {}  # ip -> time.time() of the last /firmware/<board>.bin
 
 # Browser pages that may read GET /api/usage cross-origin, besides the file://
 # case (Origin: null): pages served from this Mac's own loopback, any port --
@@ -126,124 +108,6 @@ def build_report():
     }
 
 
-def firmware_path(board):
-    return os.path.join(FIRMWARE_DIR, board + ".bin")
-
-
-def firmware_info(board):
-    """{"sha256", "size", "published"} for a published image, or None.
-
-    sha256 is the image digest esptool appends as the file's last 32 bytes --
-    the same value the board reads for its own running app partition
-    (esp_partition_get_sha256), so equal means "already running this build".
-    Cached on (mtime, size): the board asks every poll, the file rarely moves.
-    """
-    path = firmware_path(board)
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    key = (st.st_mtime_ns, st.st_size)
-    cached = _firmware_cache.get(board)
-    if cached and cached[0] == key:
-        return cached[1]
-    info = None
-    if 1024 < st.st_size <= FIRMWARE_MAX_BYTES:
-        try:
-            with open(path, "rb") as f:
-                magic = f.read(1)
-                f.seek(-32, os.SEEK_END)
-                digest = f.read(32)
-            if magic == b"\xe9" and len(digest) == 32:  # ESP image header magic
-                info = {
-                    "sha256": digest.hex(),
-                    "size": st.st_size,
-                    "published": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
-                }
-        except OSError:
-            info = None
-    _firmware_cache[board] = (key, info)
-    return info
-
-
-def firmware_request(board, info):
-    """The pending install request for this published build, or None."""
-    req = _firmware_requests.get(board)
-    if not req or not info:
-        return None
-    if req["sha256"] != info["sha256"] or time.time() - req["ts"] > FIRMWARE_REQUEST_TTL_SEC:
-        _firmware_requests.pop(board, None)
-        return None
-    return req
-
-
-def firmware_offer():
-    offer = {}
-    for board in FIRMWARE_BOARDS:
-        info = firmware_info(board)
-        if info:
-            offer[board] = dict(info)
-            req = firmware_request(board, info)
-            if req:
-                offer[board]["install"] = req["id"]
-    return offer
-
-
-def note_board_firmware(ip, sha256, ota):
-    """Record a board's poll headers (X-S3-OTA: "<state>; auto=<0|1>; req=<id>").
-
-    A request is done once a board runs its build, or reports it has acted on
-    that request id (req=) and isn't running it -- the install failed, and the
-    panel should offer it again rather than show it pending.
-    """
-    if not sha256 or len(sha256) != 64:
-        return
-    sha256 = sha256.lower()
-    state, auto, handled = ota.split(";")[0].strip(), None, None
-    for part in ota.split(";")[1:]:
-        key, _, value = part.strip().partition("=")
-        if key == "auto":
-            auto = value == "1"
-        elif key == "req" and value.isdigit():
-            handled = int(value)
-    _board_firmware[ip] = {"sha256": sha256, "ota": state[:16], "auto": auto, "ts": time.time()}
-    for board, req in list(_firmware_requests.items()):
-        if req["sha256"] == sha256 or req["id"] == handled:
-            _firmware_requests.pop(board, None)
-
-
-def firmware_status():
-    """GET /api/firmware (localhost): the control panel's Firmware section."""
-    now = time.time()
-    boards = []
-    for ip, fw in sorted(_board_firmware.items(), key=lambda kv: -kv[1]["ts"]):
-        dl = _firmware_downloads.get(ip)
-        boards.append({
-            "ip": ip,
-            "sha256": fw["sha256"],
-            "ota": fw["ota"],
-            "auto": fw["auto"],
-            "last_report_sec": int(now - fw["ts"]),
-            "download_sec": int(now - dl) if dl and now - dl <= FIRMWARE_DOWNLOAD_RECENT_SEC else None,
-        })
-    offer = firmware_offer().get("s3")
-    req = firmware_request("s3", firmware_info("s3"))
-    return {
-        "offer": offer,
-        "request": {"id": req["id"], "age_sec": int(now - req["ts"])} if req else None,
-        "boards": boards,
-        "slot_bytes": FIRMWARE_MAX_BYTES,
-    }
-
-
-def request_firmware_install(board="s3"):
-    info = firmware_info(board)
-    if not info:
-        return False, "no build published"
-    _firmware_requests[board] = {"id": int(time.time()), "sha256": info["sha256"], "ts": time.time()}
-    return True, "the board installs %s on its next poll" % info["sha256"][:12]
-
-
 HEARTBEAT_LOG_INTERVAL_SEC = 300
 _last_heartbeat_log = {}  # ip -> monotonic time of last heartbeat line logged
 
@@ -316,18 +180,12 @@ class Handler(JsonHandler):
         if not (self._is_local() or known):
             self._send(b"poll /api/usage first", "text/plain", status=403)
             return
-        if not firmware_info(board):
+        body = read_image(board)
+        if body is None:
             self._send(b"no build published", "text/plain", status=404)
             return
-        try:
-            with open(firmware_path(board), "rb") as f:
-                body = f.read()
-        except OSError:
-            self._send(b"no build published", "text/plain", status=404)
-            return
-        _firmware_downloads[ip] = time.time()
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {ip} GET /firmware/{board}.bin "
-              f"({len(body)} bytes)", flush=True)
+        note_download(ip)
+        log_out(f"{ip} GET /firmware/{board}.bin ({len(body)} bytes)")
         self._send(body, "application/octet-stream")
 
     def do_GET(self):
