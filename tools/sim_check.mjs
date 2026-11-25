@@ -6,8 +6,9 @@
 // Serves the repo, opens simulator-s3.html?fixture=<name> in headless Chromium
 // and draws every page and sheet (window.simFixture) in both themes. Each one
 // is compared pixel for pixel with tests/golden/<fixture>/<screen>-<theme>.png;
-// any JS error fails the run too. A mismatch writes the actual image and a
-// diff (mismatched pixels red over a dimmed copy) to tests/out/.
+// any page error or console error (a missing sim/*.js too) fails the run. A
+// mismatch writes the actual image and a diff (mismatched pixels red over a
+// dimmed copy) to tests/out/.
 //
 // Needs Playwright (CI: `npm install --no-save playwright@1.63.0`; locally the
 // same, or NODE_PATH pointing at an install). Text is the firmware's glyph
@@ -95,10 +96,13 @@ try {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
     await page.goto(`${base}/simulator-s3.html?fixture=${fixture}`);
     await page.waitForFunction(() => window.simFixtureReady || window.simFixtureError, null, { timeout: 15000 });
     const fxError = await page.evaluate(() => window.simFixtureError);
     if (fxError) throw new Error(fxError);
+    // A load error (a missing or broken sim/*.js) fails before any compare.
+    if (errors.length) throw new Error(`${fixture}: errors while loading:\n  ` + errors.join('\n  '));
     const screens = await page.evaluate(() => window.simFixture.screens);
     for (const theme of THEMES) {
       for (const screen of screens) {
