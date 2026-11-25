@@ -97,7 +97,7 @@ function drawModalHeader(back, title, pressed) {
 }
 
 // ── DATA ROWS (Usage page limits column, Device page) ────────
-const ROW_H = 23 + TOK_SPACE_STACK_TIGHT + TOK_METER_MD, ROW_STEP = ROW_H + TOK_SPACE_STACK;
+const ROW_H = TOK_LINE_BODY + TOK_SPACE_STACK_TIGHT + TOK_METER_MD, ROW_STEP = ROW_H + TOK_SPACE_STACK;
 // A limits-column row in 112 px: label (body) left, percent (numeral.sm, on the
 // label's baseline) right, meter.md under it. No detail text -- the Status
 // page's 5H / Week cards carry the "Resets ..." lines. numeral.sm, not .md,
@@ -108,7 +108,7 @@ function drawLimitRow(x, r, y, label, percent) {
   drawText(TOK_TYPE_BODY, x, y, fitText(TOK_TYPE_BODY, label, r - x - pw - TOK_SPACE_XS), TOK_COLOR_TEXT_PRIMARY);
   drawTextR(TOK_TYPE_NUMERAL_SM, r, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), pct,
             percent < 0 ? TOK_COLOR_TEXT_TERTIARY : dataStale() ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_PRIMARY);
-  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
+  drawMeter(x, y + TOK_LINE_BODY + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent, TOK_COLOR_DATA_USAGE);
 }
 
 // ── WEATHER GLYPHS ────────────────────────────────────────────
@@ -358,7 +358,7 @@ function drawLimitCard(cardX, cardY, cardW, cardH, compact, label, percent, ahea
   else drawText(TOK_TYPE_CAPTION, rx, y, '--', TOK_COLOR_TEXT_TERTIARY);
   if (!inText) return;
   if (compact) drawTextR(TOK_TYPE_CAPTION, x + w, y, inText, TOK_COLOR_TEXT_SECONDARY);
-  else drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
+  else drawText(TOK_TYPE_CAPTION, x, y + TOK_LINE_CAPTION, inText, TOK_COLOR_TEXT_SECONDARY);
 }
 // Twin of pages.cpp's weekResetWeekdayLabel(): "Oct 1, 04:59" -> "Thu 04:59".
 function weekResetWeekdayLabel(weekRem, resets) {

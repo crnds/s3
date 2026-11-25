@@ -8,7 +8,7 @@ function drawDeviceRow(y, label, detail, percent) {
   drawTextR(TOK_TYPE_NUMERAL_MD, r, y, pct, percent >= 0 ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   const dx = r - textW(TOK_TYPE_NUMERAL_MD, pct) - TOK_SPACE_SM;
   if (detail) drawTextR(TOK_TYPE_CAPTION, dx, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), detail, TOK_COLOR_TEXT_SECONDARY);
-  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent,
+  drawMeter(x, y + TOK_LINE_BODY + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent,
             percent >= 80 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_DATA_SYSTEM);
 }
 function drawDevicePage() {

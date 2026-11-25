@@ -60,3 +60,63 @@ NoteLine noteLineContext(const char* s, int i, int n) {
   }
   return L;
 }
+
+int noteWrap(const char* s, int n, int cols, int maxRows, NoteCellFn emit, void* ctx) {
+  if (maxRows < 1) maxRows = 1;
+  int row = 0, col = 0, i = 0;
+  // Start a new visual row; false once the grid is full.
+  auto nextRow = [&]() { row++; col = 0; return row < maxRows; };
+
+  while (i < n) {
+    const NoteLine ln = noteLineContext(s, i, n);
+    const int lineEnd = ln.end;
+    bool inCode = false;  // an unmatched backtick stains only its own line
+    col = 0;
+
+    while (i < lineEnd) {
+      if (s[i] == ' ') {
+        // Leading spaces on a wrapped row collapse; a source line's own
+        // indentation collapses too.
+        if (col > 0) col++;
+        i++;
+        if (col >= cols && !nextRow()) return row;
+        continue;
+      }
+
+      int wEnd = i;
+      while (wEnd < lineEnd && s[wEnd] != ' ') wEnd++;
+      const int wLen = wEnd - i;
+
+      // Wrap before a word that doesn't fit here but would fit on a fresh
+      // row. A word longer than a whole row is hard-broken below instead.
+      if (col > 0 && col + wLen > cols && wLen <= cols) {
+        if (!nextRow()) return row;
+        continue;  // re-test on the new row
+      }
+
+      const NoteRole wordRole = noteWordRole(s, i, wEnd);
+      while (i < wEnd) {
+        if (col >= cols && !nextRow()) return row;  // hard break inside an over-long word
+        NoteCell cell;
+        cell.idx = i;
+        cell.col = col;
+        cell.row = row;
+        if (s[i] == '`') {
+          inCode = !inCode;
+          cell.code = true;  // the tick itself counts, so a stray one is visible
+        } else {
+          cell.code = inCode;
+        }
+        cell.role = wordRole != NOTE_ROLE_NONE ? wordRole : ln.role;
+        cell.marker = i == ln.marker;
+        emit(ctx, cell);
+        col++; i++;
+      }
+    }
+
+    // End of source line (an empty line consumes a row, as an editor implies).
+    i = lineEnd + 1;
+    if (!nextRow()) return row;
+  }
+  return row;  // the row after the last glyph's == rows used
+}

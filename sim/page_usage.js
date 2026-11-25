@@ -6,12 +6,12 @@
 // 7-day trend (pages.cpp's drawUsagePage).
 const PROJ_CARD_H = 171, TREND_CARD_H = 105;
 const TREND_CARD_Y = TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H + TOK_SPACE_GUTTER;
-const PROJ_ROW_STEP = 23 + TOK_SPACE_STACK, PROJ_VALUE_W = 56;
+const PROJ_ROW_STEP = TOK_LINE_BODY + TOK_SPACE_STACK, PROJ_VALUE_W = 56;
 const PROJ_NAME_W = 116;                    // project name column (fitText)
 const TREND_BAR_W = 20, TREND_BAR_GAP = 4;  // 7 bars = 164 px from the align line
 function drawEmptyState(cx, y0, h, title, desc, isError, titleFont = TOK_TYPE_HEADLINE, titleColor = TOK_COLOR_TEXT_PRIMARY) {
   const th = fontLineH(titleFont);
-  const total = th + TOK_SPACE_SM + 17;
+  const total = th + TOK_SPACE_SM + TOK_LINE_CAPTION;
   const y = y0 + Math.trunc((h - total) / 2);
   drawTextC(titleFont, cx, y, title, isError ? TOK_COLOR_STATUS_ERROR : titleColor);
   drawTextC(TOK_TYPE_CAPTION, cx, y + th + TOK_SPACE_SM, desc, TOK_COLOR_TEXT_SECONDARY);
@@ -23,7 +23,7 @@ function drawUsagePage() {
   const ix = lx0 + TOK_SPACE_SM, ir = lx0 + lw - TOK_SPACE_SM;  // 16..128: 112 inner
   const ltop = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
   drawSectionLabel(ix, ltop, 'LIMITS');
-  let ly = ltop + 17 + TOK_SPACE_SM;
+  let ly = ltop + TOK_LINE_CAPTION + TOK_SPACE_SM;
   drawLimitRow(ix, ir, ly, 'Context', STATE.ctxTokens >= 0 ? STATE.ctxPercent : -1);
   ly += ROW_STEP;
   drawLimitRow(ix, ir, ly, '5-hour', STATE.sessionPercent);
@@ -44,7 +44,7 @@ function drawUsagePage() {
   const top = TOK_LAYOUT_CONTENT_Y0 + TOK_SPACE_CARD_PAD;
   drawSectionLabel(px, top, 'TOP PROJECTS 7D');
   if (STATE.projects.length === 0) {
-    const ey = top + 17;
+    const ey = top + TOK_LINE_CAPTION;
     drawEmptyState(x0 + w / 2, ey, TOK_LAYOUT_CONTENT_Y0 + PROJ_CARD_H - ey, 'No project data yet',
                    'Projects appear after the first poll', false);
   } else {
@@ -52,7 +52,7 @@ function drawUsagePage() {
     let maxTokens = 1;
     for (let i = 0; i < shown; i++) maxTokens = Math.max(maxTokens, STATE.projects[i].tokens);
     const meterW = pr - PROJ_VALUE_W - TOK_SPACE_SM - alignX;
-    let y = top + 17 + TOK_SPACE_SM;
+    let y = top + TOK_LINE_CAPTION + TOK_SPACE_SM;
     for (let i = 0; i < shown; i++, y += PROJ_ROW_STEP) {
       const p = STATE.projects[i];
       drawText(TOK_TYPE_BODY, px, y, fitText(TOK_TYPE_BODY, p.name, PROJ_NAME_W), TOK_COLOR_TEXT_PRIMARY);
@@ -69,11 +69,11 @@ function drawUsagePage() {
   drawSectionLabel(px, ty, '7-DAY TREND');
   let total = 0, maxTrend = 1;
   for (let i = 0; i < 7; i++) { total += STATE.trend[i]; maxTrend = Math.max(maxTrend, STATE.trend[i]); }
-  drawText(TOK_TYPE_BODY, px, ty + 17 + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
-  drawText(TOK_TYPE_CAPTION, px, ty + 17 + TOK_SPACE_SM + 23, 'this week', TOK_COLOR_TEXT_SECONDARY);
+  drawText(TOK_TYPE_BODY, px, ty + TOK_LINE_CAPTION + TOK_SPACE_SM, fmtTokens(total), TOK_COLOR_TEXT_PRIMARY);
+  drawText(TOK_TYPE_CAPTION, px, ty + TOK_LINE_CAPTION + TOK_SPACE_SM + TOK_LINE_BODY, 'this week', TOK_COLOR_TEXT_SECONDARY);
   const DAY_LABELS = ['-6', '-5', '-4', '-3', '-2', '-1', 'Now'];
   const barW = TREND_BAR_W, gap = TREND_BAR_GAP;
-  const axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - 17;
+  const axisY = TREND_CARD_Y + TREND_CARD_H - TOK_SPACE_CARD_PAD_COMPACT_V - TOK_LINE_CAPTION;
   const feet = axisY - TOK_SPACE_XS;  // bars end above the axis labels
   const chartH = feet - ty;
   for (let i = 0; i < 7; i++) {

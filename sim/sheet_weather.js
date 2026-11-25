@@ -4,7 +4,7 @@
 const WX_HERO_X = TOK_LAYOUT_CONTENT_X0, WX_HERO_Y = TOK_LAYOUT_CONTENT_Y0;
 const WX_HERO_W = TOK_LAYOUT_CONTENT_X1 - WX_HERO_X, WX_HERO_H = 64;
 const WX_HOURLY_Y = WX_HERO_Y + WX_HERO_H + TOK_SPACE_GUTTER;
-const WX_HOURLY_H = 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS + 23 + 2 * TOK_SPACE_CARD_PAD_COMPACT_V;
+const WX_HOURLY_H = TOK_LINE_CAPTION + TOK_SPACE_XS + 28 + TOK_SPACE_XS + TOK_LINE_BODY + 2 * TOK_SPACE_CARD_PAD_COMPACT_V;
 const WX_DAILY_Y = WX_HOURLY_Y + WX_HOURLY_H + TOK_SPACE_GUTTER;
 const WX_DAILY_H = TOK_LAYOUT_OVERLAY_CONTENT_Y1 - WX_DAILY_Y;
 function drawWeatherPage() {
@@ -25,11 +25,11 @@ function drawWeatherPage() {
   const badgeW = haveAqi ? aqiBadgeW(STATE.aqi) : 0;
   const badgeX = TOK_CORNER_INK_X1 - badgeW;
   const metaMaxX = haveAqi ? badgeX - TOK_SPACE_SM : TOK_CORNER_INK_X1;
-  const metaY = WX_HERO_Y + Math.trunc((WX_HERO_H - (23 + TOK_SPACE_XS + 23)) / 2);
+  const metaY = WX_HERO_Y + Math.trunc((WX_HERO_H - (TOK_LINE_BODY + TOK_SPACE_XS + TOK_LINE_BODY)) / 2);
   drawText(TOK_TYPE_HEADLINE, metaX, metaY, fitText(TOK_TYPE_HEADLINE, STATE.weatherCondition || '--', metaMaxX - metaX),
            STATE.weatherCondition ? TOK_COLOR_TEXT_PRIMARY : TOK_COLOR_TEXT_TERTIARY);
   {
-    const y = metaY + 23 + TOK_SPACE_XS;
+    const y = metaY + TOK_LINE_BODY + TOK_SPACE_XS;
     let x = drawText(TOK_TYPE_BODY, metaX, y, 'H ', TOK_COLOR_TEXT_SECONDARY);
     x = STATE.weatherHigh > -900 ? drawText(TOK_TYPE_BODY, x, y, String(STATE.weatherHigh), TOK_COLOR_TEXT_PRIMARY)
                                  : drawText(TOK_TYPE_BODY, x, y, '--', TOK_COLOR_TEXT_TERTIARY);
@@ -52,8 +52,8 @@ function drawWeatherPage() {
     const okHour = have && hr.h >= 0;
     drawTextC(TOK_TYPE_NUMERAL_SM, cx, hy, okHour ? String(hr.h).padStart(2, '0') : '--',
               i === 0 ? TOK_COLOR_ACCENT : (have ? TOK_COLOR_TEXT_SECONDARY : TOK_COLOR_TEXT_TERTIARY));
-    drawWeatherIcon(cx, hy + 17 + TOK_SPACE_XS + 14, have ? hr.code : -1, 1.5);
-    const ty = hy + 17 + TOK_SPACE_XS + 28 + TOK_SPACE_XS;
+    drawWeatherIcon(cx, hy + TOK_LINE_CAPTION + TOK_SPACE_XS + 14, have ? hr.code : -1, 1.5);
+    const ty = hy + TOK_LINE_CAPTION + TOK_SPACE_XS + 28 + TOK_SPACE_XS;
     if (have) drawTextC(TOK_TYPE_BODY, cx, ty, String(hr.tempC), TOK_COLOR_TEXT_PRIMARY);
     else drawTextC(TOK_TYPE_BODY, cx, ty, '--', TOK_COLOR_TEXT_TERTIARY);
   }

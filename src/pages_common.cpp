@@ -627,7 +627,7 @@ static void drawLimitCard(int cardX, int cardY, int cardW, int cardH, bool compa
   else drawText(TOK_TYPE_CAPTION, rx, y, "--", TOK_COLOR_TEXT_TERTIARY);
   if (!inText.length()) return;
   if (compact) drawTextR(TOK_TYPE_CAPTION, x + w, y, inText, TOK_COLOR_TEXT_SECONDARY);
-  else drawText(TOK_TYPE_CAPTION, x, y + 17, inText, TOK_COLOR_TEXT_SECONDARY);
+  else drawText(TOK_TYPE_CAPTION, x, y + TOK_LINE_CAPTION, inText, TOK_COLOR_TEXT_SECONDARY);
 }
 
 // Week reset label: the server's "Oct 1, 04:59" with the date swapped for the

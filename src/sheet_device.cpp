@@ -16,7 +16,7 @@ static void drawDeviceRow(int y, const char* label, const String& detail, int pe
   if (detail.length())
     drawTextR(TOK_TYPE_CAPTION, dx, y + fontAscent(TOK_TYPE_BODY) - fontAscent(TOK_TYPE_CAPTION), detail,
               TOK_COLOR_TEXT_SECONDARY);
-  drawMeter(x, y + 23 + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent,
+  drawMeter(x, y + TOK_LINE_BODY + TOK_SPACE_STACK_TIGHT, r - x, TOK_METER_MD, percent,
             percent >= 80 ? TOK_COLOR_STATUS_ERROR : TOK_COLOR_DATA_SYSTEM);
 }
 
