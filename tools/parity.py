@@ -200,6 +200,8 @@ def capture(port, fixture, themes):
                 key(ser, "x")
     finally:
         ser.write(b"f")  # polling back on
+        ser.flush()
+        time.sleep(0.5)  # closing the port at once can drop the byte, leaving the board in fixture mode
         ser.close()
     return shots
 
